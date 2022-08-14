@@ -52,6 +52,7 @@ FastForwardActive = False
 FastForwardErrorOutstanding = False
 OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
+NewFrameAvailable = False   # To be set to true upon reception of Arduino event
 ScriptDir = os.path.dirname(sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedSessionFilename = os.path.join(ScriptDir,"T-Scann8.json")
 ArduinoTrigger = 0
@@ -70,6 +71,9 @@ PreviewEnabled = True
 FramesPerMinute = 0
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
+PerforationThresholdLevel = 120 # To be synchronized with Arduino
+save_bg = 'gray'
+save_fg = 'black'
 
 # Persisted data
 SessionData = {
@@ -159,11 +163,13 @@ def exit_app():  # Exit Application
 
 def set_free_mode():
     global FreeWheelActive
+    global save_bg
+    global save_fg
 
     if not FreeWheelActive:
-        Free_btn.config(text='Lock Reels')
+        Free_btn.config(text='Lock Reels',bg='red',fg='white')
     else:
-        Free_btn.config(text='Unlock Reels')
+        Free_btn.config(text='Unlock Reels',bg=save_bg,fg=save_fg)
 
     if IsRpi:
         i2c.write_byte_data(16, 20, 0)
@@ -180,13 +186,16 @@ def set_free_mode():
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
+    global save_bg
+    global save_fg
+
     if not FocusZoomActive:
-        Focus_btn.config(text='Focus Zoom ON')
+        Focus_btn.config(text='Focus Zoom ON',bg=save_bg,fg=save_fg)
         if IsRpi:
             camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoon
         time.sleep(.2)
     else:
-        Focus_btn.config(text='Focus Zoom OFF')
+        Focus_btn.config(text='Focus Zoom OFF',bg='red',fg='white')
         if IsRpi:
             camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
 
@@ -307,15 +316,35 @@ def increase_exp():
     if IsRpi:
         camera.shutter_speed = CurrentExposure
 
+def decrease_perforation_threshold():
+    global PerforationThresholdLevel
+
+    if IsRpi:
+        i2c.write_byte_data(16, 91, 0)
+
+    if (PerforationThresholdLevel > 30):
+        PerforationThresholdLevel-=10
+
+def increase_perforation_threshold():
+    global PerforationThresholdLevel
+
+    if IsRpi:
+        i2c.write_byte_data(16, 90, 0)
+
+    if (PerforationThresholdLevel < 360):
+        PerforationThresholdLevel+=10
+
 
 def advance_movie():
     global AdvanceMovieActive
+    global save_bg
+    global save_fg
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='Stop movie')  # ...so now we propose to stop it in the button test
+        AdvanceMovie_btn.config(text='Stop movie',bg='red',fg='white')  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='Movie forward')  # Otherwise change to default text to start the action
+        AdvanceMovie_btn.config(text='Movie forward',bg=save_bg,fg=save_fg)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if IsRpi:
@@ -333,6 +362,8 @@ def rewind_movie():
     global RewindMovieActive
     global IsRpi
     global RewindErrorOutstanding
+    global save_bg
+    global save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
@@ -355,9 +386,9 @@ def rewind_movie():
 
     # Update button text
     if not RewindMovieActive:  # Rewind movie is about to start...
-        Rewind_btn.config(text='Stop\n<<')  # ...so now we propose to stop it in the button test
+        Rewind_btn.config(text='Stop\n<<',bg='red',fg='white')  # ...so now we propose to stop it in the button test
     else:
-        Rewind_btn.config(text='<<')  # Otherwise change to default text to start the action
+        Rewind_btn.config(text='<<',bg=save_bg,fg=save_fg)  # Otherwise change to default text to start the action
     # Send instruction to Arduino
     RewindMovieActive = not RewindMovieActive
 
@@ -385,21 +416,9 @@ def rewind_movie():
 def RewindLoop():
     global RewindMovieActive
     global IsRpi
-    global ArduinoTrigger
     global RewindErrorOutstanding
 
     if RewindMovieActive:
-        if IsRpi:
-            try:
-                ArduinoTrigger = i2c.read_byte_data(16, 0)
-            except:
-                # Log error to console
-                curtime = time.ctime()
-                print(curtime + " - Error while checking rewind status from Arduino. Will check again.")
-        if ArduinoTrigger == 61:
-            RewindErrorOutstanding = True
-            print("Received rewind error from Arduino")
-
         # Invoke RewindLoop one more time, as long as rewind is ongoing
         if not RewindErrorOutstanding:
             win.after(5, RewindLoop)
@@ -411,6 +430,8 @@ def fast_forward_movie():
     global FastForwardActive
     global IsRpi
     global FastForwardErrorOutstanding
+    global save_bg
+    global save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
@@ -433,9 +454,9 @@ def fast_forward_movie():
 
    # Update button text
     if not FastForwardActive:  # Fast forward movie is about to start...
-        FastForward_btn.config(text='Stop\n>>')  # ...so now we propose to stop it in the button test
+        FastForward_btn.config(text='Stop\n>>',bg='red',fg='white')  # ...so now we propose to stop it in the button test
     else:
-        FastForward_btn.config(text='>>')  # Otherwise change to default text to start the action
+        FastForward_btn.config(text='>>',bg=save_bg,fg=save_fg)  # Otherwise change to default text to start the action
     FastForwardActive = not FastForwardActive
 
     # Enable/Disable related buttons
@@ -463,21 +484,9 @@ def fast_forward_movie():
 def FastForwardLoop():
     global FastForwardActive
     global IsRpi
-    global ArduinoTrigger
     global FastForwardErrorOutstanding
 
     if FastForwardActive:
-        if IsRpi:
-            try:
-                ArduinoTrigger = i2c.read_byte_data(16, 0)
-            except:
-                # Log error to console
-                curtime = time.ctime()
-                print(curtime + " - Error while checking fast forward status from Arduino. Will check again.")
-        if ArduinoTrigger == 81:
-            FastForwardErrorOutstanding = True
-            print("Received fast forward error from Arduino")
-
         # Invoke RewindLoop one more time, as long as rewind is ongoing
         if not FastForwardErrorOutstanding:
             win.after(5, FastForwardLoop)
@@ -517,14 +526,16 @@ def negative_capture():
 def open_folder():
     global OpenFolderActive
     global FolderProcess
+    global save_bg
+    global save_fg
 
     if not OpenFolderActive :
-        OpenFolder_btn.config(text="Close Folder")
+        OpenFolder_btn.config(text="Close Folder",bg='red',fg='white')
         if IsRpi and PreviewEnabled:
             camera.stop_preview()
         FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
-        OpenFolder_btn.config(text="Open Folder")
+        OpenFolder_btn.config(text="Open Folder",bg=save_bg,fg=save_fg)
         FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
 
         time.sleep(.5)
@@ -536,6 +547,8 @@ def open_folder():
 
 def disable_preview():
     global PreviewEnabled
+    global save_bg
+    global save_fg
 
     if IsRpi:
         if PreviewEnabled:
@@ -547,9 +560,9 @@ def disable_preview():
 
    # Update button text
     if PreviewEnabled:  # Preview is about to be enabled
-        DisablePreview_btn.config(text='Disable Preview')
+        DisablePreview_btn.config(text='Disable Preview',bg=save_bg,fg=save_fg)
     else:
-        DisablePreview_btn.config(text='Enable Preview')  # Otherwise change to default text to start the action
+        DisablePreview_btn.config(text='Enable Preview',bg='red',fg='white')  # Otherwise change to default text to start the action
 
 
 def capture():
@@ -587,6 +600,8 @@ def StartScan():
     global ScanOngoing
     global CurrentScanStartFrame
     global CurrentScanStartTime
+    global save_bg
+    global save_fg
 
     if not ScanOngoing and BaseDir == CurrentDir:
         if IsRpi and PreviewEnabled:
@@ -597,7 +612,7 @@ def StartScan():
         return
 
     if not ScanOngoing : # Scanner session to be started
-        Start_btn.config(text="STOP Scan")
+        Start_btn.config(text="STOP Scan",bg='red',fg='white')
         LoopDelay = 0.05
         SessionData["IsActive"] = True
         SessionData["CurrentDate"] = str(datetime.now())
@@ -606,7 +621,7 @@ def StartScan():
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
     else:
-        Start_btn.config(text="START Scan")
+        Start_btn.config(text="START Scan",bg=save_bg,fg=save_fg)
         CurrentScanStartTime = 0
         CurrentScanStartFrame = CurrentFrame;
         LoopDelay = 0
@@ -640,31 +655,20 @@ def CaptureLoop():
     global CurrentFrame
     global CurrentExposure
     global SessionData
-    global ArduinoTrigger
     global FramesPerMinute
+    global NewFrameAvailable
 
     if ScanOngoing:
-        if ArduinoTrigger != 11:
-            if IsRpi:
-                try:
-                    ArduinoTrigger = i2c.read_byte_data(16, 0)
-                except:
-                    # Log error to console
-                    curtime = time.ctime()
-                    print(curtime + " - Error while checking if new frame coming from Arduino. Will check again.")
-                    win.after(5, CaptureLoop)
-                    return
-
-        if ArduinoTrigger == 11:
+        if NewFrameAvailable:
             CurrentFrame += 1
             capture()
             if IsRpi:
                 try:
-                    i2c.write_byte_data(16, 12, 0)
-                    ArduinoTrigger = 0
+                    NewFrameAvailable = False  # Set NewFrameAvailable to False here, to avoid overwriting new frame rom arduino
+                    i2c.write_byte_data(16, 12, 0)  # Tell Arduino to move to next frame
                 except:
                     CurrentFrame -= 1
-                    ArduinoTrigger = 11  # Keep the trigger for next loop
+                    NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
                     # Log error to console
                     curtime = time.ctime()
                     print(curtime + " - Error while telling Arduino to move to next Frame.")
@@ -672,29 +676,28 @@ def CaptureLoop():
                     win.after(5, CaptureLoop)
                     return
 
-        if ArduinoTrigger != 11:    # If Arduino trigger still 11 at this point, means it was not communicated properly (exception just before)
-            SessionData["CurrentDate"] = str(datetime.now())
-            SessionData["TargetFolder"] = CurrentDir
-            SessionData["CurrentFrame"] = str(CurrentFrame)
-            if CurrentExposureStr == "Auto":
-                SessionData["CurrentExposure"] = CurrentExposureStr
-            else:
-                SessionData["CurrentExposure"] = str(CurrentExposure)
-            with open(PersistedSessionFilename, 'w') as f:
-                json.dump(SessionData, f)
+        SessionData["CurrentDate"] = str(datetime.now())
+        SessionData["TargetFolder"] = CurrentDir
+        SessionData["CurrentFrame"] = str(CurrentFrame)
+        if CurrentExposureStr == "Auto":
+            SessionData["CurrentExposure"] = CurrentExposureStr
+        else:
+            SessionData["CurrentExposure"] = str(CurrentExposure)
+        with open(PersistedSessionFilename, 'w') as f:
+            json.dump(SessionData, f)
 
-            # Update number of captured frames
-            Scanned_Images_number_label.config(text=str(CurrentFrame))
-            # Update Frames per Minute
-            scan_period_time = datetime.now() - CurrentScanStartTime
-            scan_period_seconds = scan_period_time.total_seconds()
-            scan_period_frames = CurrentFrame - CurrentScanStartFrame
-            if scan_period_seconds < 10:
-                Scanned_Images_fpm.config(text="??")
-            else:
-                FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
-                Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
-            win.update()
+        # Update number of captured frames
+        Scanned_Images_number_label.config(text=str(CurrentFrame))
+        # Update Frames per Minute
+        scan_period_time = datetime.now() - CurrentScanStartTime
+        scan_period_seconds = scan_period_time.total_seconds()
+        scan_period_frames = CurrentFrame - CurrentScanStartFrame
+        if scan_period_seconds < 10:
+            Scanned_Images_fpm.config(text="??")
+        else:
+            FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
+            Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+        win.update()
 
         # Invoke CaptureLoop one more time, as long as scan is ongoing
         win.after(0, CaptureLoop)
@@ -708,6 +711,38 @@ def TempLoop():    # Update RPi temperature every 10 seconds
         last_temp = RPiTemp
 
     win.after(10000, TempLoop)
+
+def ArduinoListenLoop():    # Waits for Arduino communicated events adn dispatches accordingly
+    global NewFrameAvailable
+    global RewindErrorOutstanding
+    global FastForwardErrorOutstanding
+    global ArduinoTrigger
+    global PerforationThresholdLevel
+
+    if IsRpi:
+        try:
+            ArduinoTrigger = i2c.read_byte_data(16, 0)
+        except:
+            # Log error to console
+            curtime = time.ctime()
+            print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
+    if ArduinoTrigger == 11:    # New Frame available
+        NewFrameAvailable = True
+    elif ArduinoTrigger == 92:    # PerforationThresholdLevel value, next byte contains Arduino value
+        #PerforationThresholdLevel = i2c.read_byte_data(16, 0)
+        print("Received perforation threshold level event from Arduino")
+        perforation_threshold_value_label.config(text=str(PerforationThresholdLevel))
+        win.update()
+    elif ArduinoTrigger == 61:    # Error during Rewind
+        RewindErrorOutstanding = True
+        print("Received rewind error from Arduino")
+    elif ArduinoTrigger == 81:    # Error during FastForward
+        FastForwardErrorOutstanding = True
+        print("Received fast forward error from Arduino")
+
+    ArduinoTrigger = 0
+
+    win.after(5, ArduinoListenLoop)
 
 
 def onFormEvent(event):
@@ -744,6 +779,10 @@ def onFormEvent(event):
 # Create horizontal button row at bottom
 AdvanceMovie_btn = Button(win, text="Movie Forward", width=8, height=3, command=advance_movie, activebackground='green', activeforeground='white', wraplength=80)
 AdvanceMovie_btn.place(x=30, y=710)
+# Once first button created, get default colors, to revert when we change them
+save_bg = AdvanceMovie_btn['bg']
+save_fg = AdvanceMovie_btn['fg']
+
 SingleStep_btn = Button(win, text="Single Step", width=8, height=3, command=single_step_movie, activebackground='green', activeforeground='white', wraplength=80)
 SingleStep_btn.place(x=130, y=710)
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
@@ -760,7 +799,7 @@ OpenFolder_btn.place(x=630, y=710)
 # Create frame to display RPi temp
 RPi_temp_border_frame = Frame(win, width=8, height=2, bg='black')
 RPi_temp_border_frame.pack()
-RPi_temp_border_frame.place(x=770, y=715)
+RPi_temp_border_frame.place(x=730, y=715)
 
 RPi_temp_frame = Frame(RPi_temp_border_frame, width=8, height=2)
 RPi_temp_frame.pack(side=TOP, padx=1, pady=1)
@@ -769,6 +808,30 @@ RPi_temp_frame_label = Label(RPi_temp_frame, text='RPi Temp.', width=8, height=1
 RPi_temp_frame_label.pack(side=TOP)
 RPi_temp_value_label = Label(RPi_temp_frame, text=str(RPiTemp), font=("Arial", 18), width=5, height=1, wraplength=120, bg='white')
 RPi_temp_value_label.pack(side=TOP, fill='x')
+
+
+# Create frame to select perforation threshold
+perforation_threshold_border_frame = Frame(win, width=8, height=2, bg='black')
+perforation_threshold_border_frame.pack()
+perforation_threshold_border_frame.place(x=810, y=700)
+
+perforation_threshold_frame = Frame(perforation_threshold_border_frame, width=8, height=2, bg='white')
+perforation_threshold_frame.pack(side=TOP, padx=1, pady=1)
+
+
+perforation_threshold_title_label = Label(perforation_threshold_frame, text='Perf. Th.', width=8, height=1, bg='white')
+perforation_threshold_title_label.pack(side=TOP)
+perforation_threshold_value_label = Label(perforation_threshold_frame, text=str(PerforationThresholdLevel), width=8, height=1, font=("Arial", 16), wraplength=110, bg='white')
+perforation_threshold_value_label.pack(side=TOP)
+
+perforation_threshold_buttons = Frame(perforation_threshold_frame, width=8, height=1, bg='white')
+perforation_threshold_buttons.pack(side=TOP)
+decrease_perforation_threshold_btn = Button(perforation_threshold_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'), command=decrease_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
+decrease_perforation_threshold_btn.pack(side=LEFT)
+increase_perforation_threshold_btn = Button(perforation_threshold_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'), command=increase_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
+increase_perforation_threshold_btn.pack(side=LEFT)
+
+# Create Exit button
 
 Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
 Exit_btn.place(x=925, y=700)
@@ -858,6 +921,7 @@ increase_exp_btn.pack(side=LEFT)
 while not ExitRequested:
     CaptureLoop()
     TempLoop()
+    ArduinoListenLoop()
     if IsRpi:
         camera.shutter_speed = CurrentExposure
 
