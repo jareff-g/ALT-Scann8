@@ -5,11 +5,20 @@
       tscann8.torulf.com
 
       01 Aug 2022 - JRE - Added fast forward function
-      04 Auf 2022 - JRE - Renamed commands, initialized to 'false' instead of 'LOW' (easier understanding)
+      04 Aug 2022 - JRE - Renamed commands, initialized to 'false' instead of 'LOW' (easier understanding)
+      04 Aug 2022 - JRE - Read and understoow the basic way Arduino code is supposed to work: Interrupts and main loop
+      04 Aug 2022 - JRE - Restructuring main loop: Addig a queue for incoming commands, use a switch for command processing
+                          Beware: 
+                          - Not everything happening in the main loop is linked to a received command
+                          - Main loop migth call functions that have their own loops
+                          Possible new approach:
+                          - Only one loop (main one)
+                          - One main switch with current status (scan, rewind, etc)
+                          - Secondary switch per state to handle command
+      04 Aug 2022 - JRE - Moving to 1.61.4 before bug changes
 */
 
 #include <Wire.h>
-
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
@@ -43,6 +52,7 @@ int okFrame = LOW;  // Used for frame detection, in play ond single step modes
 int lastScanFilm = LOW;
 int lastUnlockReels = LOW;
 int lastRewind = LOW;
+int lastFastForward = LOW;
 int lastSlowForward = LOW;
 int lastFrame = LOW;
 //int LastWstep = 0;  // Unused
@@ -85,6 +95,13 @@ int Exp = 0;    // 11 is exposure I2C
 
 int measureP;   // Level out signal phototransistor detection
 
+// JRE - Support data variables
+#define QUEUE_SIZE 20
+volatile struct {
+  int Data[QUEUE_SIZE];
+  int in;
+  int out;
+} CommandQueue;
 
 
 void setup() {
@@ -128,19 +145,22 @@ void setup() {
   digitalWrite(stepKapstanB, LOW);
   digitalWrite(stepSpoleC, LOW);
 
-
+  // JRE 04/08/2022
+  CommandQueue.in = 0;
+  CommandQueue.out = 0;
 }
 void loop() {
   while (1) {
+    if (dataInQueue())
+      Ic = pop();   // Get next command from queue if pone exists
+    else
+      Ic = 0;
+
     Wire.begin(16);
 
-
-
-    int measureP = analogRead(PHOTODETECT);
-
-    // can be read in Arduino IDE - Serial plotter
-    Serial.println(measureP);
-
+    // Get phototransistor level in order to make it available via Arduino serial interface
+    measureP = analogRead(PHOTODETECT);
+    Serial.println(measureP); // can be read in Arduino IDE - Serial plotter
 
     lastScanFilm = ScanFilm;
 
@@ -150,15 +170,13 @@ void loop() {
     }
 
 
-    inDraState = digitalRead(inDra);
+    inDraState = digitalRead(inDra);  // Get status of traction stop switch
 
     //---------- step one frame ---------
     if (Ic == 40) {
       ScanFilm = HIGH; SingleStep = HIGH; Ic = 0; WstepV = 100; delay(50); scan();
 
     }
-
-
     else
     {
       digitalWrite(stepKapstanB, LOW); digitalWrite(stepSpoleC, LOW); digitalWrite(dirSpoleC, HIGH); digitalWrite(dirKapstanB, HIGH);
@@ -286,8 +304,6 @@ void backfilm() {
     Ssped = Ssped - 2;
   }
 
-
-
   backfilm();
 }
 
@@ -306,16 +322,7 @@ void fastforwardfilm() {
     FastForward = LOW; digitalWrite(neutralC, HIGH); Ic = 0; delay (100); return;
   }
 
-
-
   digitalWrite(stepSpoleC, HIGH); delayMicroseconds(Ssped); digitalWrite(stepSpoleC, LOW);
-
-
-  if (Ssped >= 250) {
-    Ssped = Ssped - 2;
-  }
-
-
 
   fastforwardfilm();
 }
@@ -365,6 +372,11 @@ void scan() {
 
   while (1) {
 
+    // Scan has a loop of its own: Need to fetch commands from queue here as well
+    if (dataInQueue())
+      Ic = pop();   // Get next command from queue if pone exists
+    else
+      Ic = 0;
 
     Wire.begin(16);
 
@@ -466,12 +478,13 @@ void scan() {
 }
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
-void receiveEvent() {
+// JRE 04/08/22: Theoretically thia might happen any time, thu Ic might change in the middle of the loop. Adding a queue...
+void receiveEvent(int byteCount) {
+  int IncomingIc;
 
-  Ic = Wire.read();
+  IncomingIc = Wire.read();
 
-
-  return Ic;
+  push(IncomingIc); // No error treatment for now
 }
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
@@ -480,4 +493,29 @@ void sendexp() {
   Wire.write(Exp);
   Exp = 0;
 
+}
+
+boolean push(int IncomingIc) {
+    boolean retvalue = false;
+    if ((CommandQueue.in+1) % QUEUE_SIZE != CommandQueue.out) {
+      CommandQueue.Data[CommandQueue.in++] = IncomingIc;
+      CommandQueue.in %= QUEUE_SIZE;
+      retvalue = true;
+    }
+    // else: Queue full: Should not happen. Not sure how this should be handled
+    return(retvalue);
+}
+
+int pop(void) {
+    int retvalue = -1;  // default return value: -1 (error)
+    if (CommandQueue.out != CommandQueue.in) {
+      retvalue = CommandQueue.Data[CommandQueue.out++];
+      CommandQueue.out %= QUEUE_SIZE;
+    }
+    // else: Queue empty: Nothing to do
+    return(retvalue);
+}
+
+boolean dataInQueue(void) {
+  return (CommandQueue.out != CommandQueue.in);
 }
