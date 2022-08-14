@@ -5,7 +5,8 @@
 # 12/08/2022: JRE: Improve automatic exposure adaptation
 # 13/08/2022: JRE Implemented detection of fild loaded via FilmGate, to prevent FF/Rewind
 # 13/08/2022: JRE Move to 2.1.9
-IsRpi = True
+# 14/08/2022: JRE Implemented function to dynamically modify the perforation level threshold
+IsRpi = False
 
 if IsRpi:
     print("Running on Raspbery Pi")
@@ -777,76 +778,52 @@ def onFormEvent(event):
     """
 
 # Create horizontal button row at bottom
+# Advance movie (through filmgate)
 AdvanceMovie_btn = Button(win, text="Movie Forward", width=8, height=3, command=advance_movie, activebackground='green', activeforeground='white', wraplength=80)
 AdvanceMovie_btn.place(x=30, y=710)
 # Once first button created, get default colors, to revert when we change them
 save_bg = AdvanceMovie_btn['bg']
 save_fg = AdvanceMovie_btn['fg']
-
+# Advance one single frame
 SingleStep_btn = Button(win, text="Single Step", width=8, height=3, command=single_step_movie, activebackground='green', activeforeground='white', wraplength=80)
 SingleStep_btn.place(x=130, y=710)
+# Switch Positive/negative modes
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
 PosNeg_btn.place(x=230, y=710)
+# Disable Pi Camera preview (might hide some stuff)
 DisablePreview_btn = Button(win, text="Disable Preview", width=8, height=3, command=disable_preview, activebackground='red', activeforeground='white', wraplength=80)
 DisablePreview_btn.place(x=330, y=710)
+# Rewind movie (via upper path, outside of film gate)
 Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
 Rewind_btn.place(x=430, y=710)
+# Fast Forward movie (via upper path, outside of film gate)
 FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=5, height=2, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
 FastForward_btn.place(x=530, y=710)
-OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
-OpenFolder_btn.place(x=630, y=710)
-
-# Create frame to display RPi temp
-RPi_temp_border_frame = Frame(win, width=8, height=2, bg='black')
-RPi_temp_border_frame.pack()
-RPi_temp_border_frame.place(x=730, y=715)
-
-RPi_temp_frame = Frame(RPi_temp_border_frame, width=8, height=2)
-RPi_temp_frame.pack(side=TOP, padx=1, pady=1)
-
-RPi_temp_frame_label = Label(RPi_temp_frame, text='RPi Temp.', width=8, height=1, wraplength=120, bg='white')
-RPi_temp_frame_label.pack(side=TOP)
-RPi_temp_value_label = Label(RPi_temp_frame, text=str(RPiTemp), font=("Arial", 18), width=5, height=1, wraplength=120, bg='white')
-RPi_temp_value_label.pack(side=TOP, fill='x')
+# Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imegined)
+# So, disabled to gain some space
+# OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
+# OpenFolder_btn.place(x=630, y=710)
+# Unlock reels button (to load film, rewind, etc)
+Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green', activeforeground='white', wraplength=80)
+Free_btn.place(x=630, y=710)
+# Activate focus zoom, to facilitate focusing the camera
+Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green', activeforeground='white', wraplength=80)
+Focus_btn.place(x=730, y=710)
 
 
-# Create frame to select perforation threshold
-perforation_threshold_border_frame = Frame(win, width=8, height=2, bg='black')
-perforation_threshold_border_frame.pack()
-perforation_threshold_border_frame.place(x=810, y=700)
-
-perforation_threshold_frame = Frame(perforation_threshold_border_frame, width=8, height=2, bg='white')
-perforation_threshold_frame.pack(side=TOP, padx=1, pady=1)
-
-
-perforation_threshold_title_label = Label(perforation_threshold_frame, text='Perf. Th.', width=8, height=1, bg='white')
-perforation_threshold_title_label.pack(side=TOP)
-perforation_threshold_value_label = Label(perforation_threshold_frame, text=str(PerforationThresholdLevel), width=8, height=1, font=("Arial", 16), wraplength=110, bg='white')
-perforation_threshold_value_label.pack(side=TOP)
-
-perforation_threshold_buttons = Frame(perforation_threshold_frame, width=8, height=1, bg='white')
-perforation_threshold_buttons.pack(side=TOP)
-decrease_perforation_threshold_btn = Button(perforation_threshold_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'), command=decrease_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
-decrease_perforation_threshold_btn.pack(side=LEFT)
-increase_perforation_threshold_btn = Button(perforation_threshold_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'), command=increase_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
-increase_perforation_threshold_btn.pack(side=LEFT)
-
-# Create Exit button
-
+# Application Exit button
 Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
 Exit_btn.place(x=925, y=700)
+
 # Create vertical button column at right
-Start_btn = Button(win, text="START Scan", width=12, height=5, command=StartScan, activebackground='green', activeforeground='white',  wraplength=80)
+# Start scan button
+Start_btn = Button(win, text="START Scan", width=14, height=5, command=StartScan, activebackground='green', activeforeground='white',  wraplength=80)
 Start_btn.place(x=925, y=40)
-Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green', activeforeground='white', wraplength=80)
-Free_btn.place(x=945, y=150)
-Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green', activeforeground='white', wraplength=80)
-Focus_btn.place(x=945, y=230)
 
 # Create frame to select target folder
 folder_border_frame = Frame(win, width=16, height=8, bg='black')
 folder_border_frame.pack()
-folder_border_frame.place(x=925, y=310)
+folder_border_frame.place(x=925, y=150)
 
 folder_frame = Frame(folder_border_frame, width=16, height=8)
 folder_frame.pack(side=TOP, padx=1, pady=1)
@@ -855,7 +832,7 @@ folder_frame_title = Frame(folder_frame, width=16, height=4)
 folder_frame_title.pack()
 folder_frame_title_label = Label(folder_frame_title, text='Target Folder', width=16, height=1)
 folder_frame_title_label.pack(side=TOP)
-folder_frame_folder_label = Label(folder_frame_title, text=CurrentDir, width=16, height=3, font=("Arial", 8), wraplength=100)
+folder_frame_folder_label = Label(folder_frame_title, text=CurrentDir, width=16, height=3, font=("Arial", 8), wraplength=60)
 folder_frame_folder_label.pack(side=TOP)
 
 folder_frame_buttons = Frame(folder_frame, width=16, height=4, bd=2)
@@ -865,10 +842,10 @@ new_folder_btn.pack(side=TOP)
 existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=5, height=1, command=set_existing_folder, activebackground='green', activeforeground='white', wraplength=80)
 existing_folder_btn.pack(side=TOP)
 
-# Create frame to display number of scanned images
+# Create frame to display number of scanned images, and frames per minute
 Scanned_Images_border_frame = Frame(win, width=16, height=2, bg='black')
 Scanned_Images_border_frame.pack()
-Scanned_Images_border_frame.place(x=925, y=460)
+Scanned_Images_border_frame.place(x=925, y=300)
 
 Scanned_Images_frame = Frame(Scanned_Images_border_frame, width=16, height=4)
 Scanned_Images_frame.pack(side=TOP, padx=1, pady=1)
@@ -888,7 +865,7 @@ Scanned_Images_fpm.pack(side=LEFT)
 # Create frame to select exposure value
 exposure_border_frame = Frame(win, width=16, height=2, bg='black')
 exposure_border_frame.pack()
-exposure_border_frame.place(x=925, y=580)
+exposure_border_frame.place(x=925, y=410)
 
 exposure_frame = Frame(exposure_border_frame, width=16, height=2, bg='white')
 exposure_frame.pack(side=TOP, padx=1, pady=1)
@@ -913,6 +890,40 @@ increase_exp_btn.pack(side=LEFT)
 # exposure_frame_aux.pack(side=TOP)
 # exposure_frame_aux_label = Label(exposure_frame_aux, text='', width=14, height=1, bg='white')
 # exposure_frame_aux_label.pack(side=TOP)
+
+# Create frame to select perforation threshold dynamically (however scan mode needs to be stopped)
+perforation_threshold_border_frame = Frame(win, width=16, height=2, bg='black')
+perforation_threshold_border_frame.pack()
+perforation_threshold_border_frame.place(x=925, y=510)
+
+perforation_threshold_frame = Frame(perforation_threshold_border_frame, width=16, height=2, bg='white')
+perforation_threshold_frame.pack(side=TOP, padx=1, pady=1)
+
+perforation_threshold_title_label = Label(perforation_threshold_frame, text='Perf. Threshold', width=16, height=1, bg='white')
+perforation_threshold_title_label.pack(side=TOP)
+perforation_threshold_value_label = Label(perforation_threshold_frame, text=str(PerforationThresholdLevel), width=8, height=1, font=("Arial", 16), wraplength=110, bg='white')
+perforation_threshold_value_label.pack(side=TOP)
+
+perforation_threshold_buttons = Frame(perforation_threshold_frame, width=8, height=1, bg='white')
+perforation_threshold_buttons.pack(side=TOP)
+decrease_perforation_threshold_btn = Button(perforation_threshold_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'), command=decrease_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
+decrease_perforation_threshold_btn.pack(side=LEFT)
+increase_perforation_threshold_btn = Button(perforation_threshold_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'), command=increase_perforation_threshold, activebackground='green', activeforeground='white', wraplength=80)
+increase_perforation_threshold_btn.pack(side=LEFT)
+
+# Create frame to display RPi temperature
+RPi_temp_border_frame = Frame(win, width=8, height=2, bg='black')
+RPi_temp_border_frame.pack()
+RPi_temp_border_frame.place(x=945, y=620)
+
+RPi_temp_frame = Frame(RPi_temp_border_frame, width=8, height=2)
+RPi_temp_frame.pack(side=TOP, padx=1, pady=1)
+
+RPi_temp_frame_label = Label(RPi_temp_frame, text='RPi Temp.', width=8, height=1, wraplength=120, bg='white')
+RPi_temp_frame_label.pack(side=TOP)
+RPi_temp_value_label = Label(RPi_temp_frame, text=str(RPiTemp), font=("Arial", 18), width=5, height=1, wraplength=120, bg='white')
+RPi_temp_value_label.pack(side=TOP, fill='x')
+
 
 
 # Check if existing session on script start
