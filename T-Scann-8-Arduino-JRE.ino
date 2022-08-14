@@ -4,7 +4,8 @@
       project page
       tscann8.torulf.com
 
-      1 Aug 2022 - JRE - Added fast forward function
+      01 Aug 2022 - JRE - Added fast forward function
+      04 Auf 2022 - JRE - Renamed commands, initialized to 'false' instead of 'LOW' (easier understanding)
 */
 
 #include <Wire.h>
@@ -13,7 +14,7 @@
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
 int Pulse = LOW;
-int Ic; // Stores I2C command from Raspberry PI --- Play=10 / Free mode=20 / Rewind movie=60 / Fast Forward movie=80 / One step frame=40 / Forward movie=30
+int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80
 
 //------------ Stepper motors control ----------------
 const int stepSpoleA = 2;   // Stepper motor film feed
@@ -28,20 +29,23 @@ const int dirSpoleC = 10;   // direction
 
 
 const int inDra = 12; // Traction stop
-int Play = LOW;
-int Free = LOW;
-int Spola = LOW;
-int Fram = LOW;
-int Frame = LOW;
+// Command list
+int ScanFilm = false;   // Scan film
+int UnlockReels = false;   // Unlock reels
+int Rewind = false;  // Rewind fild (Spola in Torulf original module)
+int FastForward = false;  // FastForward
+int SlowForward = false;   // Advance film (move forward without scanning)
+//int Frame = LOW;  // Unused
+int SingleStep = false; // Single step
 
-int oneFrame = LOW;
-int okFrame = LOW;
-int lastPlay = LOW;
-int lastFree = LOW;
-int lastSpola = LOW;
-int lastFram = LOW;
+int okFrame = LOW;  // Used for frame detection, in play ond single step modes
+// Last status for each command: I think this is useless, the base variable can be used instead
+int lastScanFilm = LOW;
+int lastUnlockReels = LOW;
+int lastRewind = LOW;
+int lastSlowForward = LOW;
 int lastFrame = LOW;
-int LastWstep = 0;
+//int LastWstep = 0;  // Unused
 
 int wave = 0;
 int waveC = 0;
@@ -138,11 +142,11 @@ void loop() {
     Serial.println(measureP);
 
 
-    lastPlay = Play;
+    lastScanFilm = ScanFilm;
 
-    //-------------PLAY-----------
-    if (Ic == 10 && lastPlay == LOW) {
-      Play = HIGH; delay(250); WstepV = 5; tone(A2, 2000, 50); Ic = 0; scan();
+    //-------------ScanFilm-----------
+    if (Ic == 10 && lastScanFilm == LOW) {
+      ScanFilm = HIGH; delay(250); WstepV = 5; tone(A2, 2000, 50); Ic = 0; scan();
     }
 
 
@@ -150,7 +154,7 @@ void loop() {
 
     //---------- step one frame ---------
     if (Ic == 40) {
-      Play = HIGH; oneFrame = HIGH; Ic = 0; WstepV = 100; delay(50); scan();
+      ScanFilm = HIGH; SingleStep = HIGH; Ic = 0; WstepV = 100; delay(50); scan();
 
     }
 
@@ -164,51 +168,51 @@ void loop() {
 
     //-------------RUN forward film-----------
 
-    lastFram = Fram;
+    lastSlowForward = SlowForward;
 
-    if (Ic == 30 && lastFram == LOW) {
-      Fram = HIGH; delay(50); Ic = 0;
+    if (Ic == 30 && lastSlowForward == LOW) {
+      SlowForward = HIGH; delay(50); Ic = 0;
     }
 
-    if (Ic == 30 && lastFram == HIGH) {
-      Fram = LOW; delay(50); Ic = 0;
+    if (Ic == 30 && lastSlowForward == HIGH) {
+      SlowForward = LOW; delay(50); Ic = 0;
     }
 
-    if (Fram == HIGH && inDraState == LOW) {
+    if (SlowForward == HIGH && inDraState == LOW) {
       inDraCount = inDraCount + 1; delay(10); digitalWrite(stepSpoleC, HIGH);
     }
 
-    if (Fram == HIGH) {
+    if (SlowForward == HIGH) {
       digitalWrite(stepKapstanB, HIGH);
     }
 
 
-    if (Ic == 30 && lastFram == HIGH) {
-      Fram = LOW; delay(50); Ic = 0;
+    if (Ic == 30 && lastSlowForward == HIGH) {
+      SlowForward = LOW; delay(50); Ic = 0;
     }
 
 
 
-    //------------- Free mode -----------
+    //------------- UnlockReels mode -----------
 
-    lastFree = Free;
+    lastUnlockReels = UnlockReels;
 
-    if (Ic == 20 && lastFree == LOW) {
-      Free = HIGH; delay(50); Ic = 0;
+    if (Ic == 20 && lastUnlockReels == LOW) {
+      UnlockReels = HIGH; delay(50); Ic = 0;
     }
 
-    if (Ic == 20 && lastFree == HIGH) {
-      Free = LOW; delay(50); Ic = 0;
+    if (Ic == 20 && lastUnlockReels == HIGH) {
+      UnlockReels = LOW; delay(50); Ic = 0;
     }
 
-    if (Free == HIGH) {
+    if (UnlockReels == HIGH) {
       digitalWrite(neutralB, HIGH); digitalWrite(neutralC, HIGH);
 
     }
 
 
 
-    if (Free == LOW) {
+    if (UnlockReels == LOW) {
       digitalWrite(neutralB, LOW); digitalWrite(neutralC, LOW);
 
 
@@ -217,25 +221,25 @@ void loop() {
 
     //-------------rewind the movie -----------
 
-    lastSpola = Spola;
+    lastRewind = Rewind;
 
-    if (Ic == 60 && lastSpola == LOW && lastPlay == LOW && lastPlay == LOW && lastFram == LOW ) {
-      Spola = HIGH; delay (500); digitalWrite(neutralA, LOW); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, HIGH); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  backfilm();
+    if (Ic == 60 && lastRewind == LOW && lastScanFilm == LOW && lastScanFilm == LOW && lastSlowForward == LOW ) {
+      Rewind = HIGH; delay (500); digitalWrite(neutralA, LOW); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, HIGH); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  backfilm();
     }
 
     //-------------fast forward the movie -----------
 
-    lastSpola = Spola;
+    lastFastForward = FastForward;
 
-    if (Ic == 80 && lastSpola == LOW && lastPlay == LOW && lastPlay == LOW && lastFram == LOW ) {
-      Spola = HIGH; delay (500); digitalWrite(neutralA, HIGH); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, LOW); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  fastforwardfilm();
+    if (Ic == 80 && lastFastForward == LOW && lastScanFilm == LOW && lastScanFilm == LOW && lastSlowForward == LOW ) {
+      FastForward = HIGH; delay (500); digitalWrite(neutralA, HIGH); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, LOW); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  fastforwardfilm();
     }
 
 
 
     // ------------ Stretching film pickup wheel (C)-------
 
-    if (Play == HIGH && inDraState == LOW) {
+    if (ScanFilm == HIGH && inDraState == LOW) {
       delay (5); digitalWrite(stepSpoleC, HIGH);
     }
 
@@ -248,7 +252,7 @@ void loop() {
 
     // org 5
 
-    if (Play == HIGH) {
+    if (ScanFilm == HIGH) {
       digitalWrite(stepKapstanB, LOW); delay(20); digitalWrite(stepKapstanB, HIGH); delay (20); digitalWrite(stepKapstanB, LOW);
     }
 
@@ -263,14 +267,14 @@ void backfilm() {
   Wire.begin(16);
 
 
-  lastSpola = Spola;
-  if (Ic == 60 && lastSpola == HIGH) {
-    Spola = LOW; Ic = 0;
+  lastRewind = Rewind;
+  if (Ic == 60 && lastRewind == HIGH) {
+    Rewind = LOW; Ic = 0;
   }
 
-  lastSpola = Spola;
-  if (Ic == 60 && lastSpola == LOW) {
-    Spola = LOW; digitalWrite(neutralA, HIGH); Ic = 0; delay (100); return;
+  lastRewind = Rewind;
+  if (Ic == 60 && lastRewind == LOW) {
+    Rewind = LOW; digitalWrite(neutralA, HIGH); Ic = 0; delay (100); return;
   }
 
 
@@ -292,14 +296,14 @@ void fastforwardfilm() {
   Wire.begin(16);  // join I2c bus with address #16
 
 
-  lastSpola = Spola;
-  if (Ic == 80 && lastSpola == HIGH) {
-    Spola = LOW; Ic = 0;
+  lastFastForward = FastForward;
+  if (Ic == 80 && lastFastForward == HIGH) {
+    FastForward = LOW; Ic = 0;
   }
 
-  lastSpola = Spola;
-  if (Ic == 80 && lastSpola == LOW) {
-    Spola = LOW; digitalWrite(neutralC, HIGH); Ic = 0; delay (100); return;
+  lastFastForward = FastForward;
+  if (Ic == 80 && lastFastForward == LOW) {
+    FastForward = LOW; digitalWrite(neutralC, HIGH); Ic = 0; delay (100); return;
   }
 
 
@@ -340,25 +344,23 @@ void check() {
   }
 
   // ------------- Frame detection ----
-  if (wave >= perfLevel && Play == HIGH && Pulse == LOW && Wstep >= WstepV ) {
-    Pulse = HIGH; okFrame = HIGH; WstepLast = Wstep; Wstep = 0; Play = LOW; analogWrite (A1, 255); Ic = 0;  Exp = 11; digitalWrite(13, HIGH);
+  if (wave >= perfLevel && ScanFilm == HIGH && Pulse == LOW && Wstep >= WstepV ) {
+    Pulse = HIGH; okFrame = HIGH; WstepLast = Wstep; Wstep = 0; ScanFilm = LOW; analogWrite (A1, 255); Ic = 0;  Exp = 11; digitalWrite(13, HIGH);
   }
 
-  else if (wave == 0 && Pulse == HIGH && Play == HIGH) {
+  else if (wave == 0 && Pulse == HIGH && ScanFilm == HIGH) {
     Pulse = LOW; analogWrite(A1, 0); Ic = 0;
   }
 
   // -- One step frame --
-  if (ScanState == Sts_SingleStep && okFrame == HIGH ) {
-    Exp = 0; 
-    okFrame = LOW; 
-    tone(A2, 2000, 35);
+  if (SingleStep == HIGH && okFrame == HIGH ) {
+    Ic = 0; Exp = 0; SingleStep = LOW; okFrame = LOW; ScanFilm = LOW; tone(A2, 2000, 35); loop();
   }
   return;
 }
 
 
-// ----- This is the function to "PLAY / SCAN" -----
+// ----- This is the function to "ScanFilm" -----
 void scan() {
 
   while (1) {
@@ -408,7 +410,7 @@ void scan() {
     }
 
 
-    if (Play == HIGH) {
+    if (ScanFilm == HIGH) {
       Serial.println(measureP);
     }
 
@@ -417,7 +419,7 @@ void scan() {
 
     // --- Waiting for the green light from the Raspberry Pi, to pull forward to the next frame-----
     if (Ic == 12) {
-      sped = spedV; Play = HIGH; WstepV = WstepVR; typeF = typeF + 1;
+      sped = spedV; ScanFilm = HIGH; WstepV = WstepVR; typeF = typeF + 1;
     }
 
 
@@ -427,32 +429,32 @@ void scan() {
 
 
 
-    if (Play == HIGH && inDraState == LOW && (time - LastTimeDra) >= inDraTime) {
+    if (ScanFilm == HIGH && inDraState == LOW && (time - LastTimeDra) >= inDraTime) {
       digitalWrite(stepSpoleC, LOW); digitalWrite(stepSpoleC, HIGH); LastTimeDra = time;
     }
 
-    if (Play == HIGH && inDraState == HIGH) {
+    if (ScanFilm == HIGH && inDraState == HIGH) {
       inDraTime = inDraTime + 200;
     }
 
-    if (Play == HIGH && inDraState == HIGH && inDraTime >= 12000) {
+    if (ScanFilm == HIGH && inDraState == HIGH && inDraTime >= 12000) {
       inDraTime = 7000;
     }
 
 
 
-    lastPlay = Play;
+    lastScanFilm = ScanFilm;
 
-    //-------------PLAY-----------
-    if (Ic == 10 && lastPlay == HIGH) {
-      Play = LOW; okFrame = LOW; Ic = 0; typeF = 0; WstepLast = 0; WstepS = 260; inDraTime = 1000; WstepLast = 0; loop();
+    //-------------ScanFilm-----------
+    if (Ic == 10 && lastScanFilm == HIGH) {
+      ScanFilm = LOW; okFrame = LOW; Ic = 0; typeF = 0; WstepLast = 0; WstepS = 260; inDraTime = 1000; WstepLast = 0; loop();
     }
 
 
     check();
     // ---- Speed on stepper motors  ------------------
 
-    if (Play == HIGH && (time - LastTime) >= sped ) {
+    if (ScanFilm == HIGH && (time - LastTime) >= sped ) {
 
       for (int x = 0; x <= 3; x++) {
         Wstep = Wstep + 1; digitalWrite(stepKapstanB, LOW); digitalWrite(stepKapstanB, HIGH); check();
@@ -463,7 +465,7 @@ void scan() {
   }
 }
 
-// ---- Receive I2C command from Raspberry PI, play... and more ------------
+// ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
 void receiveEvent() {
 
   Ic = Wire.read();
