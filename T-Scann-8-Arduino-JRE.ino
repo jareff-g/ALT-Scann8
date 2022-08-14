@@ -19,8 +19,12 @@
       04 Aug 2022 - JRE - Reorganized overall structure
                           - Converted main loop with variables to 2 switches, one for the state, another for the incoming command
                           - Some stuff works erratically, others do not work at all
-      05 Aug 2022 - JRE - Moving to 1.61.4 before doign more changes
-                          - Renaiming of variables for easier understanding of the flow
+      05 Aug 2022 - JRE - Moving to 1.61.5 before doign more changes
+                          - Renaming of variables for easier understanding of the flow
+      06 Aug 2022 - JRE - Moving to 1.61.6 before doign more changes
+                          - Version mostly working, includign slow forward and Scan
+                          - Main issue pending: Frame not detected corretly (too high)
+                          - Moving to new version in case we need to roll back
 */
 
 #include <Wire.h>
@@ -29,7 +33,7 @@
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
 int Pulse = LOW;
-int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80
+int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Emergency Stop=90
 
 //------------ Stepper motors control ----------------
 const int MotorA_Stepper = 2;   // Stepper motor film feed
@@ -62,7 +66,8 @@ enum ScanState{
   Sts_Rewind,
   Sts_FastForward,
   Sts_SlowForward,
-  Sts_SingleStep
+  Sts_SingleStep,
+  Sts_EmergencyStop
 }
 ScanState=Sts_Idle;
 
@@ -92,7 +97,7 @@ int RewindSpeed = 4000;    // speed Rewind movie
 int PerforationThresholdLevel = 250; // detector pulse level
 int PerforationMaxLevel = 500;    // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;    // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 176;     // Minimum number of steps, before new frame is exposed - JRE: Best value for me -> 176
+int MinFrameSteps = 150;     // Minimum number of steps, before new frame is exposed - JRE: Best value for me -> 176
 int MaxFrameSteps = 281;    // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
 
 // -------------------------------------------------------
@@ -125,12 +130,12 @@ volatile struct {
   int in;
   int out;
 } CommandQueue;
-boolean GlobalDebug = false;
+boolean GlobalDebug = true;
 int MaxDebugRepetitions = 3;
 
 void setup() {
 
-  Serial.begin(9600);  // Used to be 9600. Should work with 115200
+  Serial.begin(9600);  // Used to be 9600. Should work with 230400
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendexp);
@@ -188,7 +193,9 @@ void loop() {
     int PT_SignalLevelRead = analogRead(PHOTODETECT);
     SerialPrintInt(PT_SignalLevelRead); // can be read in Arduino IDE - Serial plotter
 
-    if (ScanState == Sts_Idle) {
+    TractionStopActive = digitalRead(TractionStopPin);
+
+//    if (ScanState == Sts_Idle) {
       // Set default state and direction of motors B and C (disabled, clockwise)
       // In the original main loop this was done when the Ic commamnd was NOT Single Step (49). Why???
       if (Ic != 40){  // In case we need the exact behavior of original code
@@ -207,9 +214,7 @@ void loop() {
         digitalWrite(MotorB_Neutral, LOW);  
         digitalWrite(MotorC_Neutral, LOW); 
       }
-    }
-
-    TractionStopActive = digitalRead(TractionStopPin);
+//    }
 
     switch (ScanState) {
       case Sts_Idle:
@@ -261,6 +266,11 @@ void loop() {
             tone(A2, 2000, 200); 
             RewindSpeed = 4000;
             break;
+          case 90:
+            DebugPrint("Idle -> EmergencyStop"); 
+            ScanState = Sts_EmergencyStop;
+            delay(50);
+            break;
         }
         break;
       case Sts_Scan:
@@ -279,10 +289,11 @@ void loop() {
           */
           DebugPrint("Staying in Scan state"); 
         }
-        else {
+        else if (Ic == 10) {
           DebugPrint("Exiting Scan state"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
+        else delay(800);
         break;
       case Sts_UnlockReels:
         if (Ic == 20) { //request to lock reels again
@@ -328,7 +339,7 @@ void loop() {
             digitalWrite(MotorC_Stepper, HIGH);
           }
           digitalWrite(MotorB_Stepper, HIGH);
-          DebugPrint("Staying in slow forward state"); 
+          //DebugPrint("Staying in slow forward state"); 
         }
         break;
       case Sts_SingleStep:
@@ -336,6 +347,14 @@ void loop() {
           DebugPrint("Exiting single step state"); 
           ScanState = Sts_Idle;
         }
+        break;
+      case Sts_EmergencyStop:
+        DebugPrint("Exiting EmergencyStop state"); 
+        digitalWrite(MotorA_Stepper, LOW); 
+        digitalWrite(MotorB_Stepper, LOW); 
+        digitalWrite(MotorC_Stepper, LOW); 
+        digitalWrite(MotorA_Neutral, HIGH);
+        ScanState = Sts_Idle;
         break;
     }
 
@@ -397,7 +416,6 @@ boolean FastForwardFilm(int Ic) {
 void check() {
   PT_SignalLevelRead = analogRead(PHOTODETECT);
 
-  DebugPrint("Entering check function"); 
   if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
     FilteredSignalLevel = PT_SignalLevelRead;
   }
@@ -420,15 +438,14 @@ void check() {
     FrameDetected = true; 
     LastFrameSteps = FrameStepsDone; 
     FrameStepsDone = 0; 
-    analogWrite (A1, 255); 
+    analogWrite (A1, 255); // Light green led
     Exp = 11; 
     digitalWrite(13, HIGH);
   }
   else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
     DebugPrint("check - Previous frame is now done"); 
     Pulse = LOW; 
-    analogWrite(A1, 0); 
-    Ic = 0;
+    analogWrite(A1, 0); // Turn off green led
   }
 
   // -- One step frame --
@@ -445,8 +462,6 @@ void check() {
 // Returns false when done
 boolean scan(int Ic) {
   boolean retvalue = true;
-  
-  DebugPrint("Entering scan function"); 
   
   Wire.begin(16);
 
@@ -504,7 +519,6 @@ boolean scan(int Ic) {
   TractionStopActive = digitalRead(TractionStopPin);
 
   if (!TractionStopActive && (CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
-    DebugPrint("scan - Time to pick up film on reel C"); 
     digitalWrite(MotorC_Stepper, LOW); 
     digitalWrite(MotorC_Stepper, HIGH); 
     TractionStopLastWaitEventTime = CurrentTime;
@@ -532,22 +546,22 @@ boolean scan(int Ic) {
   }
   else {
     check();
-    // ---- Speed on stepper motors  ------------------
-    if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-      DebugPrint("scan - Time for capstan to move film forward"); 
-      for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
-        FrameStepsDone = FrameStepsDone + 1; 
-        digitalWrite(MotorB_Stepper, LOW); 
-        digitalWrite(MotorB_Stepper, HIGH); 
-        check();
-        if (FrameDetected) break;
+    if (!FrameDetected) {
+      // ---- Speed on stepper motors  ------------------
+      if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
+        for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
+          FrameStepsDone = FrameStepsDone + 1; 
+          digitalWrite(MotorB_Stepper, LOW); 
+          digitalWrite(MotorB_Stepper, HIGH); 
+          check();
+          if (FrameDetected) break;
+        }
       }
     }
-  
-    digitalWrite(MotorB_Stepper, LOW);
   }
+  digitalWrite(MotorB_Stepper, LOW);
 
-  if (ScanState == Sts_SingleStep && FrameDetected) {
+  if (FrameDetected) {
     FrameDetected = false;
     retvalue = false;
   }
