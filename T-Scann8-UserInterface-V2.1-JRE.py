@@ -1,5 +1,5 @@
 
-IsRpi = False
+IsRpi = True
 
 if IsRpi:
     print("Running on Raspbery Pi")
@@ -12,8 +12,6 @@ import tkinter.simpledialog
 from tkinter import *
 
 if IsRpi:
-    #import pygame
-    #from pygame.locals import *
     import picamera
 import os
 import subprocess
@@ -97,21 +95,16 @@ if os.path.isfile(PersistedSessionFilename):
         CurrentDir = SessionData["TargetFolder"]
         CurrentFrame = int(SessionData["CurrentFrame"])
         CurrentExposure = SessionData["CurrentExposure"]
+        CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
         # when finished, close the file
         PersistedDateFile.close()
 
 # Create a frame to add a border to the preview
-preview_border_frame = Frame(win, width=844, height=634, bg='white')
+preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
 preview_border_frame.pack()
 preview_border_frame.place(x=38, y=38)
 
 if IsRpi:
-    # Init pygame
-    #pygame.init()
-    #screen = pygame.display.set_mode((1280, 1024))
-    #pygame.display.set_caption("T-Scann 8")
-    #screen.fill((200, 200, 200))
-
     camera = picamera.PiCamera()
     camera.sensor_mode=3
     # settings resulotion higer for HQ camera 2028, 1520
@@ -130,8 +123,6 @@ def exit_app():  # Exit Application
     # Uncomment next two lines when running on RPi
     if IsRpi:
         camera.close()
-    #if IsRpi:
-    #    pygame.display.quit()
     # Exiting normally: Delete session info
     if os.path.isfile(PersistedSessionFilename):
         os.remove(PersistedSessionFilename)
@@ -402,6 +393,7 @@ def negative_capture():
 
 def open_folder():
     global OpenFolderActive
+    global FolderProcess
 
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder")
@@ -409,15 +401,14 @@ def open_folder():
             if IsRpi:
                 camera.stop_preview()
             # camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
-            FolderProcess = subprocess.Popen("pcmanfm \"%s\"" % BaseDir)
-            # os.system("pcmanfm \"%s\"" % BaseDir)
+            FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
         OpenFolder_btn.config(text="Open Folder")
-        # os.system("killall pcmanfm")
-        FolderProcess.kill()
+        FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
+
         time.sleep(.5)
         if IsRpi:
-            camera.start_preview(fullscreen=False, window=(85, 105, 840, 720))
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         time.sleep(.5)
 
     OpenFolderActive = not OpenFolderActive
@@ -492,7 +483,8 @@ def CaptureLoop():
                 ArduinoTrigger = i2c.read_byte_data(16, 0)
             except:
                 # Log error to console
-                print("Error while checking if frame is ready (from Arduino). Will retry.")
+                curtime = time.ctime()
+                print(curtime + "Error while checking if frame is ready (from Arduino). Will retry.")
                 win.after(0, CaptureLoop)
                 return
 
@@ -505,8 +497,9 @@ def CaptureLoop():
             except:
                 CurrentFrame -= 1
                 # Log error to console
-                print("Error when telling Arduino to move to next Frame.")
-                print(f"Frame {CurrentFrame} capture to be tried again.")
+                curtime = time.ctime()
+                print(curtime + "Error when telling Arduino to move to next Frame.")
+                print(f"    Frame {CurrentFrame} capture to be tried again.")
     ArduinoTrigger = 0
 
     if ScanOngoing:
@@ -558,31 +551,31 @@ def onFormEvent(event):
 
 # Create horizontal button row at bottom
 AdvanceMovie_btn = Button(win, text="Advance Movie", width=8, height=3, command=advance_movie, activebackground='green', activeforeground='white', wraplength=80)
-AdvanceMovie_btn.place(x=30, y=700)
+AdvanceMovie_btn.place(x=30, y=710)
 SingleStep_btn = Button(win, text="One frame forward", width=8, height=3, command=single_step_movie, activebackground='green', activeforeground='white', wraplength=80)
-SingleStep_btn.place(x=130, y=700)
+SingleStep_btn.place(x=130, y=710)
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
-PosNeg_btn.place(x=230, y=700)
+PosNeg_btn.place(x=230, y=710)
 Rewind_btn = Button(win, text="Rewind", width=8, height=3, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
-Rewind_btn.place(x=330, y=700)
+Rewind_btn.place(x=330, y=710)
 FastForward_btn = Button(win, text="Fast Forward", width=8, height=3, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
-FastForward_btn.place(x=430, y=700)
-Exit_btn = Button(win, text="Exit", width=8, height=3, command=exit_app, bg='red', fg='white', activebackground='green', activeforeground='white', wraplength=80)
-Exit_btn.place(x=950, y=700)
+FastForward_btn.place(x=430, y=710)
+Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
+Exit_btn.place(x=925, y=700)
 # Create vertical button column at right
-Start_btn = Button(win, text="START Scan", width=8, height=3, command=StartScan, activebackground='green', activeforeground='white', wraplength=80)
-Start_btn.place(x=950, y=40)
+Start_btn = Button(win, text="START Scan", width=12, height=5, command=StartScan, activebackground='green3', activeforeground='white',  wraplength=80)
+Start_btn.place(x=925, y=40)
 Free_btn = Button(win, text="Free Reels", width=8, height=3, command=set_free_mode, activebackground='green', activeforeground='white', wraplength=80)
-Free_btn.place(x=950, y=110)
+Free_btn.place(x=945, y=150)
 Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green', activeforeground='white', wraplength=80)
-Focus_btn.place(x=950, y=180)
+Focus_btn.place(x=945, y=230)
 OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
-OpenFolder_btn.place(x=950, y=500)
+OpenFolder_btn.place(x=945, y=555)
 
 # Create frame to select exposure value
 exposure_border_frame = Frame(win, width=8, height=1, bg='white')  # Change to bg to 'black' to have a border
 exposure_border_frame.pack()
-exposure_border_frame.place(x=755, y=700)
+exposure_border_frame.place(x=650, y=700)
 
 exposure_frame = Frame(exposure_border_frame, width=8, height=1, bg='white')
 exposure_frame.pack(side=TOP, padx=1, pady=1)
@@ -611,7 +604,7 @@ increase_exp_btn.pack(side=LEFT)
 # Create frame to select target folder
 folder_border_frame = Frame(win, width=16, height=8, bg='black')
 folder_border_frame.pack()
-folder_border_frame.place(x=920, y=250)
+folder_border_frame.place(x=925, y=310)
 
 folder_frame = Frame(folder_border_frame, width=16, height=8)
 folder_frame.pack(side=TOP, padx=1, pady=1)
@@ -633,7 +626,7 @@ existing_folder_btn.pack(side=TOP)
 # Create frame to display number of scanned images
 Scanned_Images_border_frame = Frame(win, width=16, height=16, bg='black')
 Scanned_Images_border_frame.pack()
-Scanned_Images_border_frame.place(x=920, y=400)
+Scanned_Images_border_frame.place(x=925, y=460)
 Scanned_Images_frame = Frame(Scanned_Images_border_frame, width=16, height=16)
 Scanned_Images_frame.pack(side=TOP, padx=1, pady=1)
 Scanned_Images_label = Label(Scanned_Images_frame, text='Number of scanned Images', width=16, height=2, wraplength=120, bg='white')
@@ -650,10 +643,6 @@ while not ExitRequested:
     if IsRpi:
         camera.shutter_speed = CurrentExposure
 
-    #win.update()
-    #pygame.display.update()
-    #time.sleep(LoopDelay)
-
     # Enable events on windows movements, to allow preview to follow
     lblText = tk.Label(win, text='')
     lblText.pack()
@@ -663,6 +652,5 @@ while not ExitRequested:
 
 if IsRpi:
     camera.close()
-    #pygame.display.quit()
 
 # win.mainloop()  # running the loop that works as a trigger
