@@ -44,7 +44,7 @@ int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
 
 int Pulse = LOW;
-int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Emergency Stop=90
+int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Set Perf Level=90
 
 //------------ Stepper motors control ----------------
 const int MotorA_Stepper = 2;     // Stepper motor film feed
@@ -78,11 +78,14 @@ enum ScanState{
   Sts_FastForward,
   Sts_SlowForward,
   Sts_SingleStep,
-  Sts_EmergencyStop
+  Sts_SetPerfLevelUp,
+  Sts_SetPerfLevelDown
 }
 ScanState=Sts_Idle;
 
 boolean FrameDetected = false;  // Used for frame detection, in play ond single step modes
+
+boolean UVLedOn = false;
 // Last status for each command: I think this is useless, the base variable can be used instead
 /*
 int lastScanFilm = LOW;
@@ -105,7 +108,7 @@ int UVLedBrightness = 250;          // Brightness UV led, may need to be changed
 int ScanSpeed = 500 ;               // speed stepper scann Play
 int FetchFrameScanSpeed = 15000;    // Play Slow before trig
 int RewindSpeed = 4000;             // speed Rewind movie
-int PerforationThresholdLevel = 200; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
+int PerforationThresholdLevel = 120; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
 int MinFrameSteps = 200;            // Minimum number of steps, before new frame is exposed - Torulf:200
@@ -116,7 +119,7 @@ int MaxFrameStepsS8 = 290;          // JRE: Specific value for Super 8 (Torulf: 
 
 // -------------------------------------------------------
 
-const int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
+/*const */int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 // int Paus = LOW;                          // JRE: Unused
 int FrameStepsDone = 0;                     // Count steps
 int OriginalScanSpeed = ScanSpeed;          // restoration original value
@@ -128,12 +131,12 @@ int LastFrameSteps = 0;                     // stores number of steps
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
 
-unsigned long TractionStopWaitingTime = 2000;  // winding wheel C Start value, changed by program.
+unsigned long TractionStopWaitingTime = 2000;  // winding wheel C Start value, changed by program. 2000 in Original code (too much slack for me)
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 unsigned long TractionStopLastWaitEventTime = 0;
 
-int Exp = 0;    // 11 is exposure I2C
+int EventForRPi = 0;    // 11-Frame ready for exposure, 61-Rewind error, 81-FF error, 92-Confirm perf level change
 
 int PT_SignalLevelRead;   // Level out signal phototransistor detection
 
@@ -147,10 +150,10 @@ volatile struct {
 
 void setup() {
 
-  Serial.begin(230400);  // Used to be 9600. Should work with 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
+  Serial.begin(9600);  // Used to be 9600. Should work with 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
-  Wire.onRequest(sendexp);
+  Wire.onRequest(sendEvent);
 
 
   //--- set pinMode Stepper motors -----
@@ -180,6 +183,7 @@ void setup() {
 
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
+  UVLedOn = true;
 
 
   digitalWrite(MotorA_Stepper, LOW);
@@ -203,7 +207,8 @@ void loop() {
     // Get phototransistor level in order to make it available via Arduino serial interface
     // JRE 4/8/22: Check first if we are in debug mode: If yes, serial i/f is dedicated for it
     int PT_SignalLevelRead = analogRead(PHOTODETECT);
-    SerialPrintInt(PT_SignalLevelRead); // can be read in Arduino IDE - Serial plotter
+    if (ScanState == Sts_Scan || ScanState == Sts_SingleStep)
+      SerialPrintInt(PT_SignalLevelRead); // can be read in Arduino IDE - Serial plotter
 
     TractionStopActive = digitalRead(TractionStopPin);
 
@@ -220,6 +225,10 @@ void loop() {
 
     switch (ScanState) {
       case Sts_Idle:
+        if (UVLedOn) {
+            analogWrite(11, 0); // Turn off UV LED
+            UVLedOn = false;
+        }
         switch (Ic) {
           case 10:
             DebugPrint("Idle -> Scan"); 
@@ -256,7 +265,7 @@ void loop() {
           case 60:
             DebugPrint("Idle -> Rewind"); 
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
-              Exp = 61; 
+              EventForRPi = 61; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -279,7 +288,7 @@ void loop() {
           case 80:
             DebugPrint("Idle -> FastForward"); 
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
-              Exp = 81; 
+              EventForRPi = 81; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -300,8 +309,13 @@ void loop() {
             }
             break;
           case 90:
-            DebugPrint("Idle -> EmergencyStop"); 
-            ScanState = Sts_EmergencyStop;
+            DebugPrint("Idle -> SetPerfLevelUp"); 
+            ScanState = Sts_SetPerfLevelUp;
+            delay(50);
+            break;
+          case 91:
+            DebugPrint("Idle -> SetPerfLevelDown"); 
+            ScanState = Sts_SetPerfLevelDown;
             delay(50);
             break;
         }
@@ -379,12 +393,22 @@ void loop() {
           digitalWrite(MotorB_Stepper, HIGH);
         }
         break;
-      case Sts_EmergencyStop:
-        DebugPrint("Exiting EmergencyStop state"); 
-        //digitalWrite(MotorA_Stepper, LOW); 
-        //digitalWrite(MotorB_Stepper, LOW); 
-        //digitalWrite(MotorC_Stepper, LOW); 
-        //digitalWrite(MotorA_Neutral, HIGH);
+      case Sts_SetPerfLevelUp:
+        if (PerforationThresholdLevel < 400)
+          PerforationThresholdLevel += 10;
+        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+        DebugPrintAux("Perf. Lvl up to ",PerforationThresholdLevel);
+        EventForRPi = 92; 
+        digitalWrite(13, HIGH);
+        ScanState = Sts_Idle;
+        break;
+      case Sts_SetPerfLevelDown:
+        if (PerforationThresholdLevel > 30)
+          PerforationThresholdLevel -= 10;
+        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+        DebugPrintAux("Perf. Lvl down to ",PerforationThresholdLevel);
+        EventForRPi = 92; 
+        digitalWrite(13, HIGH);
         ScanState = Sts_Idle;
         break;
     }
@@ -412,7 +436,7 @@ boolean RewindFilm(int Ic) {
     digitalWrite(MotorA_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
-    if (RewindSpeed >= 150) {
+    if (RewindSpeed >= 250) {
       RewindSpeed -= 2;
     }
   }
@@ -448,17 +472,18 @@ boolean FilmInFilmgate() {
   boolean retvalue = false;
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
+  UVLedOn = true;
   delay(50);  // Give time to FT to stabilize
 
   PreviousSignalLevel = analogRead(PHOTODETECT);
-  DebugPrintAux("Signal=", PreviousSignalLevel );
+  //DebugPrintAux("Signal=", PreviousSignalLevel );
   digitalWrite(MotorB_Neutral, LOW);  
 
   for (int x = 0; x <= 2*MaxFrameSteps; x++) {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = analogRead(PHOTODETECT);
-    DebugPrintAux("Signal=", SignalLevel );
+    //DebugPrintAux("Signal=", SignalLevel );
     if (abs(SignalLevel - PreviousSignalLevel) > 50) {
       retvalue = true;
       break;
@@ -468,6 +493,7 @@ boolean FilmInFilmgate() {
   digitalWrite(MotorB_Stepper, LOW); 
   digitalWrite(MotorB_Neutral, HIGH);  
   analogWrite(11, 0); // Turn off UV LED
+  UVLedOn = false;
   return(retvalue);
 }
 
@@ -500,7 +526,7 @@ void check() {
     LastFrameSteps = FrameStepsDone; 
     FrameStepsDone = 0; 
     analogWrite (A1, 255); // Light green led
-    Exp = 11; 
+    EventForRPi = 11; 
     digitalWrite(13, HIGH);
   }
   else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
@@ -512,7 +538,7 @@ void check() {
   // -- One step frame --
   if (ScanState == Sts_SingleStep && FrameDetected) {
     DebugPrint("check - Single step mode, exit scan"); 
-    Exp = 0; 
+    EventForRPi = 0; 
     // Leave FrameDetected as true, will be disable in 'scan' after we exit here
     tone(A2, 2000, 35); 
   }
@@ -527,6 +553,7 @@ boolean scan(int Ic) {
   Wire.begin(16);
 
   analogWrite(11, UVLedBrightness);
+  UVLedOn = true;
 
   PT_SignalLevelRead = analogRead(PHOTODETECT);
   unsigned long CurrentTime = micros();
@@ -644,11 +671,10 @@ void receiveEvent(int byteCount) {
 }
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
-void sendexp() {
+void sendEvent() {
 
-  Wire.write(Exp);
-  Exp = 0;
-
+  Wire.write(EventForRPi);
+  EventForRPi = 0;
 }
 
 boolean push(int IncomingIc) {
