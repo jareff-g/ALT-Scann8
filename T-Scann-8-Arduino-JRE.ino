@@ -3,6 +3,8 @@
       © Torulf Holmström Sweden 2022
       project page
       tscann8.torulf.com
+
+      1 Aug 2022 - JRE - Added fast forward function
 */
 
 #include <Wire.h>
@@ -11,7 +13,7 @@
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
 int Pulse = LOW;
-int Ic; // Stores I2C command from Raspberry PI --- Play=10 / Free mode=20 / Rewind movie=60 / One step frame=40 / Forward movie=30
+int Ic; // Stores I2C command from Raspberry PI --- Play=10 / Free mode=20 / Rewind movie=60 / Fast Forward movie=80 / One step frame=40 / Forward movie=30
 
 //------------ Stepper motors control ----------------
 const int stepSpoleA = 2;   // Stepper motor film feed
@@ -31,6 +33,7 @@ int Free = LOW;
 int Spola = LOW;
 int Fram = LOW;
 int Frame = LOW;
+
 int oneFrame = LOW;
 int okFrame = LOW;
 int lastPlay = LOW;
@@ -220,6 +223,13 @@ void loop() {
       Spola = HIGH; delay (500); digitalWrite(neutralA, LOW); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, HIGH); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  backfilm();
     }
 
+    //-------------fast forward the movie -----------
+
+    lastSpola = Spola;
+
+    if (Ic == 80 && lastSpola == LOW && lastPlay == LOW && lastPlay == LOW && lastFram == LOW ) {
+      Spola = HIGH; delay (500); digitalWrite(neutralA, HIGH); digitalWrite(neutralB, HIGH);  digitalWrite(neutralC, LOW); tone(A2, 2000, 200); delay (300); tone(A2, 2000, 200); Ssped = 4000; Ic = 0;  fastforwardfilm();
+    }
 
 
 
@@ -277,6 +287,35 @@ void backfilm() {
   backfilm();
 }
 
+// ------ fast forward the movie ------
+void fastforwardfilm() {
+  Wire.begin(16);  // join I2c bus with address #16
+
+
+  lastSpola = Spola;
+  if (Ic == 80 && lastSpola == HIGH) {
+    Spola = LOW; Ic = 0;
+  }
+
+  lastSpola = Spola;
+  if (Ic == 80 && lastSpola == LOW) {
+    Spola = LOW; digitalWrite(neutralC, HIGH); Ic = 0; delay (100); return;
+  }
+
+
+
+  digitalWrite(stepSpoleC, HIGH); delayMicroseconds(Ssped); digitalWrite(stepSpoleC, LOW);
+
+
+  if (Ssped >= 250) {
+    Ssped = Ssped - 2;
+  }
+
+
+
+  fastforwardfilm();
+}
+
 
 
 // ------------- is the film perforation in position to take picture? ---------------
@@ -310,8 +349,10 @@ void check() {
   }
 
   // -- One step frame --
-  if (oneFrame == HIGH && okFrame == HIGH ) {
-    Ic = 0; Exp = 0; oneFrame = LOW; okFrame = LOW; Play = LOW; tone(A2, 2000, 35); loop();
+  if (ScanState == Sts_SingleStep && okFrame == HIGH ) {
+    Exp = 0; 
+    okFrame = LOW; 
+    tone(A2, 2000, 35);
   }
   return;
 }
