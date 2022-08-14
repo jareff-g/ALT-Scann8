@@ -2,6 +2,9 @@
 # 06/08/2022: 2.1.7: JRE: Add Button for EmergencyStop
 # 10/08/2022: JRE: Comment emergency stop button
 # 10/08/2022: JRE: After capturing image, if exposure has changed since previous capture wait one sec (to allow camera to adapt in automatic mode)
+# 12/08/2022: JRE: Improve automatic exposure adaptation
+# 13/08/2022: JRE Implemented detection of fild loaded via FilmGate, to prevent FF/Rewind
+# 13/08/2022: JRE Move to 2.1.9
 IsRpi = True
 
 if IsRpi:
@@ -36,13 +39,17 @@ FreeWheelActive = False
 BaseDir = '/home/juan/Vídeos/'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
 CurrentFrame = 0  # bild in original code from Torulf
+CurrentScanStartTime = datetime.now()
+CurrentScanStartFrame = 0
 CurrentExposure = 0
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 CurrentExposureStr = "Auto"
 NegativeCaptureStatus = False
 AdvanceMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
+RewindErrorOutstanding = False
 FastForwardActive = False
+FastForwardErrorOutstanding = False
 OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
 ScriptDir = os.path.dirname(sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
@@ -59,6 +66,10 @@ DeltaX = 0
 DeltaY = 0
 WinInitDone=False
 FolderProcess = 0
+PreviewEnabled = True
+FramesPerMinute = 0
+RPiTemp = 0
+last_temp = 1  # Needs to be different from RPiTemp the first time
 
 # Persisted data
 SessionData = {
@@ -107,6 +118,10 @@ if os.path.isfile(PersistedSessionFilename):
             CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
         # when finished, close the file
         PersistedDateFile.close()
+    else:
+        if os.path.isfile(PersistedSessionFilename):
+            os.remove(PersistedSessionFilename)
+
 
 # Create a frame to add a border to the preview
 preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
@@ -195,6 +210,8 @@ def set_new_folder():
         camera.stop_preview()
     while RequestedDir == "" or RequestedDir is None:
         RequestedDir = tkinter.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
+        if RequestedDir is None:
+            return
         if RequestedDir == "":
             tkinter.messagebox.showerror("Error!", "Please specify a name for the folder to be created.")
 
@@ -211,7 +228,7 @@ def set_new_folder():
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     folder_frame_folder_label.config(text=CurrentDir)
-    Scanned_Image_number_label.config(text=str(CurrentFrame))
+    Scanned_Images_number_label.config(text=str(CurrentFrame))
 
 
 
@@ -220,15 +237,22 @@ def set_existing_folder():
     global CurrentFrame
 
     # Disable preview to make tkinter dialogs visible
-    if IsRpi:
+    if IsRpi and PreviewEnabled:
         camera.stop_preview()
     CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
-    folder_frame_folder_label.config(text=CurrentDir)
+    if not CurrentDir:
+        return
+    else:
+        folder_frame_folder_label.config(text=CurrentDir)
 
-    CurrentFrame = int(tkinter.simpledialog.askstring(title="Enter number of last captured frame", prompt="Last frame captured?"))
+    current_frame_str = tkinter.simpledialog.askstring(title="Enter number of last captured frame", prompt="Last frame captured?")
+    if current_frame_str is None:
+        return
+    else:
+        CurrentFrame = int(current_frame_str)
+        Scanned_Images_number_label.config(text=current_frame_str)
 
-    Scanned_Image_number_label.config(text=str(CurrentFrame))
-    if IsRpi:
+    if IsRpi and PreviewEnabled:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -308,18 +332,26 @@ def advance_movie():
 def rewind_movie():
     global RewindMovieActive
     global IsRpi
-
+    global RewindErrorOutstanding
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
+    else:
+        if RewindErrorOutstanding:
+            if IsRpi and PreviewEnabled:
+                camera.stop_preview()
+            tkinter.messagebox.showerror(title='Error during rewind',
+                                                 message='It seems there is film loaded via filmgate. Please route it via upper path.')
+            if IsRpi and PreviewEnabled:
+                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     # Update button text
     if not RewindMovieActive:  # Rewind movie is about to start...
@@ -339,25 +371,65 @@ def rewind_movie():
     Focus_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
     OpenFolder_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
 
-    time.sleep(0.2)
-    if IsRpi:
-        i2c.write_byte_data(16, 60, 0)
+    if RewindErrorOutstanding:
+        RewindErrorOutstanding = False
+    else:
+        time.sleep(0.2)
+        if IsRpi:
+            i2c.write_byte_data(16, 60, 0)
+
+        #Invoke RewindLoop a first time shen rewind starts
+        if RewindMovieActive :
+            win.after(5,RewindLoop)
+
+def RewindLoop():
+    global RewindMovieActive
+    global IsRpi
+    global ArduinoTrigger
+    global RewindErrorOutstanding
+
+    if RewindMovieActive:
+        if IsRpi:
+            try:
+                ArduinoTrigger = i2c.read_byte_data(16, 0)
+            except:
+                # Log error to console
+                curtime = time.ctime()
+                print(curtime + " - Error while checking rewind status from Arduino. Will check again.")
+        if ArduinoTrigger == 61:
+            RewindErrorOutstanding = True
+            print("Received rewind error from Arduino")
+
+        # Invoke RewindLoop one more time, as long as rewind is ongoing
+        if not RewindErrorOutstanding:
+            win.after(5, RewindLoop)
+        else:
+            rewind_movie()
 
 
 def fast_forward_movie():
     global FastForwardActive
     global IsRpi
+    global FastForwardErrorOutstanding
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
+    else:
+        if FastForwardErrorOutstanding:
+            if IsRpi and PreviewEnabled:
+                camera.stop_preview()
+            tkinter.messagebox.showerror(title='Error during fast forward',
+                                                 message='It seems there is film loaded via filmgate. Please route it via upper path.')
+            if IsRpi and PreviewEnabled:
+                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
    # Update button text
     if not FastForwardActive:  # Fast forward movie is about to start...
@@ -376,10 +448,41 @@ def fast_forward_movie():
     Focus_btn.config(state = DISABLED if FastForwardActive else NORMAL)
     OpenFolder_btn.config(state = DISABLED if FastForwardActive else NORMAL)
 
-    # Send instruction to Arduino
-    time.sleep(0.2)
-    if IsRpi:
-        i2c.write_byte_data(16, 80, 0)
+    if FastForwardErrorOutstanding:
+        FastForwardErrorOutstanding = False
+    else:
+        # Send instruction to Arduino
+        time.sleep(0.2)
+        if IsRpi:
+            i2c.write_byte_data(16, 80, 0)
+        #Invoke FastForwardLoop a first time shen fast forward starts
+        if FastForwardActive :
+            win.after(5,FastForwardLoop)
+
+
+def FastForwardLoop():
+    global FastForwardActive
+    global IsRpi
+    global ArduinoTrigger
+    global FastForwardErrorOutstanding
+
+    if FastForwardActive:
+        if IsRpi:
+            try:
+                ArduinoTrigger = i2c.read_byte_data(16, 0)
+            except:
+                # Log error to console
+                curtime = time.ctime()
+                print(curtime + " - Error while checking fast forward status from Arduino. Will check again.")
+        if ArduinoTrigger == 81:
+            FastForwardErrorOutstanding = True
+            print("Received fast forward error from Arduino")
+
+        # Invoke RewindLoop one more time, as long as rewind is ongoing
+        if not FastForwardErrorOutstanding:
+            win.after(5, FastForwardLoop)
+        else:
+            fast_forward_movie()
 
 
 def single_step_movie():
@@ -390,6 +493,13 @@ def emergency_stop():
     if IsRpi:
         i2c.write_byte_data(16, 90, 0)
 
+def update_rpi_temp():
+    global RPiTemp
+    if (IsRpi):
+        file = open('/sys/class/thermal/thermal_zone0/temp', 'r')
+        temp_str = file.readline()
+        file.close()
+        RPiTemp = int(int(temp_str)/100)/10
 
 def negative_capture():
     global NegativeCaptureStatus
@@ -410,36 +520,64 @@ def open_folder():
 
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder")
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.stop_preview()
-        # camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
         FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
         OpenFolder_btn.config(text="Open Folder")
         FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
 
         time.sleep(.5)
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         time.sleep(.5)
 
     OpenFolderActive = not OpenFolderActive
+
+def disable_preview():
+    global PreviewEnabled
+
+    if IsRpi:
+        if PreviewEnabled:
+            camera.stop_preview();
+        else:
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+
+    PreviewEnabled = not PreviewEnabled
+
+   # Update button text
+    if PreviewEnabled:  # Preview is about to be enabled
+        DisablePreview_btn.config(text='Disable Preview')
+    else:
+        DisablePreview_btn.config(text='Enable Preview')  # Otherwise change to default text to start the action
+
 
 def capture():
     global CurrentDir
     global CurrentFrame
     global SessionData
     global PreviousCurrentExposure
+
     os.chdir(CurrentDir)
+
+    if CurrentExposure == 0:
+        while True:     # In case of exposure change, give time for the camera to adapt
+            AuxCurrentExposure = camera.exposure_speed
+            if abs(AuxCurrentExposure - PreviousCurrentExposure) > 1000:
+                curtime = time.ctime()
+                aux_exposure_str = "Auto (" + str(round((AuxCurrentExposure-20000)/2000)) + ")"
+                print(f"{curtime} - Automatic exposure: Waiting for camera to adapt ({AuxCurrentExposure},{aux_exposure_str})")
+                exposure_frame_value_label.config(text=aux_exposure_str)
+                PreviousCurrentExposure = AuxCurrentExposure
+                win.update()
+                time.sleep(0.5)
+            else:
+                break
+
     if IsRpi:
         camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
-    AuxCurrentExposure = camera.exposure_speed
-    if (AuxCurrentExposure != PreviousCurrentExposure):
-        print(f"Camera changed exposure to {AuxCurrentExposure}.")
-        PreviousCurrentExposure = AuxCurrentExposure
-        time.sleep(1)
 
 
 def StartScan():
@@ -447,12 +585,14 @@ def StartScan():
     global CurrentFrame
     global SessionData
     global ScanOngoing
+    global CurrentScanStartFrame
+    global CurrentScanStartTime
 
     if not ScanOngoing and BaseDir == CurrentDir:
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.stop_preview()
         tkinter.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-        if IsRpi:
+        if IsRpi and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         return
 
@@ -463,8 +603,12 @@ def StartScan():
         SessionData["CurrentDate"] = str(datetime.now())
         SessionData["TargetFolder"] = CurrentDir
         SessionData["CurrentFrame"] = str(CurrentFrame)
+        CurrentScanStartTime = datetime.now()
+        CurrentScanStartFrame = CurrentFrame
     else:
         Start_btn.config(text="START Scan")
+        CurrentScanStartTime = 0
+        CurrentScanStartFrame = CurrentFrame;
         LoopDelay = 0
 
     ScanOngoing = not ScanOngoing
@@ -489,7 +633,7 @@ def StartScan():
 
     #Invoke CaptureLoop a first time shen scan starts
     if ScanOngoing :
-        win.after(2,CaptureLoop)
+        win.after(5,CaptureLoop)
 
 def CaptureLoop():
     global CurrentDir
@@ -497,49 +641,73 @@ def CaptureLoop():
     global CurrentExposure
     global SessionData
     global ArduinoTrigger
+    global FramesPerMinute
 
     if ScanOngoing:
-        if IsRpi:
-            try:
-                ArduinoTrigger = i2c.read_byte_data(16, 0)
-            except:
-                # Log error to console
-                curtime = time.ctime()
-                print(curtime + "Error while checking if frame is ready (from Arduino). Will retry.")
-                win.after(0, CaptureLoop)
-                return
+        if ArduinoTrigger != 11:
+            if IsRpi:
+                try:
+                    ArduinoTrigger = i2c.read_byte_data(16, 0)
+                except:
+                    # Log error to console
+                    curtime = time.ctime()
+                    print(curtime + " - Error while checking if new frame coming from Arduino. Will check again.")
+                    win.after(5, CaptureLoop)
+                    return
 
-    if ScanOngoing and ArduinoTrigger == 11:
-        CurrentFrame += 1
-        capture()
-        if IsRpi:
-            try:
-                i2c.write_byte_data(16, 12, 0)
-            except:
-                CurrentFrame -= 1
-                # Log error to console
-                curtime = time.ctime()
-                print(curtime + "Error when telling Arduino to move to next Frame.")
-                print(f"    Frame {CurrentFrame} capture to be tried again.")
-    ArduinoTrigger = 0
+        if ArduinoTrigger == 11:
+            CurrentFrame += 1
+            capture()
+            if IsRpi:
+                try:
+                    i2c.write_byte_data(16, 12, 0)
+                    ArduinoTrigger = 0
+                except:
+                    CurrentFrame -= 1
+                    ArduinoTrigger = 11  # Keep the trigger for next loop
+                    # Log error to console
+                    curtime = time.ctime()
+                    print(curtime + " - Error while telling Arduino to move to next Frame.")
+                    print(f"    Frame {CurrentFrame} capture to be tried again.")
+                    win.after(5, CaptureLoop)
+                    return
 
-    if ScanOngoing:
-        SessionData["CurrentDate"] = str(datetime.now())
-        SessionData["TargetFolder"] = CurrentDir
-        SessionData["CurrentFrame"] = str(CurrentFrame)
-        if CurrentExposureStr == "Auto":
-            SessionData["CurrentExposure"] = CurrentExposureStr
-        else:
-            SessionData["CurrentExposure"] = str(CurrentExposure)
-        with open(PersistedSessionFilename, 'w') as f:
-            json.dump(SessionData, f)
+        if ArduinoTrigger != 11:    # If Arduino trigger still 11 at this point, means it was not communicated properly (exception just before)
+            SessionData["CurrentDate"] = str(datetime.now())
+            SessionData["TargetFolder"] = CurrentDir
+            SessionData["CurrentFrame"] = str(CurrentFrame)
+            if CurrentExposureStr == "Auto":
+                SessionData["CurrentExposure"] = CurrentExposureStr
+            else:
+                SessionData["CurrentExposure"] = str(CurrentExposure)
+            with open(PersistedSessionFilename, 'w') as f:
+                json.dump(SessionData, f)
 
-        # Update number of captured frames
-        Scanned_Image_number_label.config(text=str(CurrentFrame))
-        win.update()
+            # Update number of captured frames
+            Scanned_Images_number_label.config(text=str(CurrentFrame))
+            # Update Frames per Minute
+            scan_period_time = datetime.now() - CurrentScanStartTime
+            scan_period_seconds = scan_period_time.total_seconds()
+            scan_period_frames = CurrentFrame - CurrentScanStartFrame
+            if scan_period_seconds < 10:
+                Scanned_Images_fpm.config(text="??")
+            else:
+                FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
+                Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+            win.update()
 
         # Invoke CaptureLoop one more time, as long as scan is ongoing
         win.after(0, CaptureLoop)
+
+def TempLoop():    # Update RPi temperature every 10 seconds
+    global last_temp
+    update_rpi_temp()
+    if last_temp != RPiTemp:
+        RPi_temp_value_label.config(text=str(RPiTemp))
+        win.update()
+        last_temp = RPiTemp
+
+    win.after(10000, TempLoop)
 
 
 def onFormEvent(event):
@@ -563,7 +731,7 @@ def onFormEvent(event):
     TopWinY = NewWinY
     PreviewWinX = PreviewWinX + DeltaX
     PreviewWinY = PreviewWinY + DeltaY
-    if IsRpi:
+    if IsRpi and PreviewEnabled:
         camera.start_preview(fullscreen = False, window= (PreviewWinX,PreviewWinY,840,720))
     """
     # Uncomment to have the details of each event
@@ -580,12 +748,28 @@ SingleStep_btn = Button(win, text="Single Step", width=8, height=3, command=sing
 SingleStep_btn.place(x=130, y=710)
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
 PosNeg_btn.place(x=230, y=710)
+DisablePreview_btn = Button(win, text="Disable Preview", width=8, height=3, command=disable_preview, activebackground='red', activeforeground='white', wraplength=80)
+DisablePreview_btn.place(x=330, y=710)
 Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
-Rewind_btn.place(x=330, y=710)
+Rewind_btn.place(x=430, y=710)
 FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=5, height=2, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
-FastForward_btn.place(x=430, y=710)
-#EmergencyStop_btn = Button(win, text="Emergency Stop", width=8, height=3, command=emergency_stop, activebackground='red', activeforeground='white', wraplength=80)
-#EmergencyStop_btn.place(x=530, y=710)
+FastForward_btn.place(x=530, y=710)
+OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
+OpenFolder_btn.place(x=630, y=710)
+
+# Create frame to display RPi temp
+RPi_temp_border_frame = Frame(win, width=8, height=2, bg='black')
+RPi_temp_border_frame.pack()
+RPi_temp_border_frame.place(x=770, y=715)
+
+RPi_temp_frame = Frame(RPi_temp_border_frame, width=8, height=2)
+RPi_temp_frame.pack(side=TOP, padx=1, pady=1)
+
+RPi_temp_frame_label = Label(RPi_temp_frame, text='RPi Temp.', width=8, height=1, wraplength=120, bg='white')
+RPi_temp_frame_label.pack(side=TOP)
+RPi_temp_value_label = Label(RPi_temp_frame, text=str(RPiTemp), font=("Arial", 18), width=5, height=1, wraplength=120, bg='white')
+RPi_temp_value_label.pack(side=TOP, fill='x')
+
 Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
 Exit_btn.place(x=925, y=700)
 # Create vertical button column at right
@@ -595,37 +779,6 @@ Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_
 Free_btn.place(x=945, y=150)
 Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green', activeforeground='white', wraplength=80)
 Focus_btn.place(x=945, y=230)
-OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
-OpenFolder_btn.place(x=945, y=555)
-
-# Create frame to select exposure value
-exposure_border_frame = Frame(win, width=8, height=1, bg='white')  # Change to bg to 'black' to have a border
-exposure_border_frame.pack()
-exposure_border_frame.place(x=650, y=700)
-
-exposure_frame = Frame(exposure_border_frame, width=8, height=1, bg='white')
-exposure_frame.pack(side=TOP, padx=1, pady=1)
-
-exposure_frame_title = Frame(exposure_frame, width=8, height=1, bg='white')
-exposure_frame_title.pack()
-exposure_frame_title_label = Label(exposure_frame_title, text='Camera Exposure', width=14, height=1, bg='white')
-exposure_frame_title_label.pack(side=TOP)
-exposure_frame_value_label = Label(exposure_frame_title, text=CurrentExposureStr, width=8, height=1, font=("Arial", 20), wraplength=110, bg='white')
-exposure_frame_value_label.pack(side=TOP)
-
-exposure_frame_buttons = Frame(exposure_frame, width=8, height=1, bg='white')
-exposure_frame_buttons.pack()
-decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'), command=decrease_exp, activebackground='green', activeforeground='white', wraplength=80)
-decrease_exp_btn.pack(side=LEFT)
-auto_exp_btn = Button(exposure_frame_buttons, text='A', width=1, height=1, font=("Arial", 16, 'bold'), command=auto_exp, activebackground='green', activeforeground='white', wraplength=80)
-auto_exp_btn.pack(side=LEFT)
-increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'), command=increase_exp, activebackground='green', activeforeground='white', wraplength=80)
-increase_exp_btn.pack(side=LEFT)
-
-# exposure_frame_aux = Frame(exposure_frame, width=8, height=1, bg='white') # Additional frame just to have some whitespace below buttons
-# exposure_frame_aux.pack(side=TOP)
-# exposure_frame_aux_label = Label(exposure_frame_aux, text='', width=14, height=1, bg='white')
-# exposure_frame_aux_label.pack(side=TOP)
 
 # Create frame to select target folder
 folder_border_frame = Frame(win, width=16, height=8, bg='black')
@@ -650,15 +803,53 @@ existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=5, hei
 existing_folder_btn.pack(side=TOP)
 
 # Create frame to display number of scanned images
-Scanned_Images_border_frame = Frame(win, width=16, height=16, bg='black')
+Scanned_Images_border_frame = Frame(win, width=16, height=2, bg='black')
 Scanned_Images_border_frame.pack()
 Scanned_Images_border_frame.place(x=925, y=460)
-Scanned_Images_frame = Frame(Scanned_Images_border_frame, width=16, height=16)
+
+Scanned_Images_frame = Frame(Scanned_Images_border_frame, width=16, height=4)
 Scanned_Images_frame.pack(side=TOP, padx=1, pady=1)
+
 Scanned_Images_label = Label(Scanned_Images_frame, text='Number of scanned Images', width=16, height=2, wraplength=120, bg='white')
 Scanned_Images_label.pack(side=TOP)
-Scanned_Image_number_label = Label(Scanned_Images_frame, text=str(CurrentFrame), font=("Arial", 24), width=5, height=1, wraplength=120, bg='white')
-Scanned_Image_number_label.pack(side=TOP, fill='x')
+Scanned_Images_number_label = Label(Scanned_Images_frame, text=str(CurrentFrame), font=("Arial", 24), width=5, height=1, wraplength=120, bg='white')
+Scanned_Images_number_label.pack(side=TOP, fill='x')
+
+Scanned_Images_fpm_frame = Frame(Scanned_Images_frame, width=16, height=2)
+Scanned_Images_fpm_frame.pack(side=TOP, padx=1, pady=1)
+Scanned_Images_fpm_label = Label(Scanned_Images_fpm_frame, text='Frames/Min:', font=("Arial", 8), width=12, height=1, wraplength=120, bg='white')
+Scanned_Images_fpm_label.pack(side=LEFT)
+Scanned_Images_fpm = Label(Scanned_Images_fpm_frame, text=str(FramesPerMinute), font=("Arial", 8), width=8, height=1, wraplength=120, bg='white')
+Scanned_Images_fpm.pack(side=LEFT)
+
+# Create frame to select exposure value
+exposure_border_frame = Frame(win, width=16, height=2, bg='black')
+exposure_border_frame.pack()
+exposure_border_frame.place(x=925, y=580)
+
+exposure_frame = Frame(exposure_border_frame, width=16, height=2, bg='white')
+exposure_frame.pack(side=TOP, padx=1, pady=1)
+
+#exposure_frame_title = Frame(exposure_frame, width=8, height=1, bg='white')
+#exposure_frame_title.pack()
+exposure_frame_title_label = Label(exposure_frame, text='Camera Exposure', width=16, height=1, bg='white')
+exposure_frame_title_label.pack(side=TOP)
+exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1, font=("Arial", 16), wraplength=110, bg='white')
+exposure_frame_value_label.pack(side=TOP)
+
+exposure_frame_buttons = Frame(exposure_frame, width=8, height=1, bg='white')
+exposure_frame_buttons.pack(side=TOP)
+decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'), command=decrease_exp, activebackground='green', activeforeground='white', wraplength=80)
+decrease_exp_btn.pack(side=LEFT)
+auto_exp_btn = Button(exposure_frame_buttons, text='A', width=1, height=1, font=("Arial", 16, 'bold'), command=auto_exp, activebackground='green', activeforeground='white', wraplength=80)
+auto_exp_btn.pack(side=LEFT)
+increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'), command=increase_exp, activebackground='green', activeforeground='white', wraplength=80)
+increase_exp_btn.pack(side=LEFT)
+
+# exposure_frame_aux = Frame(exposure_frame, width=8, height=1, bg='white') # Additional frame just to have some whitespace below buttons
+# exposure_frame_aux.pack(side=TOP)
+# exposure_frame_aux_label = Label(exposure_frame_aux, text='', width=14, height=1, bg='white')
+# exposure_frame_aux_label.pack(side=TOP)
 
 
 # Check if existing session on script start
@@ -666,6 +857,7 @@ Scanned_Image_number_label.pack(side=TOP, fill='x')
 # Main Loop
 while not ExitRequested:
     CaptureLoop()
+    TempLoop()
     if IsRpi:
         camera.shutter_speed = CurrentExposure
 
