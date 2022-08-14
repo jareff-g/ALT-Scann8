@@ -1,5 +1,5 @@
 
-IsRpi = True
+IsRpi = False
 
 if IsRpi:
     print("Running on Raspbery Pi")
@@ -16,6 +16,7 @@ if IsRpi:
     #from pygame.locals import *
     import picamera
 import os
+import subprocess
 import time
 import json
 if IsRpi:
@@ -55,6 +56,7 @@ PreviewWinY = 75
 DeltaX = 0
 DeltaY = 0
 WinInitDone=False
+FolderProcess = 0
 
 # Persisted data
 SessionData = {
@@ -152,7 +154,13 @@ def set_free_mode():
         i2c.write_byte_data(16, 20, 0)
 
     FreeWheelActive = not FreeWheelActive
+
+    # Enable/Disable related buttons
     AdvanceMovie_btn.config(state=DISABLED if FreeWheelActive else NORMAL)
+    SingleStep_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
+    Rewind_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
+    FastForward_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
+    Start_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
 
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
@@ -162,12 +170,15 @@ def set_focus_zoom():
         if IsRpi:
             camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoon
         time.sleep(.2)
-        FocusZoomActive = True
     else:
         Focus_btn.config(text='Focus Zoom OFF')
         if IsRpi:
             camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
-        FocusZoomActive = False
+
+    FocusZoomActive = not FocusZoomActive
+
+    # Enable/Disable related buttons
+    Start_btn.config(state = DISABLED if FocusZoomActive else NORMAL)
 
 
 def set_new_folder():
@@ -286,6 +297,13 @@ def advance_movie():
     if IsRpi:
         i2c.write_byte_data(16, 30, 0)
 
+    # Enable/Disable related buttons
+    Free_btn.config(state=DISABLED if AdvanceMovieActive else NORMAL)
+    SingleStep_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
+    Rewind_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
+    FastForward_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
+    Start_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
+
 
 def rewind_movie():
     global RewindMovieActive
@@ -313,6 +331,13 @@ def rewind_movie():
         Rewind_btn.config(text='Rewind')  # Otherwise change to default text to start the action
     # Send instruction to Arduino
     RewindMovieActive = not RewindMovieActive
+
+    # Enable/Disable related buttons
+    Free_btn.config(state=DISABLED if RewindMovieActive else NORMAL)
+    SingleStep_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    AdvanceMovie_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    FastForward_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    Start_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
 
     time.sleep(0.2)
     if IsRpi:
@@ -344,6 +369,13 @@ def fast_forward_movie():
         FastForward_btn.config(text='Fast Forward')  # Otherwise change to default text to start the action
     FastForwardActive = not FastForwardActive
 
+    # Enable/Disable related buttons
+    Free_btn.config(state=DISABLED if FastForwardActive else NORMAL)
+    SingleStep_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    AdvanceMovie_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    Rewind_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    Start_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+
     # Send instruction to Arduino
     time.sleep(0.2)
     if IsRpi:
@@ -374,12 +406,15 @@ def open_folder():
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder")
         if IsRpi:
-            camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
-            os.system("pcmanfm \"%s\"" % BaseDir)
+            if IsRpi:
+                camera.stop_preview()
+            # camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
+            FolderProcess = subprocess.Popen("pcmanfm \"%s\"" % BaseDir)
+            # os.system("pcmanfm \"%s\"" % BaseDir)
     else:
         OpenFolder_btn.config(text="Open Folder")
-        if IsRpi:
-            os.system("killall pcmanfm")
+        # os.system("killall pcmanfm")
+        FolderProcess.kill()
         time.sleep(.5)
         if IsRpi:
             camera.start_preview(fullscreen=False, window=(85, 105, 840, 720))
@@ -404,6 +439,14 @@ def StartScan():
     global SessionData
     global ScanOngoing
 
+    if not ScanOngoing and BaseDir == CurrentDir:
+        if IsRpi:
+            camera.stop_preview()
+        tkinter.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
+        if IsRpi:
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        return
+
     if not ScanOngoing : # Scanner session to be started
         Start_btn.config(text="STOP Scan")
         LoopDelay = 0.05
@@ -419,6 +462,18 @@ def StartScan():
     #Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
     if IsRpi:
         i2c.write_byte_data(16, 10, 0)
+
+    # Enable/Disable related buttons
+    Free_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    SingleStep_btn.config(state = DISABLED if ScanOngoing else NORMAL)
+    AdvanceMovie_btn.config(state = DISABLED if ScanOngoing else NORMAL)
+    Rewind_btn.config(state = DISABLED if ScanOngoing else NORMAL)
+    FastForward_btn.config(state = DISABLED if ScanOngoing else NORMAL)
+    Focus_btn.config(state = DISABLED if ScanOngoing else NORMAL)
+    PosNeg_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    new_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    existing_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    OpenFolder_btn.config(state=DISABLED if FreeWheelActive else NORMAL)
 
     #Invoke CaptureLoop a first time shen scan starts
     if ScanOngoing :
@@ -527,7 +582,7 @@ OpenFolder_btn.place(x=950, y=500)
 # Create frame to select exposure value
 exposure_border_frame = Frame(win, width=8, height=1, bg='white')  # Change to bg to 'black' to have a border
 exposure_border_frame.pack()
-exposure_border_frame.place(x=530, y=700)
+exposure_border_frame.place(x=755, y=700)
 
 exposure_frame = Frame(exposure_border_frame, width=8, height=1, bg='white')
 exposure_frame.pack(side=TOP, padx=1, pady=1)
