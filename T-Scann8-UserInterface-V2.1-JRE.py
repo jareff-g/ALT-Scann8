@@ -6,7 +6,7 @@
 # 13/08/2022: JRE Implemented detection of fild loaded via FilmGate, to prevent FF/Rewind
 # 13/08/2022: JRE Move to 2.1.9
 # 14/08/2022: JRE Implemented function to dynamically modify the perforation level threshold
-IsRpi = False
+IsRpi = True
 
 if IsRpi:
     print("Running on Raspbery Pi")
