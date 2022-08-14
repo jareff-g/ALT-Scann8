@@ -29,7 +29,9 @@
                           - Implemented differentiated commands fro start and end of each action, where needed
       08 Aug 2022 - JRE - Moving to 1.61.8 before doing more changes
                           - Chanhe the way Scan state terminates between frames
-      10 Aug 2022 - JRE - 1.61.8 Working fine, moce to version 1.61.9 to keep 1.61.8 as reference
+      10 Aug 2022 - JRE - 1.61.8 Working fine, move to version 1.61.9 to keep 1.61.8 as reference
+      13 Aug 2022 - JRE - 1.61.9 Implemented detection of film loaded via filmgate, to prevent FF/RWND
+                        - Move to 1.61.10
 */
 
 #include <Wire.h>
@@ -45,27 +47,27 @@ int Pulse = LOW;
 int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Emergency Stop=90
 
 //------------ Stepper motors control ----------------
-const int MotorA_Stepper = 2;   // Stepper motor film feed
+const int MotorA_Stepper = 2;     // Stepper motor film feed
 const int MotorA_Neutral = 3;     // neutral position
-const int MotorB_Stepper = 4; // Stepper motor capstan propulsion
+const int MotorB_Stepper = 4;     // Stepper motor capstan propulsion
 const int MotorB_Neutral = 5;     // neutral position
-const int MotorC_Stepper = 6;   // Stepper motor film winding
+const int MotorC_Stepper = 6;     // Stepper motor film winding
 const int MotorC_Neutral = 7;     // neutral position
-const int MotorA_Direction = 8;    // direction
-const int MotorB_Direction = 9;  // direction
-const int MotorC_Direction = 10;   // direction
+const int MotorA_Direction = 8;   // direction
+const int MotorB_Direction = 9;   // direction
+const int MotorC_Direction = 10;  // direction
 
 
 const int TractionStopPin = 12; // Traction stop
 // Command list
 /*
-int ScanFilm = false;   // Scan film
-int UnlockReels = false;   // Unlock reels
-int Rewind = false;  // Rewind fild (Spola in Torulf original module)
-int FastForward = false;  // FastForward
-int SlowForward = false;   // Advance film (move forward without scanning)
-//int Frame = LOW;  // Unused
-int SingleStep = false; // Single step
+int ScanFilm = false;       // Scan film
+int UnlockReels = false;    // Unlock reels
+int Rewind = false;         // Rewind film (Spola in Torulf original module)
+int FastForward = false;    // FastForward
+int SlowForward = false;    // Advance film (move forward without scanning)
+//int Frame = LOW;          // Unused
+int SingleStep = false;     // Single step
 */
 boolean ReelsUnlocked = false;
 enum ScanState{
@@ -99,28 +101,28 @@ int FilteredSignalLevel = 0;
 
 // ----- Important setting, may need to be adjusted ------
 
-int UVLedBrightness = 250;      // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
-int ScanSpeed = 500 ;     // speed stepper scann Play
+int UVLedBrightness = 250;          // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
+int ScanSpeed = 500 ;               // speed stepper scann Play
 int FetchFrameScanSpeed = 15000;    // Play Slow before trig
-int RewindSpeed = 4000;    // speed Rewind movie
-int PerforationThresholdLevel = 80; // detector pulse level (Torulf: 250)
-int PerforationMaxLevel = 500;    // detector pulse high level, clear film and low contrast film perforation
-int PerforationMinLevel = 200;    // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 200;     // Minimum number of steps, before new frame is exposed - Torulf:200
-int MaxFrameSteps = 250;    // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
-int MaxFrameStepsR8 = 250;    // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 230)
-int MaxFrameStepsS8 = 260;    // JRE: Specific value for Super 8 (Torulf: 290, JRE: 240)
+int RewindSpeed = 4000;             // speed Rewind movie
+int PerforationThresholdLevel = 200; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
+int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
+int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
+int MinFrameSteps = 200;            // Minimum number of steps, before new frame is exposed - Torulf:200
+int MaxFrameSteps = 281;            // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
+int MaxFrameStepsR8 = 270;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 250)
+int MaxFrameStepsS8 = 290;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 260)
 
 
 // -------------------------------------------------------
 
 const int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
-// int Paus = LOW; // JRE: Unused
-int FrameStepsDone = 0;  // Count steps
-int OriginalScanSpeed = ScanSpeed; // restoration original value
-int OriginalMinFrameSteps = MinFrameSteps; // restoration original value
-int FilmTypeFrameCount = 0;  // counts to 2 before S8 / R8 is determined
-int LastFrameSteps = 0; // stores number of steps
+// int Paus = LOW;                          // JRE: Unused
+int FrameStepsDone = 0;                     // Count steps
+int OriginalScanSpeed = ScanSpeed;          // restoration original value
+int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
+int FilmTypeFrameCount = 0;                 // counts to 2 before S8 / R8 is determined
+int LastFrameSteps = 0;                     // stores number of steps
 
 
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
@@ -128,7 +130,7 @@ int TractionStopEventCount = 2;
 
 unsigned long TractionStopWaitingTime = 2000;  // winding wheel C Start value, changed by program.
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
-unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? Need to make some experiments
+unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 unsigned long TractionStopLastWaitEventTime = 0;
 
 int Exp = 0;    // 11 is exposure I2C
@@ -253,27 +255,49 @@ void loop() {
             break;
           case 60:
             DebugPrint("Idle -> Rewind"); 
-            ScanState = Sts_Rewind;
-            delay (500); 
-            digitalWrite(MotorA_Neutral, LOW); 
-            digitalWrite(MotorB_Neutral, HIGH);  
-            digitalWrite(MotorC_Neutral, HIGH); 
-            tone(A2, 2000, 200); 
-            delay (300); 
-            tone(A2, 2000, 200); 
-            RewindSpeed = 4000;
+            if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+              Exp = 61; 
+              digitalWrite(13, HIGH);
+              tone(A2, 2000, 100); 
+              delay (150); 
+              tone(A2, 1000, 100); 
+            }
+            else {
+              ScanState = Sts_Rewind;
+              delay (500); 
+              digitalWrite(MotorA_Neutral, LOW); 
+              digitalWrite(MotorB_Neutral, HIGH);  
+              digitalWrite(MotorC_Neutral, HIGH); 
+              tone(A2, 2200, 100); 
+              delay (150); 
+              tone(A2, 2200, 100); 
+              delay (150); 
+              tone(A2, 2000, 200); 
+              RewindSpeed = 4000;
+            }
             break;
           case 80:
             DebugPrint("Idle -> FastForward"); 
-            ScanState = Sts_FastForward;
-            delay (500); 
-            digitalWrite(MotorA_Neutral, HIGH); 
-            digitalWrite(MotorB_Neutral, HIGH);  
-            digitalWrite(MotorC_Neutral, LOW); 
-            tone(A2, 2000, 200); 
-            delay (300); 
-            tone(A2, 2000, 200); 
-            RewindSpeed = 4000;
+            if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+              Exp = 81; 
+              digitalWrite(13, HIGH);
+              tone(A2, 2000, 100); 
+              delay (150); 
+              tone(A2, 1000, 100); 
+            }
+            else {
+              ScanState = Sts_FastForward;
+              delay (500); 
+              digitalWrite(MotorA_Neutral, HIGH); 
+              digitalWrite(MotorB_Neutral, HIGH);  
+              digitalWrite(MotorC_Neutral, LOW); 
+              tone(A2, 2000, 100); 
+              delay (150); 
+              tone(A2, 2000, 100); 
+              delay (150); 
+              tone(A2, 2200, 200); 
+              RewindSpeed = 4000;
+            }
             break;
           case 90:
             DebugPrint("Idle -> EmergencyStop"); 
@@ -333,16 +357,12 @@ void loop() {
           DebugPrint("Exiting rewind state"); 
           ScanState = Sts_Idle;
         }
-        else
-          DebugPrint("Staying in rewind state"); 
         break;
       case Sts_FastForward:
         if (!FastForwardFilm(Ic)) {
           DebugPrint("Exiting FastForward state"); 
           ScanState = Sts_Idle;
         }
-        else
-          DebugPrint("Staying in FastForward state"); 
         break;
       case Sts_SlowForward:
         if (Ic == 30) { // Stop slow forward
@@ -393,7 +413,7 @@ boolean RewindFilm(int Ic) {
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
     if (RewindSpeed >= 150) {
-      RewindSpeed = RewindSpeed - 2;
+      RewindSpeed -= 2;
     }
   }
   return(retvalue);
@@ -418,6 +438,36 @@ boolean FastForwardFilm(int Ic) {
     if (RewindSpeed >= 250) {
       RewindSpeed = RewindSpeed - 2;
     }
+  return(retvalue);
+}
+
+
+// ------------- is there film loaded in filmgate? ---------------
+boolean FilmInFilmgate() {
+  int SignalLevel,PreviousSignalLevel=0;
+  boolean retvalue = false;
+
+  analogWrite(11, UVLedBrightness); // Turn on UV LED
+  delay(50);  // Give time to FT to stabilize
+
+  PreviousSignalLevel = analogRead(PHOTODETECT);
+  DebugPrintAux("Signal=", PreviousSignalLevel );
+  digitalWrite(MotorB_Neutral, LOW);  
+
+  for (int x = 0; x <= 2*MaxFrameSteps; x++) {
+    digitalWrite(MotorB_Stepper, LOW); 
+    digitalWrite(MotorB_Stepper, HIGH); 
+    SignalLevel = analogRead(PHOTODETECT);
+    DebugPrintAux("Signal=", SignalLevel );
+    if (abs(SignalLevel - PreviousSignalLevel) > 50) {
+      retvalue = true;
+      break;
+    }
+    PreviousSignalLevel = SignalLevel;
+  }
+  digitalWrite(MotorB_Stepper, LOW); 
+  digitalWrite(MotorB_Neutral, HIGH);  
+  analogWrite(11, 0); // Turn off UV LED
   return(retvalue);
 }
 
