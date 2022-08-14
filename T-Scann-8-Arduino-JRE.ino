@@ -27,6 +27,9 @@
                           - Moving to new version in case we need to roll back
       06 Aug 2022 - JRE - Moving to 1.61.7 before doing more changes
                           - Implemented differentiated commands fro start and end of each action, where needed
+      08 Aug 2022 - JRE - Moving to 1.61.8 before doing more changes
+                          - Chanhe the way Scan state terminates between frames
+      10 Aug 2022 - JRE - 1.61.8 Working fine, moce to version 1.61.9 to keep 1.61.8 as reference
 */
 
 #include <Wire.h>
@@ -34,8 +37,9 @@
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
-boolean GlobalDebug = false;
+boolean GlobalDebug = true;
 int MaxDebugRepetitions = 3;
+#define MAX_DEBUG_REPETITIONS_COUNT 30000
 
 int Pulse = LOW;
 int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Emergency Stop=90
@@ -95,15 +99,18 @@ int FilteredSignalLevel = 0;
 
 // ----- Important setting, may need to be adjusted ------
 
-int UVLedBrightness = 250;      // Brightness UV led, may need to be changed depending on LED
-int ScanSpeed = 1000 ;     // speed stepper scann Play
-int InitialScanSpeed = 15000;    // Play Slow before trig
+int UVLedBrightness = 250;      // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
+int ScanSpeed = 500 ;     // speed stepper scann Play
+int FetchFrameScanSpeed = 15000;    // Play Slow before trig
 int RewindSpeed = 4000;    // speed Rewind movie
-int PerforationThresholdLevel = 250; // detector pulse level
+int PerforationThresholdLevel = 80; // detector pulse level (Torulf: 250)
 int PerforationMaxLevel = 500;    // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;    // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 160;     // Minimum number of steps, before new frame is exposed - JRE: Best value for me -> 176
-int MaxFrameSteps = 281;    // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
+int MinFrameSteps = 200;     // Minimum number of steps, before new frame is exposed - Torulf:200
+int MaxFrameSteps = 250;    // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
+int MaxFrameStepsR8 = 250;    // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 230)
+int MaxFrameStepsS8 = 260;    // JRE: Specific value for Super 8 (Torulf: 290, JRE: 240)
+
 
 // -------------------------------------------------------
 
@@ -138,7 +145,7 @@ volatile struct {
 
 void setup() {
 
-  Serial.begin(9600);  // Used to be 9600. Should work with 230400
+  Serial.begin(230400);  // Used to be 9600. Should work with 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendexp);
@@ -198,7 +205,7 @@ void loop() {
 
     TractionStopActive = digitalRead(TractionStopPin);
 
-    if (ScanState == Sts_Idle) {
+    if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
       // Set default state and direction of motors B and C (disabled, clockwise)
       // In the original main loop this was done when the Ic commamnd was NOT Single Step (49). Why???
       if (Ic != 40){  // In case we need the exact behavior of original code
@@ -206,16 +213,6 @@ void loop() {
         digitalWrite(MotorC_Stepper, LOW); 
         digitalWrite(MotorC_Direction, HIGH); 
         digitalWrite(MotorB_Direction, HIGH);
-      }
-  
-      // Next does not make much sense, but this is what the original code does.
-      if (ReelsUnlocked) {
-        digitalWrite(MotorB_Neutral, HIGH);  
-        digitalWrite(MotorC_Neutral, HIGH); 
-      }
-      else {
-        digitalWrite(MotorB_Neutral, LOW);  
-        digitalWrite(MotorC_Neutral, LOW); 
       }
     }
 
@@ -225,9 +222,18 @@ void loop() {
           case 10:
             DebugPrint("Idle -> Scan"); 
             ScanState = Sts_Scan;
-            delay(250); 
+            //delay(250); 
             MinFrameSteps = 5; 
             tone(A2, 2000, 50);
+            break;
+          case 12:  // Continue scan to next frame
+            DebugPrint("Idle -> Scan (next frame)"); 
+            ScanState = Sts_Scan;
+            MinFrameSteps = OriginalMinFrameSteps; 
+            DebugPrint("scan - RPi says GO for next frame"); 
+            ScanSpeed = OriginalScanSpeed; 
+            DebugPrintAux("ScanSpeed",ScanSpeed);
+            FilmTypeFrameCount = FilmTypeFrameCount + 1;
             break;
           case 20:
             DebugPrint("Idle -> UnlockReels"); 
@@ -242,7 +248,7 @@ void loop() {
           case 40:
             DebugPrint("Idle -> SingleStep"); 
             ScanState = Sts_SingleStep;
-            MinFrameSteps = 100; 
+            MinFrameSteps = 100; // Used to be 100
             delay(50);
             break;
           case 60:
@@ -277,15 +283,15 @@ void loop() {
         }
         break;
       case Sts_Scan:
+        if (!TractionStopActive) { // Wind outgoing film on reel C, if traction stop swicth not active
+          delay (5); 
+          digitalWrite(MotorC_Stepper, HIGH);
+        }
         if (Ic == 10) {
           DebugPrint("Exiting Scan state"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         else if (scan(Ic)) {
-          if (!TractionStopActive) { // Wind outgoing film on reel C, if traction stop swicth not active
-            delay (5); 
-            digitalWrite(MotorC_Stepper, HIGH);
-          }
           // Advance to next frame ? (to be checked)
           /* does not seem to be required (loop -> scan -> loop -> scan ...). Not sure how it works. Thanks to extensive use of global variables maybe
           digitalWrite(MotorB_Stepper, LOW); 
@@ -294,10 +300,16 @@ void loop() {
           delay (20); 
           digitalWrite(MotorB_Stepper, LOW);
           */
-          DebugPrint("Staying in Scan state"); 
         }
         else {
           DebugPrint("Exiting Scan state"); 
+          ScanState = Sts_Idle; // Exit scan loop
+        }
+        break;
+      case Sts_SingleStep:
+        if (!scan(Ic)) {
+          DebugPrint("Exiting single step state"); 
+          ScanState = Sts_Idle;
         }
         break;
       case Sts_UnlockReels:
@@ -314,7 +326,6 @@ void loop() {
             digitalWrite(MotorB_Neutral, HIGH); 
             digitalWrite(MotorC_Neutral, HIGH);
           }
-          DebugPrint("Staying in unlock reels state"); 
         }
         break;
       case Sts_Rewind:
@@ -346,21 +357,14 @@ void loop() {
             digitalWrite(MotorC_Stepper, HIGH);
           }
           digitalWrite(MotorB_Stepper, HIGH);
-          //DebugPrint("Staying in slow forward state"); 
-        }
-        break;
-      case Sts_SingleStep:
-        if (!scan(Ic)) {
-          DebugPrint("Exiting single step state"); 
-          ScanState = Sts_Idle;
         }
         break;
       case Sts_EmergencyStop:
         DebugPrint("Exiting EmergencyStop state"); 
-        digitalWrite(MotorA_Stepper, LOW); 
-        digitalWrite(MotorB_Stepper, LOW); 
-        digitalWrite(MotorC_Stepper, LOW); 
-        digitalWrite(MotorA_Neutral, HIGH);
+        //digitalWrite(MotorA_Stepper, LOW); 
+        //digitalWrite(MotorB_Stepper, LOW); 
+        //digitalWrite(MotorC_Stepper, LOW); 
+        //digitalWrite(MotorA_Neutral, HIGH);
         ScanState = Sts_Idle;
         break;
     }
@@ -388,7 +392,7 @@ boolean RewindFilm(int Ic) {
     digitalWrite(MotorA_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
-    if (RewindSpeed >= 250) {
+    if (RewindSpeed >= 150) {
       RewindSpeed = RewindSpeed - 2;
     }
   }
@@ -450,7 +454,7 @@ void check() {
     digitalWrite(13, HIGH);
   }
   else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
-    DebugPrint("check - Previous frame is now done"); 
+    DebugPrint("check - Previous frame has now passed"); 
     Pulse = LOW; 
     analogWrite(A1, 0); // Turn off green led
   }
@@ -496,18 +500,19 @@ boolean scan(int Ic) {
   }
 
   if (FrameStepsDone >= MaxFrameSteps && FilmTypeFrameCount >= 2 ) {
-    ScanSpeed = InitialScanSpeed;
+    ScanSpeed = FetchFrameScanSpeed;
+    DebugPrintAux("ScanSpeed",ScanSpeed);
   }
 
   // Detect whether Super 8 or Regular 8
   if (FilmTypeFrameCount >= 2 && LastFrameSteps > 280 && LastFrameSteps < 300 ) {
     DebugPrint("scan - R8 detected"); 
-    MaxFrameSteps = 270; //R8
+    MaxFrameSteps = MaxFrameStepsR8; //R8
   }
 
   if (FilmTypeFrameCount >= 2 && LastFrameSteps > 300) {
     DebugPrint("scan - S8 detected"); 
-    MaxFrameSteps = 290; //S8
+    MaxFrameSteps = MaxFrameStepsS8; //S8
   }
 
   // Push Phototransistor level unconditionally, we neccesarily are in Scan or SingleStep modes
@@ -535,10 +540,9 @@ boolean scan(int Ic) {
 
   if (TractionStopActive) {
     TractionStopWaitingTime = TractionStopWaitingTime + 200;
-  }
-
-  if (TractionStopActive && TractionStopWaitingTime >= 12000) {
-    TractionStopWaitingTime = 7000;
+    if (TractionStopWaitingTime >= 12000) {
+      TractionStopWaitingTime = 7000;
+    }
   }
 
 
@@ -548,7 +552,6 @@ boolean scan(int Ic) {
     retvalue = false; 
     FrameDetected = false; 
     FilmTypeFrameCount = 0; 
-    LastFrameSteps = 0; 
     MaxFrameSteps = 260; 
     TractionStopWaitingTime = 1000; 
     LastFrameSteps = 0;
@@ -558,7 +561,8 @@ boolean scan(int Ic) {
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        for (int x = 0; x <= 0; x++) {    // Why only 4 times? Maybe because LastTime is not updated
+        LastTime = CurrentTime;
+        for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
@@ -573,6 +577,7 @@ boolean scan(int Ic) {
   if (FrameDetected) {
     FrameDetected = false;
     retvalue = false;
+    DebugPrintAux("LastFrameSteps",LastFrameSteps);
   }
 
   return (retvalue);
@@ -604,11 +609,6 @@ boolean push(int IncomingIc) {
       retvalue = true;
     }
     // else: Queue full: Should not happen. Not sure how this should be handled
-    {
-      static char debug[20];
-      sprintf(debug,"In: %i",IncomingIc);
-      DebugPrint(debug);
-    }
     return(retvalue);
 }
 
@@ -626,29 +626,50 @@ boolean dataInQueue(void) {
   return (CommandQueue.out != CommandQueue.in);
 }
 
-void DebugPrint(const char * str) {
-  static char PreviousDebug[128];
-  static char AuxLine[128];
+void DebugPrintAux(const char * str, int i) {
+  static char PreviousDebug[64];
+  static char AuxLine[64];
+  static char PrintLine[64];
   static int CurrentRepetitions = 0;
   boolean GoPrint = true;
   
   if (!GlobalDebug) return;
+
+  if (strlen(str) >= 50) {
+    Serial.println("Cannot print debug line, too long");
+    return;
+  }
+
+
+  if (i != -1)
+    sprintf(PrintLine,"%s=%i",str,i);
+  else
+    strcpy(PrintLine,str);
   
-  if (strcmp(str,PreviousDebug) == 0) {
-    CurrentRepetitions++;
+  if (strcmp(PrintLine,PreviousDebug) == 0) {
+    if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+      CurrentRepetitions++;
     if (CurrentRepetitions > MaxDebugRepetitions) GoPrint = false;
   }
   else {
     if (CurrentRepetitions > MaxDebugRepetitions) {
-      sprintf(AuxLine,"Previous line repeated %u times",CurrentRepetitions-MaxDebugRepetitions);
+      if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+        sprintf(AuxLine,"Previous line repeated %u times",CurrentRepetitions-MaxDebugRepetitions);
+      else
+        strcpy(AuxLine,"Previous line repeated more than 30,000 times");
       Serial.println(AuxLine);
     }
     CurrentRepetitions = 0;
   }
-  strcpy(PreviousDebug, str);
+  strcpy(PreviousDebug, PrintLine);
 
-  if (GoPrint) Serial.println(str);
+  if (GoPrint) Serial.println(PrintLine);
 }
+
+void DebugPrint(const char * str) {
+  DebugPrintAux(str,-1);
+}
+
 
 void SerialPrintStr(const char * str) {
   if (!GlobalDebug) Serial.println(str);
