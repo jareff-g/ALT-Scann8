@@ -1,4 +1,7 @@
 
+# 06/08/2022: 2.1.7: JRE: Add Button for EmergencyStop
+# 10/08/2022: JRE: Comment emergency stop button
+# 10/08/2022: JRE: After capturing image, if exposure has changed since previous capture wait one sec (to allow camera to adapt in automatic mode)
 IsRpi = True
 
 if IsRpi:
@@ -34,6 +37,7 @@ BaseDir = '/home/juan/Vídeos/'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
 CurrentFrame = 0  # bild in original code from Torulf
 CurrentExposure = 0
+PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 CurrentExposureStr = "Auto"
 NegativeCaptureStatus = False
 AdvanceMovieActive = False
@@ -62,7 +66,7 @@ SessionData = {
     "CurrentDate": str(datetime.now()),
     "TargetFolder": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
-    "CurrentExposure": CurrentExposure
+    "CurrentExposure": str(CurrentExposure)
 }
 # Some initialization
 win = Tk()  # creating the main window and storing the window object in 'win'
@@ -87,6 +91,7 @@ if os.path.isfile(PersistedSessionFilename):
     if Confirm:
         PersistedDateFile = open(PersistedSessionFilename)
         SessionData = json.load(PersistedDateFile)
+        print("SessionData loaded from disk:")
         print(SessionData["IsActive"])
         print(SessionData["CurrentDate"])
         print(SessionData["TargetFolder"])
@@ -94,8 +99,12 @@ if os.path.isfile(PersistedSessionFilename):
         print(SessionData["CurrentExposure"])
         CurrentDir = SessionData["TargetFolder"]
         CurrentFrame = int(SessionData["CurrentFrame"])
-        CurrentExposure = SessionData["CurrentExposure"]
-        CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
+        CurrentExposureStr = SessionData["CurrentExposure"]
+        if CurrentExposureStr == "Auto":
+            CurrentExposure = 0
+        else:
+            CurrentExposure = int(CurrentExposureStr)
+            CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
         # when finished, close the file
         PersistedDateFile.close()
 
@@ -106,8 +115,8 @@ preview_border_frame.place(x=38, y=38)
 
 if IsRpi:
     camera = picamera.PiCamera()
-    camera.sensor_mode=3
-    # settings resulotion higer for HQ camera 2028, 1520
+    camera.sensor_mode = 3
+    # settings resolution higher for HQ camera 2028, 1520
     camera.resolution = (2028, 1520)
     camera.iso = 100
     camera.sharpness = 100
@@ -124,8 +133,8 @@ def exit_app():  # Exit Application
     if IsRpi:
         camera.close()
     # Exiting normally: Delete session info
-    if os.path.isfile(PersistedSessionFilename):
-        os.remove(PersistedSessionFilename)
+    #if os.path.isfile(PersistedSessionFilename):
+    #    os.remove(PersistedSessionFilename)
 
     ExitRequested = True
     win.destroy()
@@ -312,9 +321,6 @@ def rewind_movie():
         if not answer:
             return()
 
-#    if IsRpi:
-#        i2c.write_byte_data(16, 60, 0)
-
     # Update button text
     if not RewindMovieActive:  # Rewind movie is about to start...
         Rewind_btn.config(text='Stop\n<<')  # ...so now we propose to stop it in the button test
@@ -353,10 +359,7 @@ def fast_forward_movie():
         if not answer:
             return()
 
- #   if IsRpi:
- #       i2c.write_byte_data(16, 80, 0)
-
-    # Update button text
+   # Update button text
     if not FastForwardActive:  # Fast forward movie is about to start...
         FastForward_btn.config(text='Stop\n>>')  # ...so now we propose to stop it in the button test
     else:
@@ -383,6 +386,10 @@ def single_step_movie():
     if IsRpi:
         i2c.write_byte_data(16, 40, 0)
 
+def emergency_stop():
+    if IsRpi:
+        i2c.write_byte_data(16, 90, 0)
+
 
 def negative_capture():
     global NegativeCaptureStatus
@@ -404,10 +411,9 @@ def open_folder():
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder")
         if IsRpi:
-            if IsRpi:
-                camera.stop_preview()
-            # camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
-            FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
+            camera.stop_preview()
+        # camera.start_preview(fullscreen=False, window=(85, 105, 0, 0))
+        FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
         OpenFolder_btn.config(text="Open Folder")
         FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
@@ -423,11 +429,17 @@ def capture():
     global CurrentDir
     global CurrentFrame
     global SessionData
+    global PreviousCurrentExposure
     os.chdir(CurrentDir)
     if IsRpi:
         camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
+    AuxCurrentExposure = camera.exposure_speed
+    if (AuxCurrentExposure != PreviousCurrentExposure):
+        print(f"Camera changed exposure to {AuxCurrentExposure}.")
+        PreviousCurrentExposure = AuxCurrentExposure
+        time.sleep(1)
 
 
 def StartScan():
@@ -454,11 +466,8 @@ def StartScan():
     else:
         Start_btn.config(text="START Scan")
         LoopDelay = 0
-    ScanOngoing = not ScanOngoing
 
-    #Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
-    if IsRpi:
-        i2c.write_byte_data(16, 10, 0)
+    ScanOngoing = not ScanOngoing
 
     # Enable/Disable related buttons
     Free_btn.config(state=DISABLED if ScanOngoing else NORMAL)
@@ -470,7 +479,13 @@ def StartScan():
     PosNeg_btn.config(state=DISABLED if ScanOngoing else NORMAL)
     new_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
     existing_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    OpenFolder_btn.config(state=DISABLED if FreeWheelActive else NORMAL)
+    OpenFolder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    Exit_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+
+
+    #Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
+    if IsRpi:
+        i2c.write_byte_data(16, 10, 0)
 
     #Invoke CaptureLoop a first time shen scan starts
     if ScanOngoing :
@@ -512,7 +527,10 @@ def CaptureLoop():
         SessionData["CurrentDate"] = str(datetime.now())
         SessionData["TargetFolder"] = CurrentDir
         SessionData["CurrentFrame"] = str(CurrentFrame)
-        SessionData["CurrentExposure"] = CurrentExposure
+        if CurrentExposureStr == "Auto":
+            SessionData["CurrentExposure"] = CurrentExposureStr
+        else:
+            SessionData["CurrentExposure"] = str(CurrentExposure)
         with open(PersistedSessionFilename, 'w') as f:
             json.dump(SessionData, f)
 
@@ -566,6 +584,8 @@ Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, comma
 Rewind_btn.place(x=330, y=710)
 FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=5, height=2, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
 FastForward_btn.place(x=430, y=710)
+#EmergencyStop_btn = Button(win, text="Emergency Stop", width=8, height=3, command=emergency_stop, activebackground='red', activeforeground='white', wraplength=80)
+#EmergencyStop_btn.place(x=530, y=710)
 Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
 Exit_btn.place(x=925, y=700)
 # Create vertical button column at right
