@@ -21,16 +21,21 @@
                           - Some stuff works erratically, others do not work at all
       05 Aug 2022 - JRE - Moving to 1.61.5 before doign more changes
                           - Renaming of variables for easier understanding of the flow
-      06 Aug 2022 - JRE - Moving to 1.61.6 before doign more changes
+      06 Aug 2022 - JRE - Moving to 1.61.6 before doing more changes
                           - Version mostly working, includign slow forward and Scan
                           - Main issue pending: Frame not detected corretly (too high)
                           - Moving to new version in case we need to roll back
+      06 Aug 2022 - JRE - Moving to 1.61.7 before doing more changes
+                          - Implemented differentiated commands fro start and end of each action, where needed
 */
 
 #include <Wire.h>
 #include <stdio.h>
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
+
+boolean GlobalDebug = false;
+int MaxDebugRepetitions = 3;
 
 int Pulse = LOW;
 int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Emergency Stop=90
@@ -97,7 +102,7 @@ int RewindSpeed = 4000;    // speed Rewind movie
 int PerforationThresholdLevel = 250; // detector pulse level
 int PerforationMaxLevel = 500;    // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;    // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 150;     // Minimum number of steps, before new frame is exposed - JRE: Best value for me -> 176
+int MinFrameSteps = 160;     // Minimum number of steps, before new frame is exposed - JRE: Best value for me -> 176
 int MaxFrameSteps = 281;    // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
 
 // -------------------------------------------------------
@@ -130,8 +135,6 @@ volatile struct {
   int in;
   int out;
 } CommandQueue;
-boolean GlobalDebug = true;
-int MaxDebugRepetitions = 3;
 
 void setup() {
 
@@ -195,7 +198,7 @@ void loop() {
 
     TractionStopActive = digitalRead(TractionStopPin);
 
-//    if (ScanState == Sts_Idle) {
+    if (ScanState == Sts_Idle) {
       // Set default state and direction of motors B and C (disabled, clockwise)
       // In the original main loop this was done when the Ic commamnd was NOT Single Step (49). Why???
       if (Ic != 40){  // In case we need the exact behavior of original code
@@ -214,7 +217,7 @@ void loop() {
         digitalWrite(MotorB_Neutral, LOW);  
         digitalWrite(MotorC_Neutral, LOW); 
       }
-//    }
+    }
 
     switch (ScanState) {
       case Sts_Idle:
@@ -274,7 +277,11 @@ void loop() {
         }
         break;
       case Sts_Scan:
-        if (scan(Ic)) {
+        if (Ic == 10) {
+          DebugPrint("Exiting Scan state"); 
+          ScanState = Sts_Idle; // Exit scan loop
+        }
+        else if (scan(Ic)) {
           if (!TractionStopActive) { // Wind outgoing film on reel C, if traction stop swicth not active
             delay (5); 
             digitalWrite(MotorC_Stepper, HIGH);
@@ -289,11 +296,9 @@ void loop() {
           */
           DebugPrint("Staying in Scan state"); 
         }
-        else if (Ic == 10) {
+        else {
           DebugPrint("Exiting Scan state"); 
-          ScanState = Sts_Idle; // Exit scan loop
         }
-        else delay(800);
         break;
       case Sts_UnlockReels:
         if (Ic == 20) { //request to lock reels again
@@ -303,12 +308,14 @@ void loop() {
           ScanState = Sts_Idle;
           DebugPrint("Exiting Unlock Reels state"); 
         }
-        else if (not ReelsUnlocked){
-          ReelsUnlocked = true;
-          digitalWrite(MotorB_Neutral, HIGH); 
-          digitalWrite(MotorC_Neutral, HIGH);
+        else {
+          if (not ReelsUnlocked){
+            ReelsUnlocked = true;
+            digitalWrite(MotorB_Neutral, HIGH); 
+            digitalWrite(MotorC_Neutral, HIGH);
+          }
+          DebugPrint("Staying in unlock reels state"); 
         }
-        DebugPrint("Staying in unlock reels state"); 
         break;
       case Sts_Rewind:
         if (!RewindFilm(Ic)) {
@@ -508,12 +515,14 @@ boolean scan(int Ic) {
   SerialPrintInt(PT_SignalLevelRead);
 
   // --- Waiting for the green light from the Raspberry Pi, to move forward to the next frame-----
+  /*
   if (Ic == 12) {
     DebugPrint("scan - RPi says GO for next frame"); 
     ScanSpeed = OriginalScanSpeed; 
     MinFrameSteps = OriginalMinFrameSteps; 
     FilmTypeFrameCount = FilmTypeFrameCount + 1;
   }
+  */
 
   // ------------ Stretching film pickup wheel (C) ------
   TractionStopActive = digitalRead(TractionStopPin);
@@ -549,7 +558,7 @@ boolean scan(int Ic) {
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
+        for (int x = 0; x <= 0; x++) {    // Why only 4 times? Maybe because LastTime is not updated
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
@@ -595,6 +604,11 @@ boolean push(int IncomingIc) {
       retvalue = true;
     }
     // else: Queue full: Should not happen. Not sure how this should be handled
+    {
+      static char debug[20];
+      sprintf(debug,"In: %i",IncomingIc);
+      DebugPrint(debug);
+    }
     return(retvalue);
 }
 
