@@ -139,7 +139,7 @@ def set_free_mode():
     if not FreeWheelActive:
         Free_btn.config(text='Lock Reels')
     else:
-        Free_btn.config(text='Free Reels')
+        Free_btn.config(text='Unlock Reels')
 
     if IsRpi:
         i2c.write_byte_data(16, 20, 0)
@@ -280,9 +280,9 @@ def advance_movie():
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='Stop advance movie')  # ...so now we propose to stop it in the button test
+        AdvanceMovie_btn.config(text='Stop movie')  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='Advance Movie')  # Otherwise change to default text to start the action
+        AdvanceMovie_btn.config(text='Movie forward')  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if IsRpi:
@@ -312,14 +312,14 @@ def rewind_movie():
         if not answer:
             return()
 
-    if IsRpi:
-        i2c.write_byte_data(16, 60, 0)
+#    if IsRpi:
+#        i2c.write_byte_data(16, 60, 0)
 
     # Update button text
     if not RewindMovieActive:  # Rewind movie is about to start...
-        Rewind_btn.config(text='Stop rewind')  # ...so now we propose to stop it in the button test
+        Rewind_btn.config(text='Stop\n<<')  # ...so now we propose to stop it in the button test
     else:
-        Rewind_btn.config(text='Rewind')  # Otherwise change to default text to start the action
+        Rewind_btn.config(text='<<')  # Otherwise change to default text to start the action
     # Send instruction to Arduino
     RewindMovieActive = not RewindMovieActive
 
@@ -329,6 +329,9 @@ def rewind_movie():
     AdvanceMovie_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
     FastForward_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
     Start_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    PosNeg_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    Focus_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    OpenFolder_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
 
     time.sleep(0.2)
     if IsRpi:
@@ -350,14 +353,14 @@ def fast_forward_movie():
         if not answer:
             return()
 
-    if IsRpi:
-        i2c.write_byte_data(16, 80, 0)
+ #   if IsRpi:
+ #       i2c.write_byte_data(16, 80, 0)
 
     # Update button text
     if not FastForwardActive:  # Fast forward movie is about to start...
-        FastForward_btn.config(text='Stop Fast Forward')  # ...so now we propose to stop it in the button test
+        FastForward_btn.config(text='Stop\n>>')  # ...so now we propose to stop it in the button test
     else:
-        FastForward_btn.config(text='Fast Forward')  # Otherwise change to default text to start the action
+        FastForward_btn.config(text='>>')  # Otherwise change to default text to start the action
     FastForwardActive = not FastForwardActive
 
     # Enable/Disable related buttons
@@ -366,6 +369,9 @@ def fast_forward_movie():
     AdvanceMovie_btn.config(state = DISABLED if FastForwardActive else NORMAL)
     Rewind_btn.config(state = DISABLED if FastForwardActive else NORMAL)
     Start_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    PosNeg_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    Focus_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    OpenFolder_btn.config(state = DISABLED if FastForwardActive else NORMAL)
 
     # Send instruction to Arduino
     time.sleep(0.2)
@@ -550,22 +556,22 @@ def onFormEvent(event):
     """
 
 # Create horizontal button row at bottom
-AdvanceMovie_btn = Button(win, text="Advance Movie", width=8, height=3, command=advance_movie, activebackground='green', activeforeground='white', wraplength=80)
+AdvanceMovie_btn = Button(win, text="Movie Forward", width=8, height=3, command=advance_movie, activebackground='green', activeforeground='white', wraplength=80)
 AdvanceMovie_btn.place(x=30, y=710)
-SingleStep_btn = Button(win, text="One frame forward", width=8, height=3, command=single_step_movie, activebackground='green', activeforeground='white', wraplength=80)
+SingleStep_btn = Button(win, text="Single Step", width=8, height=3, command=single_step_movie, activebackground='green', activeforeground='white', wraplength=80)
 SingleStep_btn.place(x=130, y=710)
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
 PosNeg_btn.place(x=230, y=710)
-Rewind_btn = Button(win, text="Rewind", width=8, height=3, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
+Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
 Rewind_btn.place(x=330, y=710)
-FastForward_btn = Button(win, text="Fast Forward", width=8, height=3, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
+FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=5, height=2, command=fast_forward_movie, activebackground='green', activeforeground='white', wraplength=80)
 FastForward_btn.place(x=430, y=710)
 Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red', activeforeground='white', wraplength=80)
 Exit_btn.place(x=925, y=700)
 # Create vertical button column at right
-Start_btn = Button(win, text="START Scan", width=12, height=5, command=StartScan, activebackground='green3', activeforeground='white',  wraplength=80)
+Start_btn = Button(win, text="START Scan", width=12, height=5, command=StartScan, activebackground='green', activeforeground='white',  wraplength=80)
 Start_btn.place(x=925, y=40)
-Free_btn = Button(win, text="Free Reels", width=8, height=3, command=set_free_mode, activebackground='green', activeforeground='white', wraplength=80)
+Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green', activeforeground='white', wraplength=80)
 Free_btn.place(x=945, y=150)
 Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green', activeforeground='white', wraplength=80)
 Focus_btn.place(x=945, y=230)
