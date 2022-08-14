@@ -67,7 +67,7 @@ SessionData = {
 # Some initialization
 win = Tk()  # creating the main window and storing the window object in 'win'
 win.title('T-Scann 8')  # setting title of the window
-win.geometry('1280x1024')  # setting the size of the window
+win.geometry('1100x850')  # setting the size of the window
 win.geometry('+50+50')  # setting the position of the window
 
 
@@ -81,6 +81,7 @@ WinInitDone = True
 
 # Check if persisted data file exist: If it does, load it
 if os.path.isfile(PersistedSessionFilename):
+    # Preview not yet displayed, no need to disable to make this popup visible
     Confirm = tkinter.messagebox.askyesno(title='Persisted session data exist',
                                          message='It seems T-Scann 8 was interrupted during the last session.\nDo you want to continue from where it was stopped?')
     if Confirm:
@@ -94,19 +95,13 @@ if os.path.isfile(PersistedSessionFilename):
         CurrentDir = SessionData["TargetFolder"]
         CurrentFrame = int(SessionData["CurrentFrame"])
         CurrentExposure = SessionData["CurrentExposure"]
-        folder_frame_folder_label.config(text=CurrentDir)
-        folder_frame_folder_label.config(text=CurrentDir)
-        exposure_frame_value_label.config(text=CurrentExposureStr)
-        Scanned_Image_number_label.config(text=str(CurrentFrame))
-        if IsRpi:
-            camera.shutter_speed = CurrentExposure
         # when finished, close the file
         PersistedDateFile.close()
 
-# Create a frame to add the preview
-folder_border_frame = Frame(win, width=844, height=634, bg='red')
-folder_border_frame.pack()
-folder_border_frame.place(x=38, y=38)
+# Create a frame to add a border to the preview
+preview_border_frame = Frame(win, width=844, height=634, bg='white')
+preview_border_frame.pack()
+preview_border_frame.place(x=38, y=38)
 
 if IsRpi:
     # Init pygame
@@ -125,7 +120,7 @@ if IsRpi:
     camera.awb_mode = 'off'
     camera.awb_gains = (3.5, 1.0)
     camera.start_preview(fullscreen = False, window= (90,75,840,720))
-
+    camera.shutter_speed = CurrentExposure
 
 
 def exit_app():  # Exit Application
@@ -157,11 +152,11 @@ def set_free_mode():
         i2c.write_byte_data(16, 20, 0)
 
     FreeWheelActive = not FreeWheelActive
+    AdvanceMovie_btn.config(state=DISABLED if FreeWheelActive else NORMAL)
 
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
-    # Uncomment relevant next lines when running on RPi (commented with if IsRpi: )
     if not FocusZoomActive:
         Focus_btn.config(text='Focus Zoom ON')
         if IsRpi:
@@ -184,10 +179,13 @@ def set_new_folder():
     # CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
     CurrentDir = BaseDir
     #folder_frame_folder_label.config(text=CurrentDir)
-    while RequestedDir == "":
+    # Disable preview to make tkinter dialogs visible
+    if IsRpi:
+        camera.stop_preview()
+    while RequestedDir == "" or RequestedDir is None:
         RequestedDir = tkinter.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
         if RequestedDir == "":
-            tkinter.messagebox.showerror("Error!", "Please specify a name for teh folder to be created.")
+            tkinter.messagebox.showerror("Error!", "Please specify a name for the folder to be created.")
 
     NewlyCreatedDir = os.path.join(CurrentDir, RequestedDir)
 
@@ -198,6 +196,9 @@ def set_new_folder():
     else:
         tkinter.messagebox.showerror("Error!", "Folder " + RequestedDir + " already exists!")
 
+    if IsRpi:
+        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+
     folder_frame_folder_label.config(text=CurrentDir)
     Scanned_Image_number_label.config(text=str(CurrentFrame))
 
@@ -207,13 +208,22 @@ def set_existing_folder():
     global CurrentDir
     global CurrentFrame
 
+    # Disable preview to make tkinter dialogs visible
+    if IsRpi:
+        camera.stop_preview()
     CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
     folder_frame_folder_label.config(text=CurrentDir)
 
     CurrentFrame = int(tkinter.simpledialog.askstring(title="Enter number of last captured frame", prompt="Last frame captured?"))
 
     Scanned_Image_number_label.config(text=str(CurrentFrame))
+    if IsRpi:
+        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
+# In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
+# we will convert it to a higher level by using a similar algorythm as the one used by torulf in his original code:
+# We take '20000' as the base reference of zero, with chunks of 2000's up and down moving the counter by one unit
+# 'CurrentExposure' = zero wil always be displayed as 'Auto'
 
 def decrease_exp():
     global CurrentExposure
@@ -224,11 +234,11 @@ def decrease_exp():
     if CurrentExposure >= 2000:
         CurrentExposure -= 2000
     else:
-        CurrentExposure = 0  # If we try to go below zero, back to auto exposure
+        CurrentExposure = 1  # Do not allow zero or below
     if CurrentExposure == 0:
         CurrentExposureStr = "Auto"
     else:
-        CurrentExposureStr = str(CurrentExposure)
+        CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
     if IsRpi:
@@ -256,7 +266,7 @@ def increase_exp():
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
             CurrentExposure = camera.exposure_speed
     CurrentExposure += 2000
-    CurrentExposureStr = str(CurrentExposure)
+    CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
     if IsRpi:
@@ -281,9 +291,15 @@ def rewind_movie():
     global RewindMovieActive
     global IsRpi
 
+
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
+        # Disable preview to make tkinter dialogs visible
+        if IsRpi:
+            camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
+        if IsRpi:
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
 
@@ -309,7 +325,12 @@ def fast_forward_movie():
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
+        # Disable preview to make tkinter dialogs visible
+        if IsRpi:
+            camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
+        if IsRpi:
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
 
@@ -578,7 +599,8 @@ while not ExitRequested:
     #pygame.display.update()
     #time.sleep(LoopDelay)
 
-    lblText = tk.Label(win, text='Form event tester')
+    # Enable events on windows movements, to allow preview to follow
+    lblText = tk.Label(win, text='')
     lblText.pack()
     win.bind('<Configure>', onFormEvent)
 
