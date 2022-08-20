@@ -111,10 +111,10 @@ int RewindSpeed = 4000;             // speed Rewind movie
 int PerforationThresholdLevel = 120; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 200;            // Minimum number of steps, before new frame is exposed - Torulf:200
-int MaxFrameSteps = 281;            // JRE assumption: Maximum number of steps, before new frame is exposed (default setting before sensing Super 8 or Regular 8)
-int MaxFrameStepsR8 = 270;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 250)
-int MaxFrameStepsS8 = 290;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 260)
+int MinFrameSteps = 200;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int DecreaseSpeedFrameStepsR8 = 270;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 250)
+int DecreaseSpeedFrameStepsS8 = 290;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 260)
+int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
 
 // -------------------------------------------------------
@@ -245,6 +245,14 @@ void loop() {
             ScanSpeed = OriginalScanSpeed; 
             DebugPrintAux("ScanSpeed",ScanSpeed);
             FilmTypeFrameCount = FilmTypeFrameCount + 1;
+            break;
+          case 18:  // Select R8 film
+            DebugPrint("Idle -> Select R8"); 
+            DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
+            break;
+          case 19:  // Select S8 film
+            DebugPrint("Idle -> Select S8"); 
+            DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
             break;
           case 20:
             DebugPrint("Idle -> UnlockReels"); 
@@ -479,7 +487,9 @@ boolean FilmInFilmgate() {
   //DebugPrintAux("Signal=", PreviousSignalLevel );
   digitalWrite(MotorB_Neutral, LOW);  
 
-  for (int x = 0; x <= 2*MaxFrameSteps; x++) {
+  // DecreaseSpeedFrameSteps used here as a reference, just to skip two frames in worst case
+  // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
+  for (int x = 0; x <= 2*DecreaseSpeedFrameSteps; x++) {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = analogRead(PHOTODETECT);
@@ -576,21 +586,23 @@ boolean scan(int Ic) {
     FilteredSignalLevel = 0;
   }
 
-  if (FrameStepsDone >= MaxFrameSteps && FilmTypeFrameCount >= 2 ) {
+  if (FrameStepsDone >= DecreaseSpeedFrameSteps && FilmTypeFrameCount >= 2 ) {
     ScanSpeed = FetchFrameScanSpeed;
     DebugPrintAux("ScanSpeed",ScanSpeed);
   }
 
+/*** Disable automatic detection
   // Detect whether Super 8 or Regular 8
   if (FilmTypeFrameCount >= 2 && LastFrameSteps > 280 && LastFrameSteps < 300 ) {
     DebugPrint("scan - R8 detected"); 
-    MaxFrameSteps = MaxFrameStepsR8; //R8
+    DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8; //R8
   }
 
   if (FilmTypeFrameCount >= 2 && LastFrameSteps > 300) {
     DebugPrint("scan - S8 detected"); 
-    MaxFrameSteps = MaxFrameStepsS8; //S8
+    DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8; //S8
   }
+***/
 
   // Push Phototransistor level unconditionally, we neccesarily are in Scan or SingleStep modes
   // JRE 4/8/22: SerialPrint used to inhibit regular writes to Serial while in debug mode
@@ -629,7 +641,7 @@ boolean scan(int Ic) {
     retvalue = false; 
     FrameDetected = false; 
     FilmTypeFrameCount = 0; 
-    MaxFrameSteps = 260; 
+    //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
     TractionStopWaitingTime = 1000; 
     LastFrameSteps = 0;
   }
@@ -638,7 +650,7 @@ boolean scan(int Ic) {
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        LastTime = CurrentTime;
+        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
         for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
