@@ -32,6 +32,8 @@
       10 Aug 2022 - JRE - 1.61.8 Working fine, move to version 1.61.9 to keep 1.61.8 as reference
       13 Aug 2022 - JRE - 1.61.9 Implemented detection of film loaded via filmgate, to prevent FF/RWND
                         - Move to 1.61.10
+      23 Aug 2022 - JRE - (version in GIT) Improvement on outgoing film management durign scan. Collect all 
+                          until traction switch triggers
 */
 
 #include <Wire.h>
@@ -96,7 +98,6 @@ int lastSlowForward = LOW;
 int lastFrame = LOW;
 int LastWstep = 0;  // Unused
 */
-
 int FilteredSignalLevel = 0;
 // int waveC = 0;  // Not used
 // int waveCS = 0;  // Not used
@@ -105,15 +106,15 @@ int FilteredSignalLevel = 0;
 // ----- Important setting, may need to be adjusted ------
 
 int UVLedBrightness = 250;          // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
-int ScanSpeed = 500 ;               // speed stepper scann Play
-int FetchFrameScanSpeed = 15000;    // Play Slow before trig
+unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
+unsigned long FetchFrameScanSpeed = 15000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;             // speed Rewind movie
 int PerforationThresholdLevel = 120; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
 int MinFrameSteps = 200;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 270;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 250)
-int DecreaseSpeedFrameStepsS8 = 290;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 260)
+int DecreaseSpeedFrameStepsR8 = 265;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: ??)
+int DecreaseSpeedFrameStepsS8 = 285;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: ??)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
 
@@ -131,10 +132,13 @@ int LastFrameSteps = 0;                     // stores number of steps
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
 
-unsigned long TractionStopWaitingTime = 2000;  // winding wheel C Start value, changed by program. 2000 in Original code (too much slack for me)
+unsigned long TractionStopWaitingTime = 20000;  // winding wheel C Start value, changed by program. 2000 in Original code (JRE: 20000, after the change in the collecting film code in scan function)
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 unsigned long TractionStopLastWaitEventTime = 0;
+
+unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
+unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
 int EventForRPi = 0;    // 11-Frame ready for exposure, 61-Rewind error, 81-FF error, 92-Confirm perf level change
 
@@ -215,6 +219,8 @@ void loop() {
     if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
       // Set default state and direction of motors B and C (disabled, clockwise)
       // In the original main loop this was done when the Ic commamnd was NOT Single Step (49). Why???
+      // JRE 23-08-2022: Explanation: THis is done mainly for the slow forward function, so that
+      //    setting to high both the motors B and C they will move one step forward
       if (Ic != 40){  // In case we need the exact behavior of original code
         digitalWrite(MotorB_Stepper, LOW); 
         digitalWrite(MotorC_Stepper, LOW); 
@@ -231,19 +237,20 @@ void loop() {
         }
         switch (Ic) {
           case 10:
-            DebugPrint("Idle -> Scan"); 
+            DebugPrint(">>>>>> Scan started by user"); 
             ScanState = Sts_Scan;
             //delay(250); 
+            StartFrameTime = micros();
             MinFrameSteps = 5; 
             tone(A2, 2000, 50);
             break;
           case 12:  // Continue scan to next frame
-            DebugPrint("Idle -> Scan (next frame)"); 
             ScanState = Sts_Scan;
             MinFrameSteps = OriginalMinFrameSteps; 
-            DebugPrint("scan - RPi says GO for next frame"); 
+            StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
-            DebugPrintAux("ScanSpeed",ScanSpeed);
+            DebugPrintAux("Last picture save time",StartFrameTime-StartPictureSaveTime);
+            DebugPrint(">>>>>> Scan next frame");
             FilmTypeFrameCount = FilmTypeFrameCount + 1;
             break;
           case 18:  // Select R8 film
@@ -334,7 +341,7 @@ void loop() {
           digitalWrite(MotorC_Stepper, HIGH);
         }
         if (Ic == 10) {
-          DebugPrint("Exiting Scan state"); 
+          DebugPrint("Scan stopped by user command"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         else if (scan(Ic)) {
@@ -348,7 +355,6 @@ void loop() {
           */
         }
         else {
-          DebugPrint("Exiting Scan state"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         break;
@@ -444,7 +450,7 @@ boolean RewindFilm(int Ic) {
     digitalWrite(MotorA_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
-    if (RewindSpeed >= 250) {
+    if (RewindSpeed >= 200) {
       RewindSpeed -= 2;
     }
   }
@@ -473,6 +479,32 @@ boolean FastForwardFilm(int Ic) {
   return(retvalue);
 }
 
+// ------------- Collect outgoing film
+void CollectOutgoingFilm(void) {
+  // --- New code by JRE (to put the new switch to good use)
+  unsigned long CurrentTime = micros();
+
+  if ((CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
+    do {
+      TractionStopActive = digitalRead(TractionStopPin);
+  
+      if (!TractionStopActive) {
+        digitalWrite(MotorC_Stepper, LOW); 
+        delayMicroseconds(1000);
+        digitalWrite(MotorC_Stepper, HIGH); 
+        delayMicroseconds(1000);
+        digitalWrite(MotorC_Stepper, LOW); 
+      }
+      else {
+        TractionStopLastWaitEventTime = CurrentTime;
+        TractionStopWaitingTime = TractionStopWaitingTime + 2000;
+        if (TractionStopWaitingTime >= 120000)
+          TractionStopWaitingTime = 70000;
+        break;
+      }
+    } while (!TractionStopActive);
+  } 
+}
 
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
@@ -536,6 +568,7 @@ void check() {
     LastFrameSteps = FrameStepsDone; 
     FrameStepsDone = 0; 
     analogWrite (A1, 255); // Light green led
+    StartPictureSaveTime = micros();
     EventForRPi = 11; 
     digitalWrite(13, HIGH);
   }
@@ -618,22 +651,8 @@ boolean scan(int Ic) {
   }
   */
 
-  // ------------ Stretching film pickup wheel (C) ------
-  TractionStopActive = digitalRead(TractionStopPin);
-
-  if (!TractionStopActive && (CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
-    digitalWrite(MotorC_Stepper, LOW); 
-    digitalWrite(MotorC_Stepper, HIGH); 
-    TractionStopLastWaitEventTime = CurrentTime;
-  }
-
-  if (TractionStopActive) {
-    TractionStopWaitingTime = TractionStopWaitingTime + 200;
-    if (TractionStopWaitingTime >= 12000) {
-      TractionStopWaitingTime = 7000;
-    }
-  }
-
+  // ------------ Stretching film pickup wheel (C) ------ 
+  CollectOutgoingFilm();
 
   //-------------ScanFilm-----------
   if (Ic == 10) {   // UI Requesting to end current scan
@@ -650,8 +669,8 @@ boolean scan(int Ic) {
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
-        for (int x = 0; x <= 3; x++) {    // Why only 4 times? Maybe because LastTime is not updated
+//        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
+        for (int x = 0; x <= 3; x++) {    // Originally from 0 to 3. Looping more than that required the collection code above to be optimized
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
@@ -666,7 +685,8 @@ boolean scan(int Ic) {
   if (FrameDetected) {
     FrameDetected = false;
     retvalue = false;
-    DebugPrintAux("LastFrameSteps",LastFrameSteps);
+    DebugPrintAux("Last Frame Steps",LastFrameSteps);
+    DebugPrintAux("Last Frame Detect Time",CurrentTime-StartFrameTime);
   }
 
   return (retvalue);
@@ -730,7 +750,7 @@ void DebugPrintAux(const char * str, int i) {
 
 
   if (i != -1)
-    sprintf(PrintLine,"%s=%i",str,i);
+    sprintf(PrintLine,"%s=%u",str,i);
   else
     strcpy(PrintLine,str);
   
