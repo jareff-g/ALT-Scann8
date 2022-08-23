@@ -8,9 +8,11 @@
 # 14/08/2022: JRE Implemented function to dynamically modify the perforation level threshold
 
 # Global variable to isolate Raspberry Pi specific code, to allow basic UI testing on PC
-IsRpi = False
+SimulatedRun = False
 
-if IsRpi:
+if SimulatedRun:
+    print("Not running on Raspbery Pi, simulated run for UI debugging purposes only")
+else:
     print("Running on Raspbery Pi")
 
 import tkinter as tk
@@ -20,18 +22,20 @@ import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import *
 
-if IsRpi:
+if SimulatedRun:
+    from PIL import ImageTk, Image
+else:
     import picamera
 import os
 import subprocess
 import time
 import json
-if IsRpi:
+if not SimulatedRun:
     import smbus
 from datetime import datetime
 import sys
 
-if IsRpi:
+if not SimulatedRun:
     i2c = smbus.SMBus(1)
 
 # Global variables
@@ -78,6 +82,12 @@ PerforationThresholdLevel = 120 # To be synchronized with Arduino
 save_bg = 'gray'
 save_fg = 'black'
 is_s8 = True
+
+simulated_captured_frame_list=[None]*1000
+raw_simulated_capture_image = ''
+simulated_capture_image = ''
+simulated_capture_label = ''
+simulated_images_in_list = 0
 
 # Persisted data
 SessionData = {
@@ -138,7 +148,7 @@ preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
 preview_border_frame.pack()
 preview_border_frame.place(x=38, y=38)
 
-if IsRpi:
+if not SimulatedRun:
     camera = picamera.PiCamera()
     camera.sensor_mode = 3
     # settings resolution higher for HQ camera 2028, 1520
@@ -154,8 +164,9 @@ if IsRpi:
 
 def exit_app():  # Exit Application
     global ExitRequested
+    global SimulatedRun
     # Uncomment next two lines when running on RPi
-    if IsRpi:
+    if not SimulatedRun:
         camera.close()
     # Exiting normally: Delete session info
     #if os.path.isfile(PersistedSessionFilename):
@@ -171,57 +182,57 @@ def set_free_mode():
     global FreeWheelActive
     global save_bg
     global save_fg
+    global SimulatedRun
 
     if not FreeWheelActive:
         Free_btn.config(text='Lock Reels',bg='red',fg='white')
     else:
         Free_btn.config(text='Unlock Reels',bg=save_bg,fg=save_fg)
 
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 20, 0)
 
     FreeWheelActive = not FreeWheelActive
 
     # Enable/Disable related buttons
-    AdvanceMovie_btn.config(state=DISABLED if FreeWheelActive else NORMAL)
-    SingleStep_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
-    Rewind_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
-    FastForward_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
-    Start_btn.config(state = DISABLED if FreeWheelActive else NORMAL)
+    button_status_change_except(Free_btn, FreeWheelActive)
 
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
     global save_bg
     global save_fg
+    global SimulatedRun
 
     if not FocusZoomActive:
-        Focus_btn.config(text='Focus Zoom ON',bg=save_bg,fg=save_fg)
-        if IsRpi:
+        Focus_btn.config(text='Focus Zoom OFF',bg='red',fg='white')
+        if not SimulatedRun:
             camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoon
         time.sleep(.2)
     else:
-        Focus_btn.config(text='Focus Zoom OFF',bg='red',fg='white')
-        if IsRpi:
+        Focus_btn.config(text='Focus Zoom ON',bg=save_bg,fg=save_fg)
+        if not SimulatedRun:
             camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
 
     FocusZoomActive = not FocusZoomActive
 
     # Enable/Disable related buttons
-    Start_btn.config(state = DISABLED if FocusZoomActive else NORMAL)
+    button_status_change_except(Focus_btn, FocusZoomActive)
 
 
 def set_new_folder():
     global GlobalDir
     global CurrentDir
     global CurrentFrame
+    global SimulatedRun
+
     RequestedDir = ""
 
     # CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
     CurrentDir = BaseDir
     #folder_frame_folder_label.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
-    if IsRpi:
+    if not SimulatedRun:
         camera.stop_preview()
     while RequestedDir == "" or RequestedDir is None:
         RequestedDir = tkinter.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
@@ -239,7 +250,7 @@ def set_new_folder():
     else:
         tkinter.messagebox.showerror("Error!", "Folder " + RequestedDir + " already exists!")
 
-    if IsRpi:
+    if not SimulatedRun:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     folder_frame_folder_label.config(text=CurrentDir)
@@ -250,9 +261,10 @@ def set_new_folder():
 def set_existing_folder():
     global CurrentDir
     global CurrentFrame
+    global SimulatedRun
 
     # Disable preview to make tkinter dialogs visible
-    if IsRpi and PreviewEnabled:
+    if not SimulatedRun and PreviewEnabled:
         camera.stop_preview()
     CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
     if not CurrentDir:
@@ -267,7 +279,7 @@ def set_existing_folder():
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
 
-    if IsRpi and PreviewEnabled:
+    if not SimulatedRun and PreviewEnabled:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -278,9 +290,12 @@ def set_existing_folder():
 def decrease_exp():
     global CurrentExposure
     global CurrentExposureStr
-    if IsRpi:
+    global SimulatedRun
+
+    if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
             CurrentExposure = camera.exposure_speed
+
     if CurrentExposure >= 2000:
         CurrentExposure -= 2000
     else:
@@ -291,7 +306,7 @@ def decrease_exp():
         CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
-    if IsRpi:
+    if not SimulatedRun:
         camera.shutter_speed = CurrentExposure
 
 
@@ -305,27 +320,30 @@ def auto_exp():
     CurrentExposureStr = "Auto"
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
-    if IsRpi:
+    if not SimulatedRun:
         camera.shutter_speed = CurrentExposure
 
 
 def increase_exp():
     global CurrentExposure
     global CurrentExposureStr
-    if IsRpi:
+    global SimulatedRun
+
+    if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
             CurrentExposure = camera.exposure_speed
     CurrentExposure += 2000
     CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
-    if IsRpi:
+    if not SimulatedRun:
         camera.shutter_speed = CurrentExposure
 
 def decrease_perforation_threshold():
     global PerforationThresholdLevel
+    global SimulatedRun
 
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 91, 0)
 
     if (PerforationThresholdLevel > 30):
@@ -333,18 +351,47 @@ def decrease_perforation_threshold():
 
 def increase_perforation_threshold():
     global PerforationThresholdLevel
+    global SimulatedRun
 
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 90, 0)
 
     if (PerforationThresholdLevel < 360):
         PerforationThresholdLevel+=10
 
+def button_status_change_except(except_button, active):
+    if (except_button != Free_btn):
+        Free_btn.config(state=DISABLED if active else NORMAL)
+    if (except_button != SingleStep_btn):
+        SingleStep_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != AdvanceMovie_btn):
+        AdvanceMovie_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != Rewind_btn):
+        Rewind_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != FastForward_btn):
+        FastForward_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != Start_btn):
+        Start_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != PosNeg_btn):
+        PosNeg_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != Focus_btn):
+        Focus_btn.config(state = DISABLED if active else NORMAL)
+    if (except_button != Start_btn):
+        Start_btn.config(state=DISABLED if active else NORMAL)
+    if (except_button != Exit_btn):
+        Exit_btn.config(state=DISABLED if active else NORMAL)
+    if (except_button != DisablePreview_btn):
+        DisablePreview_btn.config(state=DISABLED if active else NORMAL)
+    if (except_button != film_type_S8_btn):
+        film_type_S8_btn.config(state=DISABLED if active else NORMAL)
+    if (except_button != film_type_R8_btn):
+        film_type_R8_btn.config(state=DISABLED if active else NORMAL)
 
 def advance_movie():
     global AdvanceMovieActive
     global save_bg
     global save_fg
+    global SimulatedRun
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
@@ -353,20 +400,16 @@ def advance_movie():
         AdvanceMovie_btn.config(text='Movie forward',bg=save_bg,fg=save_fg)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 30, 0)
 
     # Enable/Disable related buttons
-    Free_btn.config(state=DISABLED if AdvanceMovieActive else NORMAL)
-    SingleStep_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
-    Rewind_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
-    FastForward_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
-    Start_btn.config(state = DISABLED if AdvanceMovieActive else NORMAL)
+    button_status_change_except(AdvanceMovie_btn,AdvanceMovieActive)
 
 
 def rewind_movie():
     global RewindMovieActive
-    global IsRpi
+    global SimulatedRun
     global RewindErrorOutstanding
     global save_bg
     global save_fg
@@ -374,20 +417,20 @@ def rewind_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
     else:
         if RewindErrorOutstanding:
-            if IsRpi and PreviewEnabled:
+            if not SimulatedRun and PreviewEnabled:
                 camera.stop_preview()
             tkinter.messagebox.showerror(title='Error during rewind',
                                                  message='It seems there is film loaded via filmgate. Please route it via upper path.')
-            if IsRpi and PreviewEnabled:
+            if not SimulatedRun and PreviewEnabled:
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     # Update button text
@@ -399,20 +442,13 @@ def rewind_movie():
     RewindMovieActive = not RewindMovieActive
 
     # Enable/Disable related buttons
-    Free_btn.config(state=DISABLED if RewindMovieActive else NORMAL)
-    SingleStep_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    AdvanceMovie_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    FastForward_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    Start_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    PosNeg_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    Focus_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
-    #OpenFolder_btn.config(state = DISABLED if RewindMovieActive else NORMAL)
+    button_status_change_except(Rewind_btn, RewindMovieActive)
 
     if RewindErrorOutstanding:
         RewindErrorOutstanding = False
     else:
         time.sleep(0.2)
-        if IsRpi:
+        if not SimulatedRun:
             i2c.write_byte_data(16, 60, 0)
 
         #Invoke RewindLoop a first time shen rewind starts
@@ -421,7 +457,7 @@ def rewind_movie():
 
 def RewindLoop():
     global RewindMovieActive
-    global IsRpi
+    global SimulatedRun
     global RewindErrorOutstanding
 
     if RewindMovieActive:
@@ -434,7 +470,7 @@ def RewindLoop():
 
 def fast_forward_movie():
     global FastForwardActive
-    global IsRpi
+    global SimulatedRun
     global FastForwardErrorOutstanding
     global save_bg
     global save_fg
@@ -442,20 +478,20 @@ def fast_forward_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
     else:
         if FastForwardErrorOutstanding:
-            if IsRpi and PreviewEnabled:
+            if not SimulatedRun and PreviewEnabled:
                 camera.stop_preview()
             tkinter.messagebox.showerror(title='Error during fast forward',
                                                  message='It seems there is film loaded via filmgate. Please route it via upper path.')
-            if IsRpi and PreviewEnabled:
+            if not SimulatedRun and PreviewEnabled:
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
    # Update button text
@@ -466,21 +502,14 @@ def fast_forward_movie():
     FastForwardActive = not FastForwardActive
 
     # Enable/Disable related buttons
-    Free_btn.config(state=DISABLED if FastForwardActive else NORMAL)
-    SingleStep_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    AdvanceMovie_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    Rewind_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    Start_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    PosNeg_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    Focus_btn.config(state = DISABLED if FastForwardActive else NORMAL)
-    #OpenFolder_btn.config(state = DISABLED if FastForwardActive else NORMAL)
+    button_status_change_except(FastForward_btn,FastForwardActive)
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
     else:
         # Send instruction to Arduino
         time.sleep(0.2)
-        if IsRpi:
+        if not SimulatedRun:
             i2c.write_byte_data(16, 80, 0)
         #Invoke FastForwardLoop a first time shen fast forward starts
         if FastForwardActive :
@@ -489,7 +518,7 @@ def fast_forward_movie():
 
 def FastForwardLoop():
     global FastForwardActive
-    global IsRpi
+    global SimulatedRun
     global FastForwardErrorOutstanding
 
     if FastForwardActive:
@@ -501,16 +530,19 @@ def FastForwardLoop():
 
 
 def single_step_movie():
-    if IsRpi:
+    global SimulatedRun
+    if not SimulatedRun:
         i2c.write_byte_data(16, 40, 0)
 
 def emergency_stop():
-    if IsRpi:
+    global SimulatedRun
+    if not SimulatedRun:
         i2c.write_byte_data(16, 90, 0)
 
 def update_rpi_temp():
+    global SimulatedRun
     global RPiTemp
-    if (IsRpi):
+    if (not SimulatedRun):
         file = open('/sys/class/thermal/thermal_zone0/temp', 'r')
         temp_str = file.readline()
         file.close()
@@ -518,15 +550,16 @@ def update_rpi_temp():
 
 def negative_capture():
     global NegativeCaptureStatus
+    global SimulatedRun
 
-    if NegativeCaptureStatus == False:
-        if IsRpi:
+    if not SimulatedRun:
+        if NegativeCaptureStatus == False:
             camera.image_effect = 'negative'
             camera.awb_gains = (1.7, 1.9)
-    else:
-        if IsRpi:
+        else:
             camera.image_effect = 'none'
             camera.awb_gains = (3.5, 1.0)
+
     NegativeCaptureStatus = not NegativeCaptureStatus
 
 def open_folder():
@@ -534,10 +567,11 @@ def open_folder():
     global FolderProcess
     global save_bg
     global save_fg
+    global SimulatedRun
 
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder",bg='red',fg='white')
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.stop_preview()
         FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
@@ -545,7 +579,7 @@ def open_folder():
         FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
 
         time.sleep(.5)
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         time.sleep(.5)
 
@@ -555,8 +589,9 @@ def disable_preview():
     global PreviewEnabled
     global save_bg
     global save_fg
+    global SimulatedRun
 
-    if IsRpi:
+    if not SimulatedRun:
         if PreviewEnabled:
             camera.stop_preview();
         else:
@@ -571,20 +606,24 @@ def disable_preview():
         DisablePreview_btn.config(text='Enable Preview',bg='red',fg='white')  # Otherwise change to default text to start the action
 
 def set_S8():
+    global SimulatedRun
+
     film_type_S8_btn.config(relief=SUNKEN)
     film_type_R8_btn.config(relief=RAISED)
     is_s8 = True
     time.sleep(0.2)
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 19, 0)
 
 
 def set_R8():
+    global SimulatedRun
+
     film_type_R8_btn.config(relief=SUNKEN)
     film_type_S8_btn.config(relief=RAISED)
     is_s8 = False
     time.sleep(0.2)
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 18, 0)
 
 
@@ -593,6 +632,7 @@ def capture():
     global CurrentFrame
     global SessionData
     global PreviousCurrentExposure
+    global SimulatedRun
 
     os.chdir(CurrentDir)
 
@@ -610,12 +650,94 @@ def capture():
             else:
                 break
 
-    if IsRpi:
+    if not SimulatedRun:
         camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
+def StartScanSimulated():
+    global CurrentDir
+    global CurrentFrame
+    global SessionData
+    global ScanOngoing
+    global CurrentScanStartFrame
+    global CurrentScanStartTime
+    global save_bg
+    global save_fg
+    global simulated_captured_frame_list
+    global simulated_images_in_list
 
+    if not ScanOngoing and BaseDir == CurrentDir:
+        tkinter.messagebox.showerror("Error!", "Please specify a folder where to retrieve captured images for scan simulation.")
+        return
+
+    if not ScanOngoing : # Scanner session to be started
+        Start_btn.config(text="STOP Scan",bg='red',fg='white')
+    else:
+        Start_btn.config(text="START Scan",bg=save_bg,fg=save_fg)
+
+    ScanOngoing = not ScanOngoing
+
+    # Enable/Disable related buttons
+    button_status_change_except(Start_btn, ScanOngoing)
+
+    #Invoke CaptureLoop a first time shen scan starts
+    if ScanOngoing :
+        # Get list of previously captured frames for scan simulation
+        simulated_captured_frame_list = os.listdir(CurrentDir)
+        simulated_captured_frame_list.sort()
+        simulated_images_in_list = len(simulated_captured_frame_list)
+        win.after(500,CaptureLoopSimulated)
+
+
+def CaptureLoopSimulated():
+    global CurrentDir
+    global CurrentFrame
+    global CurrentExposure
+    global SessionData
+    global FramesPerMinute
+    global NewFrameAvailable
+    global ScanOngoing
+    global preview_border_frame
+    global raw_simulated_capture_image
+    global simulated_capture_image
+    global simulated_capture_label
+    global simulated_captured_frame_list
+    global simulated_images_in_list
+
+    if ScanOngoing:
+        os.chdir(CurrentDir)
+        curtime = time.ctime()
+        frame_to_display = CurrentFrame % simulated_images_in_list
+        filename, ext = os.path.splitext(simulated_captured_frame_list[frame_to_display])
+        if ext == '.jpg':
+            print(f"{curtime} - Simulated scan: ({CurrentFrame},{simulated_captured_frame_list[frame_to_display]})")
+            raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
+            raw_simulated_capture_image = raw_simulated_capture_image.resize((844, 634))
+            simulated_capture_image = ImageTk.PhotoImage(raw_simulated_capture_image)
+            # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
+            simulated_capture_label = tk.Label(preview_border_frame, image=simulated_capture_image)
+            # The Pack geometry manager packs widgets in rows or columns.
+            simulated_capture_label.place(x=0, y=0)
+            #simulated_capture_label.pack(side="top", fill="both")
+            #simulated_capture_label.pack()
+        CurrentFrame += 1
+
+        # Update number of captured frames
+        Scanned_Images_number_label.config(text=str(CurrentFrame))
+        # Update Frames per Minute
+        scan_period_time = datetime.now() - CurrentScanStartTime
+        scan_period_seconds = scan_period_time.total_seconds()
+        scan_period_frames = CurrentFrame - CurrentScanStartFrame
+        if scan_period_seconds < 10:
+            Scanned_Images_fpm.config(text="??")
+        else:
+            FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
+            Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+        win.update()
+
+        # Invoke CaptureLoop one more time, as long as scan is ongoing
+        win.after(500, CaptureLoopSimulated)
 def StartScan():
     global CurrentDir
     global CurrentFrame
@@ -625,12 +747,14 @@ def StartScan():
     global CurrentScanStartTime
     global save_bg
     global save_fg
+    global SimulatedRun
+
 
     if not ScanOngoing and BaseDir == CurrentDir:
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.stop_preview()
         tkinter.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-        if IsRpi and PreviewEnabled:
+        if not SimulatedRun and PreviewEnabled:
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         return
 
@@ -652,26 +776,17 @@ def StartScan():
     ScanOngoing = not ScanOngoing
 
     # Enable/Disable related buttons
-    Free_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    SingleStep_btn.config(state = DISABLED if ScanOngoing else NORMAL)
-    AdvanceMovie_btn.config(state = DISABLED if ScanOngoing else NORMAL)
-    Rewind_btn.config(state = DISABLED if ScanOngoing else NORMAL)
-    FastForward_btn.config(state = DISABLED if ScanOngoing else NORMAL)
-    Focus_btn.config(state = DISABLED if ScanOngoing else NORMAL)
-    PosNeg_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    new_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    existing_folder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    #OpenFolder_btn.config(state=DISABLED if ScanOngoing else NORMAL)
-    Exit_btn.config(state=DISABLED if ScanOngoing else NORMAL)
+    button_status_change_except(Start_btn, ScanOngoing)
 
 
     #Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
-    if IsRpi:
+    if not SimulatedRun:
         i2c.write_byte_data(16, 10, 0)
 
     #Invoke CaptureLoop a first time shen scan starts
     if ScanOngoing :
         win.after(5,CaptureLoop)
+
 
 def CaptureLoop():
     global CurrentDir
@@ -680,12 +795,15 @@ def CaptureLoop():
     global SessionData
     global FramesPerMinute
     global NewFrameAvailable
+    global ScanOngoing
+    global SimulatedRun
+
 
     if ScanOngoing:
         if NewFrameAvailable:
             CurrentFrame += 1
             capture()
-            if IsRpi:
+            if not SimulatedRun:
                 try:
                     NewFrameAvailable = False  # Set NewFrameAvailable to False here, to avoid overwriting new frame rom arduino
                     i2c.write_byte_data(16, 12, 0)  # Tell Arduino to move to next frame
@@ -741,8 +859,9 @@ def ArduinoListenLoop():    # Waits for Arduino communicated events adn dispatch
     global FastForwardErrorOutstanding
     global ArduinoTrigger
     global PerforationThresholdLevel
+    global SimulatedRun
 
-    if IsRpi:
+    if not SimulatedRun:
         try:
             ArduinoTrigger = i2c.read_byte_data(16, 0)
         except:
@@ -777,6 +896,7 @@ def onFormEvent(event):
     global DeltaY
     global PreviewWinX
     global PreviewWinY
+    global SimulatedRun
 
     if not WinInitDone:
         return
@@ -789,7 +909,7 @@ def onFormEvent(event):
     TopWinY = NewWinY
     PreviewWinX = PreviewWinX + DeltaX
     PreviewWinY = PreviewWinY + DeltaY
-    if IsRpi and PreviewEnabled:
+    if not SimulatedRun and PreviewEnabled:
         camera.start_preview(fullscreen = False, window= (PreviewWinX,PreviewWinY,840,720))
     """
     # Uncomment to have the details of each event
@@ -798,6 +918,16 @@ def onFormEvent(event):
             print('%s=%s' % (key, getattr(event, key)))
     print()
     """
+
+# SimulatedRun
+# Create marker for film hole
+if SimulatedRun:
+    film_hole = Frame(win, width=1, height=11, bg='black')
+    film_hole.pack(side=TOP, padx=1, pady=1)
+    film_hole.place(x=1, y=300)
+
+    film_hole_label = Label(film_hole, font=("Arial", 8), width=6, height=11, bg='red')
+    film_hole_label.pack(side=TOP)
 
 # Create horizontal button row at bottom
 # Advance movie (through filmgate)
@@ -849,7 +979,10 @@ Exit_btn.place(x=925, y=700)
 
 # Create vertical button column at right
 # Start scan button
-Start_btn = Button(win, text="START Scan", width=14, height=5, command=StartScan, activebackground='green', activeforeground='white',  wraplength=80)
+if SimulatedRun:
+    Start_btn = Button(win, text="START Scan", width=14, height=5, command=StartScanSimulated, activebackground='green', activeforeground='white', wraplength=80)
+else:
+    Start_btn = Button(win, text="START Scan", width=14, height=5, command=StartScan, activebackground='green', activeforeground='white', wraplength=80)
 Start_btn.place(x=925, y=40)
 
 # Create frame to select target folder
@@ -945,10 +1078,10 @@ increase_perforation_threshold_btn.pack(side=LEFT)
 
 # Main Loop
 while not ExitRequested:
-    CaptureLoop()
+    # CaptureLoop()
     TempLoop()
     ArduinoListenLoop()
-    if IsRpi:
+    if not SimulatedRun:
         camera.shutter_speed = CurrentExposure
 
     # Enable events on windows movements, to allow preview to follow
@@ -958,7 +1091,7 @@ while not ExitRequested:
 
     win.mainloop()  # running the loop that works as a trigger
 
-if IsRpi:
+if not SimulatedRun:
     camera.close()
 
 # win.mainloop()  # running the loop that works as a trigger
