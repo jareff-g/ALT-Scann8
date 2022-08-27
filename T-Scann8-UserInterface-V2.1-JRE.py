@@ -6,9 +6,21 @@
 # 13/08/2022: JRE Implemented detection of fild loaded via FilmGate, to prevent FF/Rewind
 # 13/08/2022: JRE Move to 2.1.9
 # 14/08/2022: JRE Implemented function to dynamically modify the perforation level threshold
+# 27/08/2022: JRE, first attempt at migrating to picamera2
+#             - Highlights: Most functionality works fine, but slower (factors to check: SD card, preview mode, save to PNG?)
+#		  - Advance Film: OK (not camera related)
+#		  - Rewind: OK (not camera related)
+#		  - Free wheels: OK (not camera related)
+#		  - Negative film: KO, maybe can be done with overlays?
+#		  - Focus zoom: OK
+#		  - Automatic exposure: OK
+#		  - Scan: OK, but slower
 
 # Global variable to isolate Raspberry Pi specific code, to allow basic UI testing on PC
 SimulatedRun = False
+
+# Global variable to isolate camera specific code (Picamera vs PiCamera2)
+IsPiCamera2 = True
 
 if SimulatedRun:
     print("Not running on Raspbery Pi, simulated run for UI debugging purposes only")
@@ -25,7 +37,12 @@ from tkinter import *
 if SimulatedRun:
     from PIL import ImageTk, Image
 else:
-    import picamera
+    if IsPiCamera2:
+        from picamera2 import Picamera2, Preview
+        from libcamera import Transform
+    else:
+        import picamera
+
 import os
 import subprocess
 import time
@@ -82,7 +99,7 @@ PerforationThresholdLevel = 120 # To be synchronized with Arduino
 save_bg = 'gray'
 save_fg = 'black'
 is_s8 = True
-
+ZoomSize = 0
 simulated_captured_frame_list=[None]*1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
@@ -149,18 +166,26 @@ preview_border_frame.pack()
 preview_border_frame.place(x=38, y=38)
 
 if not SimulatedRun:
-    camera = picamera.PiCamera()
-    camera.sensor_mode = 3
-    # settings resolution higher for HQ camera 2028, 1520
-    camera.resolution = (2028, 1520)
-    camera.iso = 100
-    camera.sharpness = 100
-    camera.hflip = True
-    camera.awb_mode = 'off'
-    camera.awb_gains = (3.5, 1.0)
-    camera.start_preview(fullscreen = False, window= (90,75,840,720))
-    camera.shutter_speed = CurrentExposure
-
+    if IsPiCamera2:
+        camera = Picamera2()
+        camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
+        capture_config = camera.create_still_configuration(main={"size": (2028, 1520)}, transform=Transform(hflip=True))
+        camera.configure(camera.create_preview_configuration(transform=Transform(hflip=True)))
+        camera.set_controls({"ExposureTime": CurrentExposure, "AnalogueGain": 1.0})
+        camera.start(show_preview=True)
+        ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
+    else:
+        camera = picamera.PiCamera()
+        camera.sensor_mode = 3
+        # settings resolution higher for HQ camera 2028, 1520
+        camera.resolution = (2028, 1520)  # not supported in picamera2
+        camera.iso = 100  # not supported in picamera2
+        camera.sharpness = 100
+        camera.hflip = True
+        camera.awb_mode = 'off'
+        camera.awb_gains = (3.5, 1.0)
+        camera.start_preview(fullscreen = False, window= (90,75,840,720))
+        camera.shutter_speed = CurrentExposure
 
 def exit_app():  # Exit Application
     global ExitRequested
@@ -203,17 +228,24 @@ def set_focus_zoom():
     global save_bg
     global save_fg
     global SimulatedRun
+    global ZoomSize
 
     if not FocusZoomActive:
         Focus_btn.config(text='Focus Zoom OFF',bg='red',fg='white')
         if not SimulatedRun:
-            camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoon
-        time.sleep(.2)
+            if IsPiCamera2:
+                camera.set_controls({"ScalerCrop": (int(0.35*ZoomSize[0]),int(0.35*ZoomSize[1])) + (int(0.2*ZoomSize[0]),int(0.2*ZoomSize[1]))})
+            else:
+                camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoom
     else:
         Focus_btn.config(text='Focus Zoom ON',bg=save_bg,fg=save_fg)
         if not SimulatedRun:
-            camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
+            if IsPiCamera2:
+                camera.set_controls({"ScalerCrop": (0,0) + (ZoomSize[0],ZoomSize[1])})
+            else:
+                camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
 
+    time.sleep(.2)
     FocusZoomActive = not FocusZoomActive
 
     # Enable/Disable related buttons
@@ -232,7 +264,7 @@ def set_new_folder():
     CurrentDir = BaseDir
     #folder_frame_folder_label.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
-    if not SimulatedRun:
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
         camera.stop_preview()
     while RequestedDir == "" or RequestedDir is None:
         RequestedDir = tkinter.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
@@ -251,7 +283,8 @@ def set_new_folder():
         tkinter.messagebox.showerror("Error!", "Folder " + RequestedDir + " already exists!")
 
     if not SimulatedRun:
-        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     folder_frame_folder_label.config(text=CurrentDir)
     Scanned_Images_number_label.config(text=str(CurrentFrame))
@@ -264,9 +297,12 @@ def set_existing_folder():
     global SimulatedRun
 
     # Disable preview to make tkinter dialogs visible
-    if not SimulatedRun and PreviewEnabled:
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
         camera.stop_preview()
-    CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
+    if not SimulatedRun:
+        CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
+    else:
+        CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder with snapshots for simulated run")
     if not CurrentDir:
         return
     else:
@@ -279,7 +315,7 @@ def set_existing_folder():
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
 
-    if not SimulatedRun and PreviewEnabled:
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -294,7 +330,12 @@ def decrease_exp():
 
     if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
-            CurrentExposure = camera.exposure_speed
+            if IsPiCamera2:
+                metadata = camera.capture_metadata()
+                CurrentExposure = metadata["ExposureTime"]
+                # CurrentExposure = camera.controls.ExposureTime # Does not work, need to get all metadata
+            else:
+                CurrentExposure = camera.exposure_speed
 
     if CurrentExposure >= 2000:
         CurrentExposure -= 2000
@@ -307,7 +348,10 @@ def decrease_exp():
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
     if not SimulatedRun:
-        camera.shutter_speed = CurrentExposure
+        if IsPiCamera2:
+            camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
+        else:
+            camera.shutter_speed = CurrentExposure
 
 
 
@@ -321,7 +365,10 @@ def auto_exp():
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
     if not SimulatedRun:
-        camera.shutter_speed = CurrentExposure
+        if IsPiCamera2:
+            camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
+        else:
+            camera.shutter_speed = CurrentExposure
 
 
 def increase_exp():
@@ -331,13 +378,21 @@ def increase_exp():
 
     if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
-            CurrentExposure = camera.exposure_speed
+            if IsPiCamera2:
+                metadata = camera.capture_metadata()
+                CurrentExposure = metadata["ExposureTime"]
+                # CurrentExposure = camera.controls.ExposureTime
+            else:
+                CurrentExposure = camera.exposure_speed
     CurrentExposure += 2000
     CurrentExposureStr = str(round((CurrentExposure-20000)/2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
     if not SimulatedRun:
-        camera.shutter_speed = CurrentExposure
+        if IsPiCamera2:
+            camera.controls.ExposureTime = CurrentExposure
+        else:
+            camera.shutter_speed = CurrentExposure
 
 def decrease_perforation_threshold():
     global PerforationThresholdLevel
@@ -417,20 +472,20 @@ def rewind_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if not SimulatedRun and PreviewEnabled:
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
     else:
         if RewindErrorOutstanding:
-            if not SimulatedRun and PreviewEnabled:
+            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
                 camera.stop_preview()
             tkinter.messagebox.showerror(title='Error during rewind',
                                                  message='It seems there is film loaded via filmgate. Please route it via upper path.')
-            if not SimulatedRun and PreviewEnabled:
+            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     # Update button text
@@ -478,23 +533,23 @@ def fast_forward_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.stop_preview()
         answer = tkinter.messagebox.askyesno(title='Security check ',  message='Have you routed the film via the upper path?')
-        if not SimulatedRun and PreviewEnabled:
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
             return()
     else:
         if FastForwardErrorOutstanding:
-            if not SimulatedRun and PreviewEnabled:
+            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
                 camera.stop_preview()
             tkinter.messagebox.showerror(title='Error during fast forward',
                                                  message='It seems there is film loaded via filmgate. Please route it via upper path.')
-            if not SimulatedRun and PreviewEnabled:
+            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
-   # Update button text
+    # Update button text
     if not FastForwardActive:  # Fast forward movie is about to start...
         FastForward_btn.config(text='Stop\n>>',bg='red',fg='white')  # ...so now we propose to stop it in the button test
     else:
@@ -553,12 +608,13 @@ def negative_capture():
     global SimulatedRun
 
     if not SimulatedRun:
-        if NegativeCaptureStatus == False:
-            camera.image_effect = 'negative'
-            camera.awb_gains = (1.7, 1.9)
-        else:
-            camera.image_effect = 'none'
-            camera.awb_gains = (3.5, 1.0)
+        if not IsPiCamera2:
+            if NegativeCaptureStatus == False:
+                camera.image_effect = 'negative'
+                camera.awb_gains = (1.7, 1.9)
+            else:
+                camera.image_effect = 'none'
+                camera.awb_gains = (3.5, 1.0)
 
     NegativeCaptureStatus = not NegativeCaptureStatus
 
@@ -571,7 +627,7 @@ def open_folder():
 
     if not OpenFolderActive :
         OpenFolder_btn.config(text="Close Folder",bg='red',fg='white')
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.stop_preview()
         FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
@@ -579,7 +635,7 @@ def open_folder():
         FolderProcess.terminate()  # This does not work, neither do some other means found on the internet. To be done (not too critical)
 
         time.sleep(.5)
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         time.sleep(.5)
 
@@ -595,7 +651,10 @@ def disable_preview():
         if PreviewEnabled:
             camera.stop_preview();
         else:
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+            if IsPiCamera2:
+                camera.start_preview(True)
+            else:
+                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
     PreviewEnabled = not PreviewEnabled
 
@@ -638,7 +697,12 @@ def capture():
 
     if CurrentExposure == 0:
         while True:     # In case of exposure change, give time for the camera to adapt
-            AuxCurrentExposure = camera.exposure_speed
+            if IsPiCamera2:
+                metadata = camera.capture_metadata()
+                AuxCurrentExposure = metadata["ExposureTime"]
+                # AuxCurrentExposure = camera.controls.ExposureTime # Does not work, need to get all metadata
+            else:
+                AuxCurrentExposure = camera.exposure_speed
             if abs(AuxCurrentExposure - PreviousCurrentExposure) > 1000:
                 curtime = time.ctime()
                 aux_exposure_str = "Auto (" + str(round((AuxCurrentExposure-20000)/2000)) + ")"
@@ -651,7 +715,10 @@ def capture():
                 break
 
     if not SimulatedRun:
-        camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+        if IsPiCamera2:
+            camera.switch_mode_and_capture_file(capture_config,'picture-%05d.jpg' % CurrentFrame)
+        else:
+            camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
@@ -751,10 +818,10 @@ def StartScan():
 
 
     if not ScanOngoing and BaseDir == CurrentDir:
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.stop_preview()
         tkinter.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-        if not SimulatedRun and PreviewEnabled:
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         return
 
@@ -909,8 +976,9 @@ def onFormEvent(event):
     TopWinY = NewWinY
     PreviewWinX = PreviewWinX + DeltaX
     PreviewWinY = PreviewWinY + DeltaY
-    if not SimulatedRun and PreviewEnabled:
-        camera.start_preview(fullscreen = False, window= (PreviewWinX,PreviewWinY,840,720))
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+
     """
     # Uncomment to have the details of each event
     for key in dir(event):
@@ -921,12 +989,13 @@ def onFormEvent(event):
 
 # SimulatedRun
 # Create marker for film hole
-if SimulatedRun:
+# if SimulatedRun:
     film_hole = Frame(win, width=1, height=11, bg='black')
     film_hole.pack(side=TOP, padx=1, pady=1)
-    film_hole.place(x=1, y=300)
+    film_hole.place(x=4, y=300)
 
-    film_hole_label = Label(film_hole, font=("Arial", 8), width=6, height=11, bg='red')
+    # film_hole_label = Label(film_hole, justify=LEFT, font=("Arial", 8), text="S\rP\rR  H\rO  O\rC  L\rK  E\rE\rT", width=5, height=11, bg='red' , fg='white')
+    film_hole_label = Label(film_hole, justify=LEFT, font=("Arial", 8), width=5, height=11, bg='red' , fg='white')
     film_hole_label.pack(side=TOP)
 
 # Create horizontal button row at bottom
@@ -1082,12 +1151,16 @@ while not ExitRequested:
     TempLoop()
     ArduinoListenLoop()
     if not SimulatedRun:
-        camera.shutter_speed = CurrentExposure
+        if IsPiCamera2:
+            camera.controls.ExposureTime = CurrentExposure
+        else:
+            camera.shutter_speed = CurrentExposure
 
     # Enable events on windows movements, to allow preview to follow
     lblText = tk.Label(win, text='')
     lblText.pack()
-    win.bind('<Configure>', onFormEvent)
+    if not IsPiCamera2:
+    	win.bind('<Configure>', onFormEvent)
 
     win.mainloop()  # running the loop that works as a trigger
 
