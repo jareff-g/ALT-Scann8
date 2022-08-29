@@ -38,8 +38,12 @@ if SimulatedRun:
     from PIL import ImageTk, Image
 else:
     if IsPiCamera2:
-        from picamera2 import Picamera2, Preview
-        from libcamera import Transform
+        try:
+            from picamera2 import Picamera2, Preview
+            from libcamera import Transform
+        except:
+            IsPiCamera2 = False
+            import picamera
     else:
         import picamera
 
@@ -92,6 +96,7 @@ DeltaY = 0
 WinInitDone=False
 FolderProcess = 0
 PreviewEnabled = True
+PendingPreviewStatusChange = False
 FramesPerMinute = 0
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
@@ -156,8 +161,11 @@ if os.path.isfile(PersistedSessionFilename):
         # when finished, close the file
         PersistedDateFile.close()
     else:
-        if os.path.isfile(PersistedSessionFilename):
-            os.remove(PersistedSessionFilename)
+        try:
+            if os.path.isfile(PersistedSessionFilename):
+                os.remove(PersistedSessionFilename)
+        except:
+            print("Error deleting persistent session data file ({PersistedSessionFilename})")
 
 
 # Create a frame to add a border to the preview
@@ -170,7 +178,11 @@ if not SimulatedRun:
         camera = Picamera2()
         camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
         capture_config = camera.create_still_configuration(main={"size": (2028, 1520)}, transform=Transform(hflip=True))
-        camera.configure(camera.create_preview_configuration(transform=Transform(hflip=True)))
+        preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
+        if PreviewEnabled:
+            camera.configure(preview_config)
+        else:
+            camera.configure(capture_config)
         camera.set_controls({"ExposureTime": CurrentExposure, "AnalogueGain": 1.0})
         camera.start(show_preview=True)
         ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
@@ -641,6 +653,28 @@ def open_folder():
 
     OpenFolderActive = not OpenFolderActive
 
+def handle_preview_stop_completion():
+    global PendingPreviewStatusChange
+
+    print("Stop preview completed - 1")
+
+    if (PendingPreviewStatusChange):
+        print("Stop preview completed - 2")
+        result = camera.wait()
+        PendingPreviewStatusChange = False
+
+def handle_preview_start_completion():
+    global PendingPreviewStatusChange
+
+    print("Start preview completed - 1")
+
+    if (PendingPreviewStatusChange):
+        print("Start preview completed - 2")
+        result = camera.wait()
+        camera.start_preview(True)
+        PendingPreviewStatusChange = False
+
+
 def disable_preview():
     global PreviewEnabled
     global save_bg
@@ -650,9 +684,13 @@ def disable_preview():
     if not SimulatedRun:
         if PreviewEnabled:
             camera.stop_preview();
+            if IsPiCamera2:
+                camera.switch_mode(capture_config, wait=False, signal_function=handle_preview_stop_completion)
+                PendingPreviewStatusChange = True
         else:
             if IsPiCamera2:
-                camera.start_preview(True)
+                camera.switch_mode(preview_config, wait=False, signal_function=handle_preview_start_completion)
+                PendingPreviewStatusChange = True
             else:
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
@@ -716,7 +754,11 @@ def capture():
 
     if not SimulatedRun:
         if IsPiCamera2:
-            camera.switch_mode_and_capture_file(capture_config,'picture-%05d.jpg' % CurrentFrame)
+            if PreviewEnabled:
+                camera.switch_mode_and_capture_file(capture_config,'picture-%05d.jpg' % CurrentFrame)
+            else:
+                time.sleep(.2)  # Allow time to stabilize image, too fast with PiCamera2. Need to refine this (shorter time, Arduino specific slowdown)
+                camera.capture_file('picture-%05d.jpg' % CurrentFrame)
         else:
             camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
     SessionData["CurrentDate"] = str(datetime.now())
@@ -836,7 +878,6 @@ def StartScan():
         CurrentScanStartFrame = CurrentFrame
     else:
         Start_btn.config(text="START Scan",bg=save_bg,fg=save_fg)
-        CurrentScanStartTime = 0
         CurrentScanStartFrame = CurrentFrame;
         LoopDelay = 0
 
@@ -928,30 +969,31 @@ def ArduinoListenLoop():    # Waits for Arduino communicated events adn dispatch
     global PerforationThresholdLevel
     global SimulatedRun
 
-    if not SimulatedRun:
-        try:
-            ArduinoTrigger = i2c.read_byte_data(16, 0)
-        except:
-            # Log error to console
-            curtime = time.ctime()
-            print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
-    if ArduinoTrigger == 11:    # New Frame available
-        NewFrameAvailable = True
-    elif ArduinoTrigger == 92:    # PerforationThresholdLevel value, next byte contains Arduino value
-        #PerforationThresholdLevel = i2c.read_byte_data(16, 0)
-        print("Received perforation threshold level event from Arduino")
-        perforation_threshold_value_label.config(text=str(PerforationThresholdLevel))
-        win.update()
-    elif ArduinoTrigger == 61:    # Error during Rewind
-        RewindErrorOutstanding = True
-        print("Received rewind error from Arduino")
-    elif ArduinoTrigger == 81:    # Error during FastForward
-        FastForwardErrorOutstanding = True
-        print("Received fast forward error from Arduino")
+    if not PendingPreviewStatusChange:
+        if not SimulatedRun:
+            try:
+                ArduinoTrigger = i2c.read_byte_data(16, 0)
+            except:
+                # Log error to console
+                curtime = time.ctime()
+                print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
+        if ArduinoTrigger == 11:    # New Frame available
+            NewFrameAvailable = True
+        elif ArduinoTrigger == 92:    # PerforationThresholdLevel value, next byte contains Arduino value
+            #PerforationThresholdLevel = i2c.read_byte_data(16, 0)
+            print("Received perforation threshold level event from Arduino")
+            perforation_threshold_value_label.config(text=str(PerforationThresholdLevel))
+            win.update()
+        elif ArduinoTrigger == 61:    # Error during Rewind
+            RewindErrorOutstanding = True
+            print("Received rewind error from Arduino")
+        elif ArduinoTrigger == 81:    # Error during FastForward
+            FastForwardErrorOutstanding = True
+            print("Received fast forward error from Arduino")
 
-    ArduinoTrigger = 0
+        ArduinoTrigger = 0
 
-    win.after(5, ArduinoListenLoop)
+    win.after(500, ArduinoListenLoop)
 
 
 def onFormEvent(event):
@@ -989,7 +1031,7 @@ def onFormEvent(event):
 
 # SimulatedRun
 # Create marker for film hole
-# if SimulatedRun:
+if SimulatedRun:
     film_hole = Frame(win, width=1, height=11, bg='black')
     film_hole.pack(side=TOP, padx=1, pady=1)
     film_hole.place(x=4, y=300)
@@ -1012,7 +1054,7 @@ SingleStep_btn.place(x=130, y=710)
 PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green', activeforeground='white', wraplength=80)
 PosNeg_btn.place(x=230, y=710)
 # Disable Pi Camera preview (might hide some stuff)
-DisablePreview_btn = Button(win, text="Disable Preview", width=8, height=3, command=disable_preview, activebackground='red', activeforeground='white', wraplength=80)
+DisablePreview_btn = Button(win, text="Disable Preview", width=8, height=3, command=disable_preview, activebackground='green', activeforeground='white', wraplength=80)
 DisablePreview_btn.place(x=330, y=710)
 # Rewind movie (via upper path, outside of film gate)
 Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, command=rewind_movie, activebackground='green', activeforeground='white', wraplength=80)
@@ -1150,12 +1192,13 @@ while not ExitRequested:
     # CaptureLoop()
     TempLoop()
     ArduinoListenLoop()
+    """
     if not SimulatedRun:
         if IsPiCamera2:
             camera.controls.ExposureTime = CurrentExposure
         else:
             camera.shutter_speed = CurrentExposure
-
+    """
     # Enable events on windows movements, to allow preview to follow
     lblText = tk.Label(win, text='')
     lblText.pack()
