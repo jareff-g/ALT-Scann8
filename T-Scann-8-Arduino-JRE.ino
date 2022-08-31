@@ -17,7 +17,7 @@
                           - Secondary switch per state to handle command
       04 Aug 2022 - JRE - Moving to 1.61.4 before bug changes
       04 Aug 2022 - JRE - Reorganized overall structure
-                          - Converted main loop with variables to 2 switches, one for the state, another for the incoming command
+                          - Converted main loop with variables to 2 switches, one for the state, other for incoming command
                           - Some stuff works erratically, others do not work at all
       05 Aug 2022 - JRE - Moving to 1.61.5 before doign more changes
                           - Renaming of variables for easier understanding of the flow
@@ -34,6 +34,18 @@
                         - Move to 1.61.10
       23 Aug 2022 - JRE - (version in GIT) Improvement on outgoing film management durign scan. Collect all 
                           until traction switch triggers
+      31 Aug 2022 - JRE - Nice and easy improvement in frame detection
+                        - Increase MinFrameSteps (WstepV) from 176 to 270-275
+                        - Logic behind: 
+                          1/ There is no reason why, for a given build, the capstan will move LESS than n steps to get 
+                             the next frame
+                            1.1/ MORE than n steps might happen (if film slides over capstan), and should handled
+                          2/ Number of steps n depends on stepper motor model and configuration, plus capstan radius
+                          3/ Usign the standard components advised by Torulf, this number is around 270-275
+                          4/ The minumum number of step considered in the Arduino program (as of 1.61) is 176 (WstepV)
+                          5/ Because of this, it sometimes happen (due to factors like sub-optimal FT isolation) that 
+                             the frame is detected before reaching 270 steps (this is typically when the lower part of 
+                             the frame is off limits in the captured image)
 */
 
 #include <Wire.h>
@@ -107,14 +119,16 @@ int FilteredSignalLevel = 0;
 
 int UVLedBrightness = 250;          // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
-unsigned long FetchFrameScanSpeed = 15000;    // Play Slow before trig (Original 15000)
+unsigned long FetchFrameScanSpeed = 25000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;             // speed Rewind movie
-int PerforationThresholdLevel = 120; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
+int PerforationThresholdLevel = 160; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
-int MinFrameSteps = 200;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 265;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: ??)
-int DecreaseSpeedFrameStepsS8 = 285;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: ??)
+int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsS8 = 280;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int DecreaseSpeedFrameStepsR8 = 260;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: ??)
+int DecreaseSpeedFrameStepsS8 = 280;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: ??)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
 
@@ -154,7 +168,11 @@ volatile struct {
 
 void setup() {
 
-  Serial.begin(9600);  // Used to be 9600. Should work with 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
+  // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
+  if (GlobalDebug)
+    Serial.begin(115200);  // As fast as possible for debug, otherwise it slows down execution
+  else
+    Serial.begin(9600);  // 9600 for serial plotter (otyherwise it goes too fast)
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendEvent);
@@ -256,10 +274,12 @@ void loop() {
           case 18:  // Select R8 film
             DebugPrint("Idle -> Select R8"); 
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
+            MinFrameSteps = MinFrameStepsR8;
             break;
           case 19:  // Select S8 film
             DebugPrint("Idle -> Select S8"); 
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
+            MinFrameSteps = MinFrameStepsS8;
             break;
           case 20:
             DebugPrint("Idle -> UnlockReels"); 
@@ -278,8 +298,8 @@ void loop() {
             delay(50);
             break;
           case 60:
-            DebugPrint("Idle -> Rewind"); 
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+              DebugPrint("Rewind error"); 
               EventForRPi = 61; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -287,6 +307,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
+              DebugPrint("Idle -> Rewind"); 
               ScanState = Sts_Rewind;
               delay (500); 
               digitalWrite(MotorA_Neutral, LOW); 
@@ -299,10 +320,11 @@ void loop() {
               tone(A2, 2000, 200); 
               RewindSpeed = 4000;
             }
+            delay(50);
             break;
           case 80:
-            DebugPrint("Idle -> FastForward"); 
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+              DebugPrint("FF error"); 
               EventForRPi = 81; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -310,6 +332,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
+              DebugPrint("Idle -> FastForward"); 
               ScanState = Sts_FastForward;
               delay (500); 
               digitalWrite(MotorA_Neutral, HIGH); 
@@ -513,15 +536,14 @@ boolean FilmInFilmgate() {
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
   UVLedOn = true;
-  delay(50);  // Give time to FT to stabilize
+  delay(100);  // Give time to FT to stabilize
 
   PreviousSignalLevel = analogRead(PHOTODETECT);
   //DebugPrintAux("Signal=", PreviousSignalLevel );
-  digitalWrite(MotorB_Neutral, LOW);  
 
-  // DecreaseSpeedFrameSteps used here as a reference, just to skip two frames in worst case
+  // MinFrameSteps used here as a reference, just to skip two frames in worst case
   // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
-  for (int x = 0; x <= 2*DecreaseSpeedFrameSteps; x++) {
+  for (int x = 0; x <= 2*MinFrameSteps; x++) {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = analogRead(PHOTODETECT);
@@ -533,7 +555,6 @@ boolean FilmInFilmgate() {
     PreviousSignalLevel = SignalLevel;
   }
   digitalWrite(MotorB_Stepper, LOW); 
-  digitalWrite(MotorB_Neutral, HIGH);  
   analogWrite(11, 0); // Turn off UV LED
   UVLedOn = false;
   return(retvalue);
@@ -567,7 +588,7 @@ void check() {
     FrameDetected = true; 
     LastFrameSteps = FrameStepsDone; 
     FrameStepsDone = 0; 
-    analogWrite (A1, 255); // Light green led
+    analogWrite(A1, 255); // Light green led
     StartPictureSaveTime = micros();
     EventForRPi = 11; 
     digitalWrite(13, HIGH);
@@ -641,16 +662,6 @@ boolean scan(int Ic) {
   // JRE 4/8/22: SerialPrint used to inhibit regular writes to Serial while in debug mode
   SerialPrintInt(PT_SignalLevelRead);
 
-  // --- Waiting for the green light from the Raspberry Pi, to move forward to the next frame-----
-  /*
-  if (Ic == 12) {
-    DebugPrint("scan - RPi says GO for next frame"); 
-    ScanSpeed = OriginalScanSpeed; 
-    MinFrameSteps = OriginalMinFrameSteps; 
-    FilmTypeFrameCount = FilmTypeFrameCount + 1;
-  }
-  */
-
   // ------------ Stretching film pickup wheel (C) ------ 
   CollectOutgoingFilm();
 
@@ -669,7 +680,7 @@ boolean scan(int Ic) {
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-//        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
+        //LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
         for (int x = 0; x <= 3; x++) {    // Originally from 0 to 3. Looping more than that required the collection code above to be optimized
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
@@ -677,10 +688,10 @@ boolean scan(int Ic) {
           check();
           if (FrameDetected) break;
         }
+        digitalWrite(MotorB_Stepper, LOW);
       }
     }
   }
-  digitalWrite(MotorB_Stepper, LOW);
 
   if (FrameDetected) {
     FrameDetected = false;
@@ -734,7 +745,7 @@ boolean dataInQueue(void) {
   return (CommandQueue.out != CommandQueue.in);
 }
 
-void DebugPrintAux(const char * str, int i) {
+void DebugPrintAux(const char * str, unsigned long i) {
   static char PreviousDebug[64];
   static char AuxLine[64];
   static char PrintLine[64];
