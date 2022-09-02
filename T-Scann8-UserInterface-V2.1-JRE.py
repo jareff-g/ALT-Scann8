@@ -24,23 +24,17 @@
         - Implemented post-view (display captured image) when preview is disabled (also has
           a speed cost, result is closer to current version)
 30/08/2022: JRE, fixed segment fault
-        - It was clearly related to the askyesno popup askign if the user wanted to retrieve
+        - It was clearly related to the askyesno popup asking if the user wanted to retrieve
           previous session (commenting out the popup was avoiding thg segment fault)
           Moving the session recovery code to a dedicated function solved the issue (do not ask me why)
-
+31/08/2022: JRE, UI changes
+        - Use LabelFrame instead of Frame
+        - Reorganize position of controls
+01/09/2022: JRE Removed function to dynamically modify the perforation level threshold
+        - Already used for it's purpose (find optimal value), remove it as it is confusing
+        - Also with the new approach prioritizing the minimal number of steps, perforation
+          detection is more a confirmation we are in next frame
 """
-# ######## Special Global variable definition ##########
-# Global variable to isolate Raspberry Pi specific code, to allow basic UI testing on PC
-SimulatedRun = False
-
-if SimulatedRun:
-    print("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
-else:
-    print("Running on Raspberry Pi")
-
-# Global variable to isolate camera specific code (Picamera vs PiCamera2)
-# If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
-IsPiCamera2 = True
 
 # ######### Imports section ##########
 import tkinter as tk
@@ -50,30 +44,39 @@ import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import *
 
-if SimulatedRun:
-    from PIL import ImageTk, Image
-else:
-    from PIL import ImageTk, Image
-
-    if IsPiCamera2:
-        try:
-            from picamera2 import Picamera2, Preview
-            from libcamera import Transform
-        except:
-            IsPiCamera2 = False
-            import picamera
-    else:
-        import picamera
+from PIL import ImageTk, Image
 
 import os
 import subprocess
 import time
 import json
 
-if not SimulatedRun:
-    import smbus
 from datetime import datetime
 import sys
+
+try:
+    import smbus
+    try:
+        from picamera2 import Picamera2, Preview
+        from libcamera import Transform
+        # Global variable to isolate camera specific code (Picamera vs PiCamera2)
+        IsPiCamera2 = True
+    except:
+        # If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
+        IsPiCamera2 = False
+        import picamera
+
+    # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
+    SimulatedRun = False
+except:
+    SimulatedRun=True
+    IsPiCamera2 = False
+
+if SimulatedRun:
+    print("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
+else:
+    print("Running on Raspberry Pi")
+
 
 #  ######### Global variable definition ##########
 FocusState = True
@@ -88,6 +91,7 @@ CurrentScanStartFrame = 0
 CurrentExposure = 0
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 CurrentExposureStr = "Auto"
+ExposureAdaptPause = False
 NegativeCaptureStatus = False
 AdvanceMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
@@ -112,17 +116,21 @@ WinInitDone = False
 FolderProcess = 0
 PreviewEnabled = True
 PostviewAllowed = False  # Workaround when preview is disabled with PiCamera2 due to speed issues
+PostviewModule = 1
+PostviewCounter = 0
 FramesPerMinute = 0
+PreviewAreaImage = ''
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
-PerforationThresholdLevel = 160  # To be synchronized with Arduino
+TempInFahrenheit = False
+LastTempInFahrenheit = False
 save_bg = 'gray'
 save_fg = 'black'
 ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
-simulated_capture_label = ''
+draw_capture_label = ''
 simulated_images_in_list = 0
 
 # Persisted data
@@ -148,13 +156,12 @@ global Focus_btn
 global RPi_temp_value_label
 global Exit_btn
 global Start_btn
-global folder_frame_folder_label
+global folder_frame_target_dir
 global Scanned_Images_number_label
 global Scanned_Images_fpm
 global exposure_frame_value_label
 global film_type_S8_btn
 global film_type_R8_btn
-global perforation_threshold_value_label
 global preview_border_frame
 global camera
 global CurrentFrame
@@ -170,6 +177,8 @@ def exit_app():  # Exit Application
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
+        if PreviewEnabled:
+            camera.stop_preview()
         camera.close()
     # Exiting normally: Delete session info
     # if os.path.isfile(PersistedSessionFilename):
@@ -237,14 +246,14 @@ def set_new_folder():
     global CurrentDir
     global CurrentFrame
     global SimulatedRun
-    global folder_frame_folder_label
+    global folder_frame_target_dir
     global Scanned_Images_number_label
 
     requested_dir = ""
 
     # CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
     CurrentDir = BaseDir
-    # folder_frame_folder_label.config(text=CurrentDir)
+    # folder_frame_target_dir.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
     if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
         camera.stop_preview()
@@ -264,11 +273,10 @@ def set_new_folder():
     else:
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
 
-    if not SimulatedRun:
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
-    folder_frame_folder_label.config(text=CurrentDir)
+    folder_frame_target_dir.config(text=CurrentDir)
     Scanned_Images_number_label.config(text=str(CurrentFrame))
 
 
@@ -288,13 +296,16 @@ def set_existing_folder():
     if not CurrentDir:
         return
     else:
-        folder_frame_folder_label.config(text=CurrentDir)
+        folder_frame_target_dir.config(text=CurrentDir)
 
     current_frame_str = tk.simpledialog.askstring(title="Enter number of last captured frame",
                                                        prompt="Last frame captured?")
     if current_frame_str is None:
+        CurrentFrame = 0
         return
     else:
+        if (current_frame_str==''):
+            current_frame_str = '0'
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
 
@@ -336,6 +347,7 @@ def decrease_exp():
             camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
         else:
             camera.shutter_speed = CurrentExposure
+    auto_exp_wait_checkbox.config(state=DISABLED)
 
 
 def auto_exp():
@@ -353,6 +365,7 @@ def auto_exp():
         else:
             camera.shutter_speed = CurrentExposure
 
+    auto_exp_wait_checkbox.config(state=NORMAL)
 
 def increase_exp():
     global CurrentExposure
@@ -376,28 +389,12 @@ def increase_exp():
             camera.controls.ExposureTime = CurrentExposure
         else:
             camera.shutter_speed = CurrentExposure
+    auto_exp_wait_checkbox.config(state=DISABLED)
 
-
-def decrease_perforation_threshold():
-    global PerforationThresholdLevel
-    global SimulatedRun
-
-    if not SimulatedRun:
-        i2c.write_byte_data(16, 91, 0)
-
-    if PerforationThresholdLevel > 30:
-        PerforationThresholdLevel -= 10
-
-
-def increase_perforation_threshold():
-    global PerforationThresholdLevel
-    global SimulatedRun
-
-    if not SimulatedRun:
-        i2c.write_byte_data(16, 90, 0)
-
-    if PerforationThresholdLevel < 360:
-        PerforationThresholdLevel += 10
+def auto_exposure_change_pause_selection():
+    global auto_exposure_change_pause
+    global ExposureAdaptPause
+    ExposureAdaptPause = auto_exposure_change_pause.get()
 
 
 def button_status_change_except(except_button, active):
@@ -479,10 +476,9 @@ def rewind_movie():
         if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
             camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         if not answer:
-            return ()
+            return()
     else:
         if RewindErrorOutstanding:
-
             if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
                 # Preview needs to be hidden only when using picamera legacy
                 camera.stop_preview()
@@ -596,10 +592,33 @@ def fast_forward_loop():
             fast_forward_movie()
 
 
+def draw_preview_image(preview_image):
+    global draw_capture_label
+    global preview_border_frame
+    global PreviewAreaImage
+
+    preview_image = preview_image.resize((844, 634))
+    PreviewAreaImage = ImageTk.PhotoImage(preview_image)
+    # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
+    draw_capture_label = tk.Label(preview_border_frame, image=PreviewAreaImage)
+    # The Pack geometry manager packs widgets in rows or columns.
+    draw_capture_label.place(x=0, y=0)
+
+
 def single_step_movie():
     global SimulatedRun
+    global camera
+
     if not SimulatedRun:
         i2c.write_byte_data(16, 40, 0)
+
+        if not PreviewEnabled and PostviewAllowed:
+            # If no preview, capture frame in memory and display it
+            # Single step is not a critical operation, waiting 100ms for it to happen should be enough
+            # No need to implement confirmation from Arduino, as we have for regular capture during scan
+            time.sleep(0.1)
+            single_step_image = camera.capture_image("main")
+            draw_preview_image(single_step_image)
 
 
 def emergency_stop():
@@ -659,9 +678,14 @@ def open_folder():
 
 
 def change_preview_status():
+    global win
     global PreviewEnabled
     global PreviewStatus
     global PostviewAllowed
+    global PostviewModule
+    global PostviewCounter
+    global capture_config
+    global preview_config
 
     choice = PreviewStatus.get()
     if choice == 1:
@@ -673,15 +697,27 @@ def change_preview_status():
     elif choice == 3:
         PreviewEnabled = False
         PostviewAllowed = True
+        PostviewModule = 1
+    elif choice == 4:
+        PreviewEnabled = False
+        PostviewAllowed = True
+        PostviewModule = 10
 
     if not SimulatedRun:
         if PreviewEnabled:
             if IsPiCamera2:
+                camera.stop_preview()
+                camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
+                time.sleep(0.1)
                 camera.switch_mode(preview_config)
+                #self.canvas.create_rectangle(90, 75, 840, 720, fill="RED")
             else:
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         else:
             if IsPiCamera2:
+                camera.stop_preview()
+                camera.start_preview(False)
+                time.sleep(0.1)
                 camera.switch_mode(capture_config)
             else:
                 camera.stop_preview()
@@ -712,15 +748,20 @@ def capture():
     global CurrentDir
     global CurrentFrame
     global SessionData
+    global CurrentExposure
     global PreviousCurrentExposure
     global SimulatedRun
     global raw_simulated_capture_image
     global simulated_capture_image
-    global simulated_capture_label
+    global draw_capture_label
+    global PostviewCounter
+    global PostviewModule
+    global ExposureAdaptPause
 
     os.chdir(CurrentDir)
 
-    if CurrentExposure == 0:
+    # Wait for auto exposure to adapt only is allowed
+    if CurrentExposure == 0 and ExposureAdaptPause:
         while True:  # In case of exposure change, give time for the camera to adapt
             if IsPiCamera2:
                 metadata = camera.capture_metadata()
@@ -738,7 +779,7 @@ def capture():
                 exposure_frame_value_label.config(text=aux_exposure_str)
                 PreviousCurrentExposure = aux_current_exposure
                 win.update()
-                time.sleep(0.5)
+                time.sleep(0.2)
             else:
                 break
 
@@ -749,20 +790,21 @@ def capture():
             else:
                 # Allow time to stabilize image, too fast with PiCamera2 when no preview.
                 # Need to refine this (shorter time, Arduino specific slowdown?)
-                time.sleep(0.2)
+                time.sleep(0.1)  # 100 ms seems OK. Tried with 50 and some frames were blurry
                 camera.capture_file('picture-%05d.jpg' % CurrentFrame)
-                if PostviewAllowed:
-                    # Mitigation when preview is disabled to speed up things in PiCamera2
-                    # Warning: Displaying the image just captured also has a cost in speed terms
-                    raw_simulated_capture_image = Image.open('picture-%05d.jpg' % CurrentFrame)
-                    raw_simulated_capture_image = raw_simulated_capture_image.resize((844, 634))
-                    simulated_capture_image = ImageTk.PhotoImage(raw_simulated_capture_image)
-                    # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
-                    simulated_capture_label = tk.Label(preview_border_frame, image=simulated_capture_image)
-                    # The Pack geometry manager packs widgets in rows or columns.
-                    simulated_capture_label.place(x=0, y=0)
         else:
             camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+
+        # Treatment for postview common for Picamera2 adn legacy
+        if not PreviewEnabled and PostviewAllowed:
+            # Mitigation when preview is disabled to speed up things in PiCamera2
+            # Warning: Displaying the image just captured also has a cost in speed terms
+            PostviewCounter += 1
+            PostviewCounter %= PostviewModule
+            if (PostviewCounter == 0):
+                raw_simulated_capture_image = Image.open('picture-%05d.jpg' % CurrentFrame)
+                draw_preview_image(raw_simulated_capture_image)
+
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
@@ -812,7 +854,7 @@ def capture_loop_simulated():
     global preview_border_frame
     global raw_simulated_capture_image
     global simulated_capture_image
-    global simulated_capture_label
+    global draw_capture_label
     global simulated_captured_frame_list
     global simulated_images_in_list
 
@@ -824,14 +866,8 @@ def capture_loop_simulated():
         if ext == '.jpg':
             print(f"{curtime} - Simulated scan: ({CurrentFrame},{simulated_captured_frame_list[frame_to_display]})")
             raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
-            raw_simulated_capture_image = raw_simulated_capture_image.resize((844, 634))
-            simulated_capture_image = ImageTk.PhotoImage(raw_simulated_capture_image)
-            # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
-            simulated_capture_label = tk.Label(preview_border_frame, image=simulated_capture_image)
-            # The Pack geometry manager packs widgets in rows or columns.
-            simulated_capture_label.place(x=0, y=0)
-            # simulated_capture_label.pack(side="top", fill="both")
-            # simulated_capture_label.pack()
+            draw_preview_image(raw_simulated_capture_image)
+
         CurrentFrame += 1
 
         # Update number of captured frames
@@ -952,16 +988,32 @@ def capture_loop():
         win.after(0, capture_loop)
 
 
+def temp_in_fahrenheit_selection():
+    global temp_in_fahrenheit
+    global TempInFahrenheit
+    TempInFahrenheit = temp_in_fahrenheit.get()
+    temperature_loop()
+
+
 def temperature_loop():  # Update RPi temperature every 10 seconds
     global last_temp
     global RPi_temp_value_label
     global RPiTemp
+    global temp_in_fahrenheit
+    global LastTempInFahrenheit
+    global TempInFahrenheit
 
     update_rpi_temp()
-    if last_temp != RPiTemp:
-        RPi_temp_value_label.config(text=str(RPiTemp))
+    if last_temp != RPiTemp or LastTempInFahrenheit != TempInFahrenheit:
+        if TempInFahrenheit:
+            rounded_temp = round(RPiTemp*1.8+32,1)
+            temp_str = str(rounded_temp) + 'ºF'
+        else:
+            temp_str = str(RPiTemp) + 'º'
+        RPi_temp_value_label.config(text=str(temp_str))
         win.update()
         last_temp = RPiTemp
+        LastTempInFahrenheit = TempInFahrenheit
 
     win.after(10000, temperature_loop)
 
@@ -971,7 +1023,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     global RewindErrorOutstanding
     global FastForwardErrorOutstanding
     global ArduinoTrigger
-    global PerforationThresholdLevel
     global SimulatedRun
 
     if not SimulatedRun:
@@ -983,11 +1034,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
             print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
     if ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
-    elif ArduinoTrigger == 92:  # PerforationThresholdLevel value, next byte contains Arduino value
-        # PerforationThresholdLevel = i2c.read_byte_data(16, 0)
-        print("Received perforation threshold level event from Arduino")
-        perforation_threshold_value_label.config(text=str(PerforationThresholdLevel))
-        win.update()
     elif ArduinoTrigger == 61:  # Error during Rewind
         RewindErrorOutstanding = True
         print("Received rewind error from Arduino")
@@ -1000,7 +1046,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     win.after(5, arduino_listen_loop)
 
 
-def on_form_event():
+def on_form_event(test):
     global TopWinX
     global TopWinY
     global DeltaX
@@ -1043,10 +1089,11 @@ def recover_session():
 
     # Check if persisted data file exist: If it does, load it
     if os.path.isfile(PersistedSessionFilename):
-        # Preview not yet displayed, no need to disable to make this popup visible
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+            camera.stop_preview()
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
-                                              message='It seems T-Scann 8 was interrupted during the last session.\n\
-                                              Do you want to continue from where it was stopped?')
+                                              message='It seems T-Scann 8 was interrupted during the last session.\
+                                                        \r\nDo you want to continue from where it was stopped?')
         if confirm:
             persisted_data_file = open(PersistedSessionFilename)
             SessionData = json.load(persisted_data_file)
@@ -1072,6 +1119,8 @@ def recover_session():
                     os.remove(PersistedSessionFilename)
             except:
                 print("Error deleting persistent session data file ({PersistedSessionFilename})")
+        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
+            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 
 def tscann8_init():
@@ -1090,6 +1139,7 @@ def tscann8_init():
     global ZoomSize
     global capture_config
     global preview_config
+    global draw_capture_label
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -1114,6 +1164,8 @@ def tscann8_init():
     preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
     preview_border_frame.pack()
     preview_border_frame.place(x=38, y=38)
+    # Also a label to draw images when preview is not used
+    draw_capture_label = tk.Label(preview_border_frame)
 
     if not SimulatedRun:
         if IsPiCamera2:
@@ -1145,7 +1197,7 @@ def tscann8_init():
     # Enable events on windows movements, to allow preview to follow
     # lblText = tk.Label(win, text='')
     # lblText.pack()
-    if not IsPiCamera2:
+    if not SimulatedRun and not IsPiCamera2:
         win.bind('<Configure>', on_form_event)
 
 
@@ -1162,16 +1214,20 @@ def build_ui():
     global RPi_temp_value_label
     global Exit_btn
     global Start_btn
-    global folder_frame_folder_label
+    global folder_frame_target_dir
     global Scanned_Images_number_label
     global Scanned_Images_fpm
     global exposure_frame_value_label
     global film_type_S8_btn
     global film_type_R8_btn
-    global perforation_threshold_value_label
     global save_bg
     global save_fg
     global PreviewStatus
+    global auto_exposure_change_pause
+    global auto_exp_wait_checkbox
+    global ExposureAdaptPause
+    global temp_in_fahrenheit
+    global TempInFahrenheit
 
     # SimulatedRun: Create marker for film hole
     if SimulatedRun:
@@ -1183,29 +1239,27 @@ def build_ui():
         film_hole_label.pack(side=TOP)
 
     # Create horizontal button row at bottom
-    # Advance movie (through filmgate)
+    # Advance movie (slow forward through filmgate)
     AdvanceMovie_btn = Button(win, text="Movie Forward", width=8, height=3, command=advance_movie,
                               activebackground='green', activeforeground='white', wraplength=80)
     AdvanceMovie_btn.place(x=30, y=710)
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
     save_fg = AdvanceMovie_btn['fg']
+
     # Advance one single frame
     SingleStep_btn = Button(win, text="Single Step", width=8, height=3, command=single_step_movie,
                             activebackground='green', activeforeground='white', wraplength=80)
     SingleStep_btn.place(x=130, y=710)
-    # Switch Positive/negative modes
-    PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green',
-                        activeforeground='white', wraplength=80)
-    PosNeg_btn.place(x=230, y=710)
+
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=5, height=2, command=rewind_movie,
+    Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=2, height=2, command=rewind_movie,
                         activebackground='green', activeforeground='white', wraplength=80)
-    Rewind_btn.place(x=330, y=710)
+    Rewind_btn.place(x=230, y=710)
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=5, height=2, command=fast_forward_movie,
+    FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
                              activebackground='green', activeforeground='white', wraplength=80)
-    FastForward_btn.place(x=430, y=710)
+    FastForward_btn.place(x=290, y=710)
     # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imegined)
     # So, disabled to gain some space
     # OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
@@ -1213,39 +1267,34 @@ def build_ui():
     # Unlock reels button (to load film, rewind, etc)
     Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green',
                       activeforeground='white', wraplength=80)
-    Free_btn.place(x=530, y=710)
+    Free_btn.place(x=350, y=710)
+
+    # Switch Positive/negative modes
+    PosNeg_btn = Button(win, text="Pos/Neg", width=8, height=3, command=negative_capture, activebackground='green',
+                        activeforeground='white', wraplength=80)
+    PosNeg_btn.place(x=450, y=710)
+
     # Activate focus zoom, to facilitate focusing the camera
     Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green',
                        activeforeground='white', wraplength=80)
-    Focus_btn.place(x=630, y=710)
+    Focus_btn.place(x=550, y=710)
 
-    # Disable Pi Camera preview (might hide some stuff)
-    preview_frame = Frame(win, width=8, height=4, highlightbackground="black", highlightthickness=1, bg='white')
+    # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
+    preview_frame = LabelFrame(win, text='Preview/Display capture', width=8, height=3)
     preview_frame.pack(side=TOP, padx=1, pady=1)
-    preview_frame.place(x=730, y=710)
+    preview_frame.place(x=650, y=700)
 
-    preview_label = Label(preview_frame, text='Preview', width=8, height=1, wraplength=120, bg='white')
-    preview_label.pack(side=TOP)
     PreviewStatus=tk.IntVar()
-    preview_radio1 = Radiobutton(preview_frame,text="Enabled", variable=PreviewStatus, value=1, command=change_preview_status,  bg='white', highlightbackground="white")
-    preview_radio1.pack(side=TOP)
+    preview_radio1 = Radiobutton(preview_frame,text="Enabled     ", variable=PreviewStatus, value=1, command=change_preview_status)
+    preview_radio1.grid(row=0, column=1)
     preview_radio1.select()
-    preview_radio2 = Radiobutton(preview_frame,text="Disabled", variable=PreviewStatus, value=2, command=change_preview_status, bg='white', highlightbackground="white")
-    preview_radio2.pack(side=TOP)
-    preview_radio3 = Radiobutton(preview_frame,text="Postview", variable=PreviewStatus, value=3, command=change_preview_status, bg='white', highlightbackground="white")
-    preview_radio3.pack(side=TOP)
+    preview_radio2 = Radiobutton(preview_frame,text="Disabled    ", variable=PreviewStatus, value=2, command=change_preview_status)
+    preview_radio2.grid(row=0, column=2)
+    preview_radio3 = Radiobutton(preview_frame,text="Each frame", variable=PreviewStatus, value=3, command=change_preview_status)
+    preview_radio3.grid(row=1, column=1)
+    preview_radio4 = Radiobutton(preview_frame,text="1/10 frame", variable=PreviewStatus, value=4, command=change_preview_status)
+    preview_radio4.grid(row=1, column=2)
     PreviewStatus.set(1)
-
-    # Create frame to display RPi temperature
-    rpi_temp_frame = Frame(win, width=8, height=3, highlightbackground="black", highlightthickness=1)
-    rpi_temp_frame.pack(side=TOP)
-    rpi_temp_frame.place(x=840, y=715)
-
-    rpi_temp_label = Label(rpi_temp_frame, text='RPi Temp.', width=8, height=1, wraplength=120, bg='white')
-    rpi_temp_label.pack(side=TOP)
-    RPi_temp_value_label = Label(rpi_temp_frame, text=str(RPiTemp), font=("Arial", 18), width=5, height=1,
-                                 wraplength=120, bg='white')
-    RPi_temp_value_label.pack(side=TOP, fill='x')
 
     # Application Exit button
     Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
@@ -1263,17 +1312,13 @@ def build_ui():
     Start_btn.place(x=925, y=40)
 
     # Create frame to select target folder
-    folder_frame = Frame(win, width=16, height=8, highlightbackground="black", highlightthickness=1)
+    folder_frame = LabelFrame(win, text='Target Folder', width=16, height=8)
     folder_frame.pack()
     folder_frame.place(x=925, y=150)
 
-    folder_frame_title = Frame(folder_frame, width=16, height=4)
-    folder_frame_title.pack()
-    folder_frame_title_label = Label(folder_frame_title, text='Target Folder', width=16, height=1)
-    folder_frame_title_label.pack(side=TOP)
-    folder_frame_folder_label = Label(folder_frame_title, text=CurrentDir, width=16, height=3, font=("Arial", 8),
-                                      wraplength=140)
-    folder_frame_folder_label.pack(side=TOP)
+    folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=22, height=3, font=("Arial", 8),
+                                      wraplength=120)
+    folder_frame_target_dir.pack(side=TOP)
 
     folder_frame_buttons = Frame(folder_frame, width=16, height=4, bd=2)
     folder_frame_buttons.pack()
@@ -1285,90 +1330,74 @@ def build_ui():
     existing_folder_btn.pack(side=LEFT)
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = Frame(win, width=16, height=4, highlightbackground="black", highlightthickness=1, bg='white')
+    scanned_images_frame = LabelFrame(win, text='Scanned frames', width=16, height=4)
     scanned_images_frame.pack(side=TOP, padx=1, pady=1)
-    scanned_images_frame.place(x=925, y=270)
+    scanned_images_frame.place(x=925, y=260)
 
-    scanned_images_label = Label(scanned_images_frame, text='Number of scanned Images', width=16, height=2,
-                                 wraplength=120, bg='white')
-    scanned_images_label.pack(side=TOP)
     Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", 24), width=5,
-                                        height=1, wraplength=120, bg='white')
-    Scanned_Images_number_label.pack(side=TOP, fill='both')
+                                        height=1)
+    Scanned_Images_number_label.pack(side=TOP)
 
-    scanned_images_fpm_frame = Frame(scanned_images_frame, width=16, height=2, bg='white')
-    scanned_images_fpm_frame.pack(side=TOP, padx=1, pady=1, fill='both')
+    scanned_images_fpm_frame = Frame(scanned_images_frame, width=16, height=2)
+    scanned_images_fpm_frame.pack(side=TOP)
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, text='Frames/Min:', font=("Arial", 8), width=12,
-                                     height=1, wraplength=120, bg='white')
-    scanned_images_fpm_label.pack(side=LEFT, fill='both')
+                                     height=1)
+    scanned_images_fpm_label.pack(side=LEFT)
     Scanned_Images_fpm = Label(scanned_images_fpm_frame, text=str(FramesPerMinute), font=("Arial", 8), width=8,
-                               height=1, wraplength=120, bg='white')
-    Scanned_Images_fpm.pack(side=LEFT, fill='both')
+                               height=1)
+    Scanned_Images_fpm.pack(side=LEFT)
 
     # Create frame to select exposure value
-    exposure_frame = Frame(win, width=16, height=2, bg='white', highlightbackground="black", highlightthickness=1)
-    exposure_frame.pack(side=TOP, padx=1, pady=1)
-    exposure_frame.place(x=925, y=390)
+    exposure_frame = LabelFrame(win, text='Exposure', width=16, height=2)
+    exposure_frame.pack(side=TOP)
+    exposure_frame.place(x=925, y=350)
 
-    exposure_frame_title_label = Label(exposure_frame, text='Camera Exposure', width=16, height=1, bg='white')
-    exposure_frame_title_label.pack(side=TOP)
-    exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1, font=("Arial", 16),
-                                       wraplength=110, bg='white')
+    exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1, font=("Arial", 16))
     exposure_frame_value_label.pack(side=TOP)
 
-    exposure_frame_buttons = Frame(exposure_frame, width=8, height=1, bg='white')
+    exposure_frame_buttons = Frame(exposure_frame, width=8, height=1)
     exposure_frame_buttons.pack(side=TOP)
     decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=decrease_exp, activebackground='green', activeforeground='white', wraplength=80)
+                              command=decrease_exp, activebackground='green', activeforeground='white')
     decrease_exp_btn.pack(side=LEFT)
-    auto_exp_btn = Button(exposure_frame_buttons, text='A', width=1, height=1, font=("Arial", 16, 'bold'),
-                          command=auto_exp, activebackground='green', activeforeground='white', wraplength=80)
+    auto_exp_btn = Button(exposure_frame_buttons, text='A', width=2, height=1, font=("Arial", 16, 'bold'),
+                          command=auto_exp, activebackground='green', activeforeground='white')
     auto_exp_btn.pack(side=LEFT)
     increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=increase_exp, activebackground='green', activeforeground='white', wraplength=80)
+                              command=increase_exp, activebackground='green', activeforeground='white')
     increase_exp_btn.pack(side=LEFT)
 
+    auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
+    auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Adapt. wait', height=1, variable=auto_exposure_change_pause, onvalue=True, offvalue=False, command=auto_exposure_change_pause_selection)
+    auto_exp_wait_checkbox.pack(side=TOP)
+
     # Create frame to select S8/R8 film
-    film_type_frame = Frame(win, width=16, height=2, bg='white', highlightbackground="black", highlightthickness=1)
-    film_type_frame.pack(side=TOP, padx=1, pady=1)
-    film_type_frame.place(x=925, y=500)
+    film_type_frame = LabelFrame(win, text='Film type', width=16, height=1)
+    film_type_frame.pack(side=TOP)
+    film_type_frame.place(x=925, y=490)
 
-    film_type_title_label = Label(film_type_frame, text='Film Type', width=16, height=1, bg='white')
-    film_type_title_label.pack(side=TOP)
-
-    film_type_buttons = Frame(film_type_frame, width=8, height=1, bg='white')
+    film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP)
-    film_type_S8_btn = Button(film_type_buttons, text='S8', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=set_s8, activebackground='green', activeforeground='white', wraplength=80,
+    film_type_S8_btn = Button(film_type_buttons, text='S8', width=3, height=1, font=("Arial", 16, 'bold'),
+                              command=set_s8, activebackground='green', activeforeground='white',
                               relief=SUNKEN)
     film_type_S8_btn.pack(side=LEFT)
-    film_type_R8_btn = Button(film_type_buttons, text='R8', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=set_r8, activebackground='green', activeforeground='white', wraplength=80)
+    film_type_R8_btn = Button(film_type_buttons, text='R8', width=3, height=1, font=("Arial", 16, 'bold'),
+                              command=set_r8, activebackground='green', activeforeground='white')
     film_type_R8_btn.pack(side=LEFT)
 
-    # Create frame to select perforation threshold dynamically (however scan mode needs to be stopped)
-    perforation_threshold_frame = Frame(win, width=16, height=2, bg='white', highlightbackground="black",
-                                        highlightthickness=1)
-    perforation_threshold_frame.pack(side=TOP, padx=1, pady=1)
-    perforation_threshold_frame.place(x=925, y=580)
+    # Create frame to display RPi temperature
+    rpi_temp_frame = LabelFrame(win, text='RPi Temp.', width=8, height=1)
+    rpi_temp_frame.pack(side=TOP)
+    rpi_temp_frame.place(x=925, y=580)
+    temp_str = str(RPiTemp)+'º'
+    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=1, height=1)
+    RPi_temp_value_label.pack(side=TOP, fill='x')
 
-    perforation_threshold_title_label = Label(perforation_threshold_frame, text='Perf. Threshold', width=16, height=1,
-                                              bg='white')
-    perforation_threshold_title_label.pack(side=TOP)
-    perforation_threshold_value_label = Label(perforation_threshold_frame, text=str(PerforationThresholdLevel), width=8,
-                                              height=1, font=("Arial", 16), wraplength=110, bg='white')
-    perforation_threshold_value_label.pack(side=TOP)
+    temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
+    temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1, variable=temp_in_fahrenheit, onvalue=True, offvalue=False, command=temp_in_fahrenheit_selection)
+    temp_in_fahrenheit_checkbox.pack(side=TOP)
 
-    perforation_threshold_buttons = Frame(perforation_threshold_frame, width=8, height=1, bg='white')
-    perforation_threshold_buttons.pack(side=TOP)
-    decrease_perforation_threshold_btn = Button(perforation_threshold_buttons, text='-', width=1, height=1,
-                                                font=("Arial", 16, 'bold'), command=decrease_perforation_threshold,
-                                                activebackground='green', activeforeground='white', wraplength=80)
-    decrease_perforation_threshold_btn.pack(side=LEFT)
-    increase_perforation_threshold_btn = Button(perforation_threshold_buttons, text='+', width=1, height=1,
-                                                font=("Arial", 16, 'bold'), command=increase_perforation_threshold,
-                                                activebackground='green', activeforeground='white', wraplength=80)
-    increase_perforation_threshold_btn.pack(side=LEFT)
 
 
 def main():
@@ -1376,13 +1405,13 @@ def main():
 
     tscann8_init()
 
-    recover_session()
-
     build_ui()
 
     temperature_loop()
 
     arduino_listen_loop()
+
+    recover_session()
 
     # Main Loop
     win.mainloop()  # running the loop that works as a trigger
