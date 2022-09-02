@@ -46,6 +46,9 @@
                           5/ Because of this, it sometimes happen (due to factors like sub-optimal FT isolation) that 
                              the frame is detected before reaching 270 steps (this is typically when the lower part of 
                              the frame is off limits in the captured image)
+      01 Sep 2022 - JRE - Remove interface to allow RPi to tell us to modify the perforation level threshold
+                          This was mostly to analyze best value, can be removed now.
+                          Also, with yesterday's change (increase of MinFrameSteps), hole detection is more of a confirmation
 */
 
 #include <Wire.h>
@@ -91,9 +94,7 @@ enum ScanState{
   Sts_Rewind,
   Sts_FastForward,
   Sts_SlowForward,
-  Sts_SingleStep,
-  Sts_SetPerfLevelUp,
-  Sts_SetPerfLevelDown
+  Sts_SingleStep
 }
 ScanState=Sts_Idle;
 
@@ -117,11 +118,12 @@ int FilteredSignalLevel = 0;
 
 // ----- Important setting, may need to be adjusted ------
 
-int UVLedBrightness = 250;          // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
+int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
 unsigned long FetchFrameScanSpeed = 25000;    // Play Slow before trig (Original 15000)
-int RewindSpeed = 4000;             // speed Rewind movie
-int PerforationThresholdLevel = 160; // detector pulse level (Torulf: 250, JRE: At one point reduced to 80, worked fine. Put up again after chang in filmgate)
+int RewindSpeed = 4000;                       // speed Rewind movie
+int PerforationThresholdLevel = 160;          // detector pulse level (Torulf: 250)
+                                              // JRE: After increasing MinFramSteps, this one is not so critical any more
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
 int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
@@ -154,7 +156,7 @@ unsigned long TractionStopLastWaitEventTime = 0;
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
-int EventForRPi = 0;    // 11-Frame ready for exposure, 61-Rewind error, 81-FF error, 92-Confirm perf level change
+int EventForRPi = 0;    // 11-Frame ready for exposure, 61-Rewind error, 81-FF error
 
 int PT_SignalLevelRead;   // Level out signal phototransistor detection
 
@@ -346,16 +348,6 @@ void loop() {
               RewindSpeed = 4000;
             }
             break;
-          case 90:
-            DebugPrint("Idle -> SetPerfLevelUp"); 
-            ScanState = Sts_SetPerfLevelUp;
-            delay(50);
-            break;
-          case 91:
-            DebugPrint("Idle -> SetPerfLevelDown"); 
-            ScanState = Sts_SetPerfLevelDown;
-            delay(50);
-            break;
         }
         break;
       case Sts_Scan:
@@ -429,24 +421,6 @@ void loop() {
           }
           digitalWrite(MotorB_Stepper, HIGH);
         }
-        break;
-      case Sts_SetPerfLevelUp:
-        if (PerforationThresholdLevel < 400)
-          PerforationThresholdLevel += 10;
-        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
-        DebugPrintAux("Perf. Lvl up to ",PerforationThresholdLevel);
-        EventForRPi = 92; 
-        digitalWrite(13, HIGH);
-        ScanState = Sts_Idle;
-        break;
-      case Sts_SetPerfLevelDown:
-        if (PerforationThresholdLevel > 30)
-          PerforationThresholdLevel -= 10;
-        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
-        DebugPrintAux("Perf. Lvl down to ",PerforationThresholdLevel);
-        EventForRPi = 92; 
-        digitalWrite(13, HIGH);
-        ScanState = Sts_Idle;
         break;
     }
 
