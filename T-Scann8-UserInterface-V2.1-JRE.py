@@ -1,6 +1,6 @@
 """
 06/08/2022: 2.1.7: JRE: Add Button for EmergencyStop
-10/08/2022: JRE: Comment emergency stop button
+10/08/2022: JRE: Comment out emergency stop button
 10/08/2022: JRE: After capturing image, if exposure has changed since previous capture wait one sec
                  (to allow camera to adapt in automatic mode)
 12/08/2022: JRE: Improve automatic exposure adaptation
@@ -34,6 +34,21 @@
         - Already used for it's purpose (find optimal value), remove it as it is confusing
         - Also with the new approach prioritizing the minimal number of steps, perforation
           detection is more a confirmation we are in next frame
+04/09/2022: JRE - Port awb_gains to PiCamera2 (via libcamera controls AwbEnable, ColourGains)
+                  Negative image can probably be achieved via ColourCorrectionMatrix
+                  For now, if awb_gains values found in PiCamera legacy version are ported as they are
+                  to th ePiCamera2 version, terrible colors result. For now code is left commented out
+                - Optimization of 'postview' capture: Instead of retrieving the captured image from disk,
+                  we reuse the one captured in  memory (slight speed improvement, 55 to 64 FPM)
+                - Bug fix: We were writing session info to disk each capture loop, instead of each frame
+                  Significant speed improvement (including also previous optimization):
+                   - Without preview: 99 to 115 FPM
+                   - Postview 1/1: 55 to 74 FPM
+                   - Postview 1/10: 81 to 109
+                   - QTGL Preview: 30 to 36 (still quite unusable)
+                - Implement support for new Arduino message (12), indicating an error during the scan
+                  process. This allows for clean termination and reset of the UI to default status.
+                  This is useful mainly when the single step or scan buttons are clicked with no film
 """
 
 # ######### Imports section ##########
@@ -101,6 +116,7 @@ FastForwardErrorOutstanding = False
 OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
+ScanProcessError = False # To be set to true  upon reception of Arduino event
 ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedSessionFilename = os.path.join(ScriptDir, "T-Scann8.json")
@@ -641,16 +657,26 @@ def negative_capture():
     global NegativeCaptureStatus
     global SimulatedRun
 
+    NegativeCaptureStatus = not NegativeCaptureStatus
+
     if not SimulatedRun:
         if not IsPiCamera2:
-            if not NegativeCaptureStatus:
+            if NegativeCaptureStatus:
                 camera.image_effect = 'negative'
                 camera.awb_gains = (1.7, 1.9)
             else:
                 camera.image_effect = 'none'
                 camera.awb_gains = (3.5, 1.0)
-
-    NegativeCaptureStatus = not NegativeCaptureStatus
+        """
+        # Terrible colors with these values, need to tune
+        else:
+            if NegativeCaptureStatus:
+                # camera.image_effect = 'negative'
+                camera.set_controls({"ColourGains": (1.7, 1.9), "ColourCorrectionMatrix": (-1,0,0,0,-1,0,0,0,-1)})
+            else:
+                # camera.image_effect = 'none'
+                camera.set_controls({"ColourGains": (3.5, 1.0), "ColourCorrectionMatrix": (1,0,0,0,1,0,0,0,1)})
+        """
 
 
 def open_folder():
@@ -791,7 +817,10 @@ def capture():
                 # Allow time to stabilize image, too fast with PiCamera2 when no preview.
                 # Need to refine this (shorter time, Arduino specific slowdown?)
                 time.sleep(0.1)  # 100 ms seems OK. Tried with 50 and some frames were blurry
-                camera.capture_file('picture-%05d.jpg' % CurrentFrame)
+                #camera.capture_file('picture-%05d.jpg' % CurrentFrame)
+                captured_snapshot = camera.capture_image("main")
+                captured_snapshot.save('picture-%05d.jpg' % CurrentFrame)
+
         else:
             camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
 
@@ -801,9 +830,17 @@ def capture():
             # Warning: Displaying the image just captured also has a cost in speed terms
             PostviewCounter += 1
             PostviewCounter %= PostviewModule
-            if (PostviewCounter == 0):
-                raw_simulated_capture_image = Image.open('picture-%05d.jpg' % CurrentFrame)
-                draw_preview_image(raw_simulated_capture_image)
+            if PostviewCounter == 0:
+                # Even if there's no gain using postview in PiCamera legacy, support is implemented
+                # to allow comparing same modes with PiCamera2. So now, for the case of PiCamera legacy,
+                # we need to get the captured image in memory, by reading it from disk (recapturing it 
+                # in memory directly implies importing yet another library so, no thanks)
+                if not IsPiCamera2:
+                    captured_snapshot = Image.open('picture-%05d.jpg' % CurrentFrame)
+
+                #raw_simulated_capture_image = Image.open('picture-%05d.jpg' % CurrentFrame)
+                #draw_preview_image(raw_simulated_capture_image)
+                draw_preview_image(captured_snapshot)
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -924,7 +961,7 @@ def start_scan():
     button_status_change_except(Start_btn, ScanOngoing)
 
     # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
-    if not SimulatedRun:
+    if not SimulatedRun and ScanOngoing:
         i2c.write_byte_data(16, 10, 0)
 
     # Invoke capture_loop a first time shen scan starts
@@ -939,6 +976,7 @@ def capture_loop():
     global SessionData
     global FramesPerMinute
     global NewFrameAvailable
+    global ScanProcessError
     global ScanOngoing
     global SimulatedRun
 
@@ -961,29 +999,35 @@ def capture_loop():
                     win.after(5, capture_loop)
                     return
 
-        SessionData["CurrentDate"] = str(datetime.now())
-        SessionData["TargetFolder"] = CurrentDir
-        SessionData["CurrentFrame"] = str(CurrentFrame)
-        if CurrentExposureStr == "Auto":
-            SessionData["CurrentExposure"] = CurrentExposureStr
-        else:
-            SessionData["CurrentExposure"] = str(CurrentExposure)
-        with open(PersistedSessionFilename, 'w') as f:
-            json.dump(SessionData, f)
+            SessionData["CurrentDate"] = str(datetime.now())
+            SessionData["TargetFolder"] = CurrentDir
+            SessionData["CurrentFrame"] = str(CurrentFrame)
+            if CurrentExposureStr == "Auto":
+                SessionData["CurrentExposure"] = CurrentExposureStr
+            else:
+                SessionData["CurrentExposure"] = str(CurrentExposure)
+            with open(PersistedSessionFilename, 'w') as f:
+                json.dump(SessionData, f)
 
-        # Update number of captured frames
-        Scanned_Images_number_label.config(text=str(CurrentFrame))
-        # Update Frames per Minute
-        scan_period_time = datetime.now() - CurrentScanStartTime
-        scan_period_seconds = scan_period_time.total_seconds()
-        scan_period_frames = CurrentFrame - CurrentScanStartFrame
-        if scan_period_seconds < 10:
-            Scanned_Images_fpm.config(text="??")
-        else:
-            FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
-            Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
-        win.update()
-
+            # Update number of captured frames
+            Scanned_Images_number_label.config(text=str(CurrentFrame))
+            # Update Frames per Minute
+            scan_period_time = datetime.now() - CurrentScanStartTime
+            scan_period_seconds = scan_period_time.total_seconds()
+            scan_period_frames = CurrentFrame - CurrentScanStartFrame
+            if scan_period_seconds < 10:
+                Scanned_Images_fpm.config(text="??")
+            else:
+                FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
+                Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+            win.update()
+        elif ScanProcessError:
+            curtime = time.ctime()
+            print(curtime + " - Error during scan process.")
+            ScanProcessError = False
+            if ScanOngoing:
+                start_scan()  # If scan ongoing (not single step) call start_scan to get back to normal state
+            return
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(0, capture_loop)
 
@@ -1024,6 +1068,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     global FastForwardErrorOutstanding
     global ArduinoTrigger
     global SimulatedRun
+    global ScanProcessError
+    global ScanOngoing
 
     if not SimulatedRun:
         try:
@@ -1032,8 +1078,13 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
             # Log error to console
             curtime = time.ctime()
             print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
+            ArduinoTrigger = 0 # should be zero already in case of error, but just in case
+
     if ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
+    elif ArduinoTrigger == 12:  # Error during scan
+        print("Received scan error from Arduino")
+        ScanProcessError = True
     elif ArduinoTrigger == 61:  # Error during Rewind
         RewindErrorOutstanding = True
         print("Received rewind error from Arduino")
@@ -1140,6 +1191,7 @@ def tscann8_init():
     global capture_config
     global preview_config
     global draw_capture_label
+    global PreviewAreaImage
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -1179,6 +1231,8 @@ def tscann8_init():
             else:
                 camera.configure(capture_config)
             camera.set_controls({"ExposureTime": CurrentExposure, "AnalogueGain": 1.0})
+            camera.set_controls({"AwbEnable": 1})
+            #camera.set_controls({"ColourGains": (1.0, 1.0)})
             camera.start(show_preview=True)
             ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         else:
@@ -1194,7 +1248,7 @@ def tscann8_init():
             camera.start_preview(fullscreen=False, window=(90, 75, 840, 720))
             camera.shutter_speed = CurrentExposure
 
-    # Enable events on windows movements, to allow preview to follow
+# Enable events on windows movements, to allow preview to follow
     # lblText = tk.Label(win, text='')
     # lblText.pack()
     if not SimulatedRun and not IsPiCamera2:
@@ -1402,6 +1456,10 @@ def build_ui():
 
 def main():
     global SimulatedRun
+
+    if len(sys.argv) >= 2:
+        if sys.argv[1] == '-s':
+            SimulatedRun = True
 
     tscann8_init()
 
