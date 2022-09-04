@@ -49,6 +49,26 @@
       01 Sep 2022 - JRE - Remove interface to allow RPi to tell us to modify the perforation level threshold
                           This was mostly to analyze best value, can be removed now.
                           Also, with yesterday's change (increase of MinFrameSteps), hole detection is more of a confirmation
+      04 Sep 2022 - JRE - Improve error handling in scan function (weird things happen when it is called with no film loaded)
+                          Changes:
+                          - Implement a 10 step limit in CollectOutgoingFilm:
+                            That function is only called from scan, once on each pass. Since scan only advances the capstan 
+                            4 steps per pass, 10 steps on wheel C to collect outgoing film should be more than enough (if film
+                            is loaded, it will be stopped before by the traction switch)
+                          - Implement  higher limit of steps per frame
+                            Even if advancing to next frame could take more steps that average (foir example, if film slides 
+                            over capstan), it should never be more than reasonable. To be safe, we set a limit of 3 times 
+                            DecreaseSpeedFrameSteps (no relation, just take as a reference for number of steps per frame)
+                          - Because of those two previous changes, we need to implement additional return codes for scan 
+                            function, so it cannot be a boolean anymore (we create an enum)
+                            - Before
+                              - False: Frame detected
+                              - True: No frame detected, continue
+                            - Now
+                              - SCAN_NO_FRAME_DETECTED: No frame detected, keep trying
+                              - SCAN_FRAME_DETECTED: Frame detected
+                              - SCAN_FRAME_DETECTION_ERROR: Error, too many steps advance without finding a frame
+                              - SCAN_TERMINATION_REQUESTED: User asked to stop scan process
 */
 
 #include <Wire.h>
@@ -86,6 +106,9 @@ int SlowForward = false;    // Advance film (move forward without scanning)
 //int Frame = LOW;          // Unused
 int SingleStep = false;     // Single step
 */
+
+enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
+
 boolean ReelsUnlocked = false;
 enum ScanState{
   Sts_Idle,
@@ -359,7 +382,11 @@ void loop() {
           DebugPrint("Scan stopped by user command"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
-        else if (scan(Ic)) {
+        else if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
+          //DebugPrint("Exiting scan state"); 
+          ScanState = Sts_Idle; // Exit scan loop
+        }
+        else {
           // Advance to next frame ? (to be checked)
           /* does not seem to be required (loop -> scan -> loop -> scan ...). Not sure how it works. Thanks to extensive use of global variables maybe
           digitalWrite(MotorB_Stepper, LOW); 
@@ -369,13 +396,10 @@ void loop() {
           digitalWrite(MotorB_Stepper, LOW);
           */
         }
-        else {
-          ScanState = Sts_Idle; // Exit scan loop
-        }
         break;
       case Sts_SingleStep:
-        if (!scan(Ic)) {
-          DebugPrint("Exiting single step state"); 
+        if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
+          //DebugPrint("Exiting single step state"); 
           ScanState = Sts_Idle;
         }
         break;
@@ -480,6 +504,7 @@ boolean FastForwardFilm(int Ic) {
 void CollectOutgoingFilm(void) {
   // --- New code by JRE (to put the new switch to good use)
   unsigned long CurrentTime = micros();
+  int StepCount=0;
 
   if ((CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
     do {
@@ -491,6 +516,7 @@ void CollectOutgoingFilm(void) {
         digitalWrite(MotorC_Stepper, HIGH); 
         delayMicroseconds(1000);
         digitalWrite(MotorC_Stepper, LOW); 
+        StepCount++;
       }
       else {
         TractionStopLastWaitEventTime = CurrentTime;
@@ -499,7 +525,7 @@ void CollectOutgoingFilm(void) {
           TractionStopWaitingTime = 70000;
         break;
       }
-    } while (!TractionStopActive);
+    } while (!TractionStopActive && StepCount < 10); // 10 should be enough. This function is called only from scan, and each pass it performs a max of 4 steps
   } 
 }
 
@@ -510,7 +536,7 @@ boolean FilmInFilmgate() {
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
   UVLedOn = true;
-  delay(100);  // Give time to FT to stabilize
+  delay(200);  // Give time to FT to stabilize
 
   PreviousSignalLevel = analogRead(PHOTODETECT);
   //DebugPrintAux("Signal=", PreviousSignalLevel );
@@ -564,6 +590,7 @@ void check() {
     FrameStepsDone = 0; 
     analogWrite(A1, 255); // Light green led
     StartPictureSaveTime = micros();
+    // Tell UI (Raspberry PI) a new frame is available for processing
     EventForRPi = 11; 
     digitalWrite(13, HIGH);
   }
@@ -585,8 +612,8 @@ void check() {
 
 // ----- This is the function to "ScanFilm" -----
 // Returns false when done
-boolean scan(int Ic) {
-  boolean retvalue = true;
+ScanResult scan(int Ic) {
+  ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
   
   Wire.begin(16);
 
@@ -642,7 +669,7 @@ boolean scan(int Ic) {
   //-------------ScanFilm-----------
   if (Ic == 10) {   // UI Requesting to end current scan
     DebugPrint("scan - RPi asks to end scan"); 
-    retvalue = false; 
+    retvalue = SCAN_TERMINATION_REQUESTED; 
     FrameDetected = false; 
     FilmTypeFrameCount = 0; 
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
@@ -660,7 +687,7 @@ boolean scan(int Ic) {
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
           check();
-          if (FrameDetected) break;
+          if (FrameDetected || FrameStepsDone > 3*DecreaseSpeedFrameSteps) break;
         }
         digitalWrite(MotorB_Stepper, LOW);
       }
@@ -669,9 +696,17 @@ boolean scan(int Ic) {
 
   if (FrameDetected) {
     FrameDetected = false;
-    retvalue = false;
+    retvalue = SCAN_FRAME_DETECTED;
     DebugPrintAux("Last Frame Steps",LastFrameSteps);
     DebugPrintAux("Last Frame Detect Time",CurrentTime-StartFrameTime);
+  }
+  else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
+    retvalue = SCAN_FRAME_DETECTION_ERROR;    
+    FrameStepsDone = 0;
+    DebugPrint("Error during scanning");
+    // Tell UI (Raspberry PI) an error happened during scanning
+    EventForRPi = 12; 
+    digitalWrite(13, HIGH);
   }
 
   return (retvalue);
