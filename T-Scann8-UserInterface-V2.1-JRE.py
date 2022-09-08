@@ -67,7 +67,7 @@ import time
 import json
 
 from datetime import datetime
-import sys
+import sys, getopt
 
 try:
     import smbus
@@ -148,6 +148,14 @@ raw_simulated_capture_image = ''
 simulated_capture_image = ''
 draw_capture_label = ''
 simulated_images_in_list = 0
+
+Experimental = False
+CurrentAwbAuto = True
+gain_red = 1 # 2.4
+gain_blue = 1 # 2.8
+AwbPause = False
+PreviousGainRed = 1
+PreviousGainBlue = 1
 
 # Persisted data
 SessionData = {
@@ -258,6 +266,14 @@ def set_focus_zoom():
     button_status_change_except(Focus_btn, FocusZoomActive)
 
 
+# A couple of helper funtcions to hide/display preview when needed (displaying popups with picamera legacy)
+def hide_preview():
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
+        camera.stop_preview()
+def display_preview():
+    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
+        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+
 def set_new_folder():
     global CurrentDir
     global CurrentFrame
@@ -271,8 +287,7 @@ def set_new_folder():
     CurrentDir = BaseDir
     # folder_frame_target_dir.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-        camera.stop_preview()
+    hide_preview()
     while requested_dir == "" or requested_dir is None:
         requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
         if requested_dir is None:
@@ -289,8 +304,7 @@ def set_new_folder():
     else:
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
 
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+    display_preview()
 
     folder_frame_target_dir.config(text=CurrentDir)
     Scanned_Images_number_label.config(text=str(CurrentFrame))
@@ -302,8 +316,7 @@ def set_existing_folder():
     global SimulatedRun
 
     # Disable preview to make tkinter dialogs visible
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-        camera.stop_preview()
+    hide_preview()
     if not SimulatedRun:
         CurrentDir = tk.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
     else:
@@ -325,8 +338,7 @@ def set_existing_folder():
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
 
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+    display_preview()
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -412,6 +424,123 @@ def auto_exposure_change_pause_selection():
     global ExposureAdaptPause
     ExposureAdaptPause = auto_exposure_change_pause.get()
 
+def auto_white_balance_change_pause_selection():
+    global auto_white_balance_change_pause
+    global AwbPause
+    AwbPause = auto_white_balance_change_pause.get()
+
+def colour_gain_red_plus():
+    global colour_gains_red_value_label
+    global gain_blue
+    global gain_red
+    gain_red += 0.1
+    colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+    if not SimulatedRun and not CurrentAwbAuto:
+        if IsPiCamera2:
+            #camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+        else:
+            #camera.awb_mode = 'off'
+            camera.awb_gains = (gain_red, gain_blue)
+
+def colour_gain_red_minus():
+    global colour_gains_red_value_label
+    global gain_blue
+    global gain_red
+    gain_red -= 0.1
+    colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+    if not SimulatedRun and not CurrentAwbAuto:
+        if IsPiCamera2:
+            #camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+        else:
+            #camera.awb_mode = 'off'
+            camera.awb_gains = (gain_red, gain_blue)
+
+def colour_gain_blue_plus():
+    global colour_gains_blue_value_label
+    global gain_blue
+    global gain_red
+    gain_blue += 0.1
+    colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+    if not SimulatedRun and not CurrentAwbAuto:
+        if IsPiCamera2:
+            #camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+        else:
+            #camera.awb_mode = 'off'
+            camera.awb_gains = (gain_red, gain_blue)
+
+def colour_gain_blue_minus():
+    global colour_gains_blue_value_label
+    global gain_blue
+    global gain_red
+    gain_blue -= 0.1
+    colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+    if not SimulatedRun and not CurrentAwbAuto:
+        if IsPiCamera2:
+            #camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+        else:
+            #camera.awb_mode = 'off'
+            camera.awb_gains = (gain_red, gain_blue)
+
+
+def colour_gain_auto():
+    global CurrentAwbAuto
+    global gain_blue
+    global gain_red
+    global colour_gains_auto_btn
+    global colour_gains_red_btn_plus
+    global colour_gains_red_btn_minus
+    global colour_gains_blue_btn_plus
+    global colour_gains_blue_btn_minus
+    global colour_gains_red_value_label
+    global colour_gains_blue_value_label
+
+    CurrentAwbAuto = not CurrentAwbAuto
+
+    if CurrentAwbAuto:
+        awb_wait_checkbox.config(state=NORMAL)
+        colour_gains_auto_btn.config(text='AWB OFF')
+        colour_gains_red_btn_plus.config(state=DISABLED)
+        colour_gains_red_btn_minus.config(state=DISABLED)
+        colour_gains_blue_btn_plus.config(state=DISABLED)
+        colour_gains_blue_btn_minus.config(state=DISABLED)
+        if not SimulatedRun:
+            if IsPiCamera2:
+                camera.set_controls({"AwbEnable": 1})
+                colour_gains_red_value_label.config(text="Auto")
+                colour_gains_blue_value_label.config(text="Auto")
+            else:
+                camera.awb_mode = 'auto'
+                colour_gains_red_value_label.config(text="Auto")
+                colour_gains_blue_value_label.config(text="Auto")
+    else:
+        awb_wait_checkbox.config(state=DISABLED)
+        colour_gains_auto_btn.config(text='AWB ON')
+        colour_gains_red_btn_plus.config(state=NORMAL)
+        colour_gains_red_btn_minus.config(state=NORMAL)
+        colour_gains_blue_btn_plus.config(state=NORMAL)
+        colour_gains_blue_btn_minus.config(state=NORMAL)
+        if not SimulatedRun:
+            if IsPiCamera2:
+                # Retrieve current gain values from Camera
+                metadata = camera.capture_metadata()
+                camera_colour_gains = metadata["ColourGains"]
+                gain_red = camera_colour_gains[0]
+                gain_blue = camera_colour_gains[1]
+                colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+                colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+                camera.set_controls({"AwbEnable": 0})
+            else:
+                gain_red = camera.awb_gains[0]
+                gain_blue = camera.awb_gains[1]
+                colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+                colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+                camera.awb_mode = 'off'
+                camera.awb_gains = (gain_red, gain_blue)
+
 
 def button_status_change_except(except_button, active):
     global Free_btn
@@ -485,25 +614,19 @@ def rewind_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.stop_preview()
+        hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
                                              message='Have you routed the film via the upper path?')
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        display_preview()
         if not answer:
             return()
     else:
         if RewindErrorOutstanding:
-            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
-                # Preview needs to be hidden only when using picamera legacy
-                camera.stop_preview()
+            hide_preview()
             tk.messagebox.showerror(title='Error during rewind',
                                          message='It seems there is film loaded via filmgate. \
                                          Please route it via upper path.')
-            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
-                # Preview needs to be hidden only when using picamera legacy
-                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+            display_preview()
 
     # Update button text
     if not RewindMovieActive:  # Rewind movie is about to start...
@@ -551,25 +674,19 @@ def fast_forward_movie():
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.stop_preview()
+        hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
                                              message='Have you routed the film via the upper path?')
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        display_preview()
         if not answer:
             return ()
     else:
         if FastForwardErrorOutstanding:
-            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
-                # Preview needs to be hidden only when using picamera legacy
-                camera.stop_preview()
+            hide_preview()
             tk.messagebox.showerror(title='Error during fast forward',
                                          message='It seems there is film loaded via filmgate. \
                                          Please route it via upper path.')
-            if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
-                # Preview needs to be hidden only when using picamera legacy
-                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+            display_preview()
 
     # Update button text
     if not FastForwardActive:  # Fast-forward movie is about to start...
@@ -660,23 +777,21 @@ def negative_capture():
     NegativeCaptureStatus = not NegativeCaptureStatus
 
     if not SimulatedRun:
-        if not IsPiCamera2:
+        if IsPiCamera2:
+            # Terrible colors with these values, need to tune
+            if NegativeCaptureStatus:
+                # camera.image_effect = 'negative'
+                camera.set_controls({"ColourGains": (1.0, 1.0), "ColourCorrectionMatrix": (-1,0,0,0,-1,0,0,0,-1)})
+            else:
+                # camera.image_effect = 'none'
+                camera.set_controls({"ColourGains": (1.0, 1.0), "ColourCorrectionMatrix": (1,0,0,0,1,0,0,0,1)})
+        else:
             if NegativeCaptureStatus:
                 camera.image_effect = 'negative'
                 camera.awb_gains = (1.7, 1.9)
             else:
                 camera.image_effect = 'none'
                 camera.awb_gains = (3.5, 1.0)
-        """
-        # Terrible colors with these values, need to tune
-        else:
-            if NegativeCaptureStatus:
-                # camera.image_effect = 'negative'
-                camera.set_controls({"ColourGains": (1.7, 1.9), "ColourCorrectionMatrix": (-1,0,0,0,-1,0,0,0,-1)})
-            else:
-                # camera.image_effect = 'none'
-                camera.set_controls({"ColourGains": (3.5, 1.0), "ColourCorrectionMatrix": (1,0,0,0,1,0,0,0,1)})
-        """
 
 
 def open_folder():
@@ -688,16 +803,14 @@ def open_folder():
 
     if not OpenFolderActive:
         OpenFolder_btn.config(text="Close Folder", bg='red', fg='white')
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.stop_preview()
+        hide_preview()
         FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
     else:
         OpenFolder_btn.config(text="Open Folder", bg=save_bg, fg=save_fg)
         FolderProcess.terminate()  # Does not work, needs to be debugged
 
         time.sleep(.5)
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        display_preview()
         time.sleep(.5)
 
     OpenFolderActive = not OpenFolderActive
@@ -783,19 +896,23 @@ def capture():
     global PostviewCounter
     global PostviewModule
     global ExposureAdaptPause
+    global CurrentAwbAuto
+    global AwbPause
+    global PreviousGainRed
+    global PreviousGainBlue
+
 
     os.chdir(CurrentDir)
 
-    # Wait for auto exposure to adapt only is allowed
+    # Wait for auto exposure to adapt only if allowed
     if CurrentExposure == 0 and ExposureAdaptPause:
         while True:  # In case of exposure change, give time for the camera to adapt
             if IsPiCamera2:
                 metadata = camera.capture_metadata()
                 aux_current_exposure = metadata["ExposureTime"]
-                # aux_current_exposure = camera.controls.ExposureTime # Does not work, need to get all metadata
             else:
                 aux_current_exposure = camera.exposure_speed
-            # With PiCamera 20, exposure was changing too much, so level changed from 1000 to 2000
+            # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000
             if abs(aux_current_exposure - PreviousCurrentExposure) > 2000:
                 curtime = time.ctime()
                 aux_exposure_str = "Auto (" + str(round((aux_current_exposure - 20000) / 2000)) + ")"
@@ -808,6 +925,33 @@ def capture():
                 time.sleep(0.2)
             else:
                 break
+
+    # Wait for auto white balance to adapt only if allowed
+    if CurrentAwbAuto and AwbPause:
+        while True:  # In case of exposure change, give time for the camera to adapt
+            if IsPiCamera2:
+                metadata = camera.capture_metadata()
+                camera_colour_gains = metadata["ColourGains"]
+                aux_gain_red = camera_colour_gains[0]
+                aux_gain_blue = camera_colour_gains[1]
+            else:
+                aux_gain_red = camera.awb_gains[0]
+                aux_gain_blue = camera.awb_gains[1]
+
+            if aux_gain_red != PreviousGainRed or aux_gain_blue != PreviousGainBlue:
+                curtime = time.ctime()
+                aux_gains_str = "Auto (" + str(round(aux_gain_red)) + ", " + str(round(aux_gain_blue)) + ")"
+                print(
+                    f"{curtime} - Automatic Wait Balance: Waiting for camera to adapt {aux_gains_str})")
+                colour_gains_red_value_label.config(text=str(round(aux_gain_red,1)))
+                colour_gains_blue_value_label.config(text=str(round(aux_gain_blue,1)))
+                PreviousGainRed = aux_gain_red
+                PreviousGainBlue = aux_gain_blue
+                win.update()
+                time.sleep(0.2)
+            else:
+                break
+
 
     if not SimulatedRun:
         if IsPiCamera2:
@@ -936,11 +1080,9 @@ def start_scan():
     global SimulatedRun
 
     if not ScanOngoing and BaseDir == CurrentDir:
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.stop_preview()
+        hide_preview()
         tk.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        display_preview()
         return
 
     if not ScanOngoing:  # Scanner session to be started
@@ -989,7 +1131,7 @@ def capture_loop():
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
                     NewFrameAvailable = False
                     i2c.write_byte_data(16, 12, 0)  # Tell Arduino to move to next frame
-                except:
+                except IOError:
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
                     # Log error to console
@@ -1074,7 +1216,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     if not SimulatedRun:
         try:
             ArduinoTrigger = i2c.read_byte_data(16, 0)
-        except:
+        except IOError:
             # Log error to console
             curtime = time.ctime()
             print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
@@ -1118,8 +1260,7 @@ def on_form_event(test):
     TopWinY = new_win_y
     PreviewWinX = PreviewWinX + DeltaX
     PreviewWinY = PreviewWinY + DeltaY
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+    display_preview()
 
     """
     # Uncomment to have the details of each event
@@ -1133,15 +1274,13 @@ def recover_session():
     global PersistedSessionFilename
     global SessionData
     global CurrentExposure
-    global PreviousCurrentExposure
     global CurrentExposureStr
     global CurrentDir
     global CurrentFrame
 
     # Check if persisted data file exist: If it does, load it
     if os.path.isfile(PersistedSessionFilename):
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.stop_preview()
+        hide_preview()
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
                                               message='It seems T-Scann 8 was interrupted during the last session.\
                                                         \r\nDo you want to continue from where it was stopped?')
@@ -1170,15 +1309,13 @@ def recover_session():
                     os.remove(PersistedSessionFilename)
             except:
                 print("Error deleting persistent session data file ({PersistedSessionFilename})")
-        if PreviewEnabled and not SimulatedRun and not IsPiCamera2:  # Preview hidden only when using picamera legacy
-            camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+        display_preview()
 
 
 def tscann8_init():
     global win
     global camera
     global CurrentExposure
-    global PreviousCurrentExposure
     global CurrentExposureStr
     global TopWinX
     global TopWinY
@@ -1198,11 +1335,15 @@ def tscann8_init():
 
     win = Tk()  # creating the main window and storing the window object in 'win'
     win.title('T-Scann 8')  # setting title of the window
-    win.geometry('1100x850')  # setting the size of the window
+    win.geometry('1100x830')  # setting the size of the window
     win.geometry('+50+50')  # setting the position of the window
     # Prevent window resize
-    win.minsize(1100, 850)
-    win.maxsize(1100, 850)
+    win.minsize(1100, 830)
+    win.maxsize(1100, 830)
+    if (Experimental):
+        win.geometry('1100x950')  # setting the size of the window
+        win.minsize(1100, 950)
+        win.maxsize(1100, 950)
 
     win.update_idletasks()
 
@@ -1232,7 +1373,7 @@ def tscann8_init():
                 camera.configure(capture_config)
             camera.set_controls({"ExposureTime": CurrentExposure, "AnalogueGain": 1.0})
             camera.set_controls({"AwbEnable": 1})
-            #camera.set_controls({"ColourGains": (1.0, 1.0)})
+            #camera.set_controls({"ColourGains": (2.4, 2.8)}) # Red 2.4, Blue 2.8 seem to be OK
             camera.start(show_preview=True)
             ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         else:
@@ -1243,8 +1384,8 @@ def tscann8_init():
             camera.iso = 100  # not supported in picamera2
             camera.sharpness = 100
             camera.hflip = True
-            camera.awb_mode = 'off'
-            camera.awb_gains = (3.5, 1.0)
+            camera.awb_mode = 'auto'
+            #camera.awb_gains = (3.5, 1.0)
             camera.start_preview(fullscreen=False, window=(90, 75, 840, 720))
             camera.shutter_speed = CurrentExposure
 
@@ -1257,6 +1398,7 @@ def tscann8_init():
 
 def build_ui():
     global win
+    global Experimental
     global AdvanceMovie_btn
     global SingleStep_btn
     global PosNeg_btn
@@ -1282,6 +1424,15 @@ def build_ui():
     global ExposureAdaptPause
     global temp_in_fahrenheit
     global TempInFahrenheit
+    global colour_gains_red_value_label
+    global colour_gains_blue_value_label
+    global colour_gains_auto_btn
+    global colour_gains_red_btn_plus
+    global colour_gains_red_btn_minus
+    global colour_gains_blue_btn_plus
+    global colour_gains_blue_btn_minus
+    global auto_white_balance_change_pause
+    global awb_wait_checkbox
 
     # SimulatedRun: Create marker for film hole
     if SimulatedRun:
@@ -1334,19 +1485,19 @@ def build_ui():
     Focus_btn.place(x=550, y=710)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    preview_frame = LabelFrame(win, text='Preview/Display capture', width=8, height=3)
+    preview_frame = LabelFrame(win, text='Preview', width=8, height=3)
     preview_frame.pack(side=TOP, padx=1, pady=1)
     preview_frame.place(x=650, y=700)
 
     PreviewStatus=tk.IntVar()
-    preview_radio1 = Radiobutton(preview_frame,text="Enabled     ", variable=PreviewStatus, value=1, command=change_preview_status)
-    preview_radio1.grid(row=0, column=1)
+    preview_radio1 = Radiobutton(preview_frame,text="From camera", variable=PreviewStatus, value=1, command=change_preview_status)
+    preview_radio1.grid(row=0, column=2)
     preview_radio1.select()
-    preview_radio2 = Radiobutton(preview_frame,text="Disabled    ", variable=PreviewStatus, value=2, command=change_preview_status)
-    preview_radio2.grid(row=0, column=2)
-    preview_radio3 = Radiobutton(preview_frame,text="Each frame", variable=PreviewStatus, value=3, command=change_preview_status)
+    preview_radio2 = Radiobutton(preview_frame,text="None          ", variable=PreviewStatus, value=2, command=change_preview_status)
+    preview_radio2.grid(row=0, column=1)
+    preview_radio3 = Radiobutton(preview_frame,text="Capture 1/1", variable=PreviewStatus, value=3, command=change_preview_status)
     preview_radio3.grid(row=1, column=1)
-    preview_radio4 = Radiobutton(preview_frame,text="1/10 frame", variable=PreviewStatus, value=4, command=change_preview_status)
+    preview_radio4 = Radiobutton(preview_frame,text="Capture 1/10", variable=PreviewStatus, value=4, command=change_preview_status)
     preview_radio4.grid(row=1, column=2)
     PreviewStatus.set(1)
 
@@ -1452,14 +1603,51 @@ def build_ui():
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1, variable=temp_in_fahrenheit, onvalue=True, offvalue=False, command=temp_in_fahrenheit_selection)
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
+    # Create experimental frame to play with ColourGains
+    if Experimental:
+        experimental_frame = LabelFrame(win, text='Experimental', width=8, height=5, font=("Arial", 7))
+        experimental_frame.pack(side=TOP)
+        experimental_frame.place(x=30, y=790)
+
+        awb_frame = LabelFrame(experimental_frame, text='AWB Mode', width=8, height=1, font=("Arial", 7))
+        awb_frame.pack(side=LEFT, fill='both', expand=True, padx=10, pady=10)
+
+        colour_gains_auto_btn= Button(awb_frame,text="AWB OFF", width=8, height=4, command=colour_gain_auto, activebackground='green', activeforeground='white', font=("Arial", 7))
+        colour_gains_auto_btn.grid(row=2, column=1)
+        colour_gains_auto_btn.pack(side=TOP)
+
+        auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
+        awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Adapt. wait', height=1, variable=auto_white_balance_change_pause, onvalue=True, offvalue=False, command=auto_white_balance_change_pause_selection, font=("Arial", 7))
+        awb_wait_checkbox.pack(side=TOP)
+
+        colour_gains_frame = LabelFrame(experimental_frame, text='Colour Gains', width=8, height=1, font=("Arial", 7))
+        colour_gains_frame.pack(side=LEFT, fill='both', expand=True, padx=10, pady=10)
+
+        colour_gains_red_btn_plus = Button(colour_gains_frame,text="Red-", command=colour_gain_red_minus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_red_btn_plus.grid(row=0, column=1)
+        colour_gains_red_btn_minus = Button(colour_gains_frame,text="Red+", command=colour_gain_red_plus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_red_btn_minus.grid(row=0, column=2)
+        colour_gains_red_value_label = Label(colour_gains_frame, text="Auto", width=8, height=1, font=("Arial", 7))
+        colour_gains_red_value_label.grid(row=0, column=3)
+        colour_gains_blue_btn_plus = Button(colour_gains_frame,text="Blue-", command=colour_gain_blue_minus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_blue_btn_plus.grid(row=1, column=1)
+        colour_gains_blue_btn_minus = Button(colour_gains_frame,text="Blue+", command=colour_gain_blue_plus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_blue_btn_minus.grid(row=1, column=2)
+        colour_gains_blue_value_label = Label(colour_gains_frame, text="Auto", width=8, height=1, font=("Arial", 7))
+        colour_gains_blue_value_label.grid(row=1, column=3)
 
 
-def main():
+def main(argv):
     global SimulatedRun
+    global Experimental
 
-    if len(sys.argv) >= 2:
-        if sys.argv[1] == '-s':
+    opts, args = getopt.getopt(argv, "sx")
+
+    for opt, arg in opts:
+        if opt == '-s':
             SimulatedRun = True
+        elif opt  == '-x':
+            Experimental = True
 
     tscann8_init()
 
@@ -1479,4 +1667,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])
