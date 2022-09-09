@@ -66,6 +66,8 @@ import subprocess
 import time
 import json
 
+from enum import Enum
+
 from datetime import datetime
 import sys, getopt
 
@@ -132,6 +134,13 @@ WinInitDone = False
 FolderProcess = 0
 PreviewEnabled = True
 PostviewAllowed = False  # Workaround when preview is disabled with PiCamera2 due to speed issues
+# Create enum to consolidate all pre/post view modes in a single variable
+class PreviewType(Enum):
+    NO_PREVIEW = 0
+    CAMERA_PREVIEW = 1
+    CAPTURE_1_1 = 2
+    CAPTURE_1_10 = 3
+PreviewMode = PreviewType.CAMERA_PREVIEW
 PostviewModule = 1
 PostviewCounter = 0
 FramesPerMinute = 0
@@ -148,6 +157,7 @@ raw_simulated_capture_image = ''
 simulated_capture_image = ''
 draw_capture_label = ''
 simulated_images_in_list = 0
+FilmHoleY=300
 
 Experimental = False
 CurrentAwbAuto = True
@@ -163,7 +173,8 @@ SessionData = {
     "CurrentDate": str(datetime.now()),
     "TargetFolder": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
-    "CurrentExposure": str(CurrentExposure)
+    "CurrentExposure": str(CurrentExposure),
+    "FilmHoleY": str(FilmHoleY)
 }
 
 #  ######### Special Global variables defined inside functions  ##########
@@ -485,6 +496,18 @@ def colour_gain_blue_minus():
             #camera.awb_mode = 'off'
             camera.awb_gains = (gain_red, gain_blue)
 
+def ccm_update():
+    global ccm_11,ccm_12,ccm_13,ccm_21,ccm_22,ccm_23,ccm_31,ccm_32,ccm_33
+    if IsPiCamera2:
+        camera.set_controls({"ColourCorrectionMatrix": (float(ccm_11.get()),
+                                                        float(ccm_12.get()),
+                                                        float(ccm_13.get()),
+                                                        float(ccm_21.get()),
+                                                        float(ccm_22.get()),
+                                                        float(ccm_23.get()),
+                                                        float(ccm_31.get()),
+                                                        float(ccm_32.get()),
+                                                        float(ccm_33.get()))})
 
 def colour_gain_auto():
     global CurrentAwbAuto
@@ -800,6 +823,7 @@ def open_folder():
     global save_bg
     global save_fg
     global SimulatedRun
+    global OpenFolder_btn
 
     if not OpenFolderActive:
         OpenFolder_btn.config(text="Close Folder", bg='red', fg='white')
@@ -882,6 +906,19 @@ def set_r8():
     if not SimulatedRun:
         i2c.write_byte_data(16, 18, 0)
 
+def film_hole_up():
+    global FilmHoleY
+    if FilmHoleY > 38:
+        FilmHoleY -= 4
+    film_hole_frame.place(x=4, y=FilmHoleY)
+    SessionData["FilmHoleY"] = str(FilmHoleY)
+
+def film_hole_down():
+    global FilmHoleY
+    if FilmHoleY < 758:
+        FilmHoleY += 3 # Intentionally different from button up, to allow eventual fine tunning
+    film_hole_frame.place(x=4, y=FilmHoleY)
+    SessionData["FilmHoleY"] = str(FilmHoleY)
 
 def capture():
     global CurrentDir
@@ -938,9 +975,9 @@ def capture():
                 aux_gain_red = camera.awb_gains[0]
                 aux_gain_blue = camera.awb_gains[1]
 
-            if aux_gain_red != PreviousGainRed or aux_gain_blue != PreviousGainBlue:
+            if round(aux_gain_red,2) != round(PreviousGainRed,2) or round(aux_gain_blue,2) != round(PreviousGainBlue,2):
                 curtime = time.ctime()
-                aux_gains_str = "Auto (" + str(round(aux_gain_red)) + ", " + str(round(aux_gain_blue)) + ")"
+                aux_gains_str = "Auto (" + str(round(aux_gain_red,2)) + ", " + str(round(aux_gain_blue,2)) + ")"
                 print(
                     f"{curtime} - Automatic Wait Balance: Waiting for camera to adapt {aux_gains_str})")
                 colour_gains_red_value_label.config(text=str(round(aux_gain_red,1)))
@@ -1136,7 +1173,7 @@ def capture_loop():
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
                     # Log error to console
                     curtime = time.ctime()
-                    print(curtime + " - Error while telling Arduino to move to next Frame.")
+                    print(f"{curtime} - Error while telling Arduino to move to next Frame.")
                     print(f"    Frame {CurrentFrame} capture to be tried again.")
                     win.after(5, capture_loop)
                     return
@@ -1165,7 +1202,7 @@ def capture_loop():
             win.update()
         elif ScanProcessError:
             curtime = time.ctime()
-            print(curtime + " - Error during scan process.")
+            print(f"{curtime} - Error during scan process.")
             ScanProcessError = False
             if ScanOngoing:
                 start_scan()  # If scan ongoing (not single step) call start_scan to get back to normal state
@@ -1219,8 +1256,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
         except IOError:
             # Log error to console
             curtime = time.ctime()
-            print(curtime + " - Error while checking incoming event from Arduino. Will check again.")
-            ArduinoTrigger = 0 # should be zero already in case of error, but just in case
+            print(f"{curtime} - Error while checking incoming event ({ArduinoTrigger}) from Arduino. Will check again.")
 
     if ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
@@ -1277,6 +1313,7 @@ def recover_session():
     global CurrentExposureStr
     global CurrentDir
     global CurrentFrame
+    global film_hole_frame
 
     # Check if persisted data file exist: If it does, load it
     if os.path.isfile(PersistedSessionFilename):
@@ -1293,14 +1330,17 @@ def recover_session():
             print(SessionData["TargetFolder"])
             print(SessionData["CurrentFrame"])
             print(SessionData["CurrentExposure"])
+            print(SessionData["FilmHoleY"])
             CurrentDir = SessionData["TargetFolder"]
             CurrentFrame = int(SessionData["CurrentFrame"])
+            FilmHoleY = int(SessionData["FilmHoleY"])
             CurrentExposureStr = SessionData["CurrentExposure"]
             if CurrentExposureStr == "Auto":
                 CurrentExposure = 0
             else:
                 CurrentExposure = int(CurrentExposureStr)
                 CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
+            film_hole_frame.place(x=4, y=FilmHoleY)
             # when finished, close the file
             persisted_data_file.close()
         else:
@@ -1416,8 +1456,7 @@ def build_ui():
     global exposure_frame_value_label
     global film_type_S8_btn
     global film_type_R8_btn
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
     global PreviewStatus
     global auto_exposure_change_pause
     global auto_exp_wait_checkbox
@@ -1427,21 +1466,14 @@ def build_ui():
     global colour_gains_red_value_label
     global colour_gains_blue_value_label
     global colour_gains_auto_btn
-    global colour_gains_red_btn_plus
-    global colour_gains_red_btn_minus
-    global colour_gains_blue_btn_plus
-    global colour_gains_blue_btn_minus
+    global colour_gains_red_btn_plus, colour_gains_red_btn_minus
+    global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
     global awb_wait_checkbox
-
-    # SimulatedRun: Create marker for film hole
-    if SimulatedRun:
-        film_hole = Frame(win, width=1, height=11, bg='black')
-        film_hole.pack(side=TOP, padx=1, pady=1)
-        film_hole.place(x=4, y=300)
-
-        film_hole_label = Label(film_hole, justify=LEFT, font=("Arial", 8), width=5, height=11, bg='red', fg='white')
-        film_hole_label.pack(side=TOP)
+    global ccm_11,ccm_12,ccm_13,ccm_21,ccm_22,ccm_23,ccm_31,ccm_32,ccm_33
+    global OpenFolder_btn
+    global film_hole_frame
+    global FilmHoleY
 
     # Create horizontal button row at bottom
     # Advance movie (slow forward through filmgate)
@@ -1465,10 +1497,7 @@ def build_ui():
     FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
                              activebackground='green', activeforeground='white', wraplength=80)
     FastForward_btn.place(x=290, y=710)
-    # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imegined)
-    # So, disabled to gain some space
-    # OpenFolder_btn = Button(win, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80)
-    # OpenFolder_btn.place(x=630, y=710)
+
     # Unlock reels button (to load film, rewind, etc)
     Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green',
                       activeforeground='white', wraplength=80)
@@ -1610,9 +1639,9 @@ def build_ui():
         experimental_frame.place(x=30, y=790)
 
         awb_frame = LabelFrame(experimental_frame, text='AWB Mode', width=8, height=1, font=("Arial", 7))
-        awb_frame.pack(side=LEFT, fill='both', expand=True, padx=10, pady=10)
+        awb_frame.pack(side=LEFT, padx=5)
 
-        colour_gains_auto_btn= Button(awb_frame,text="AWB OFF", width=8, height=4, command=colour_gain_auto, activebackground='green', activeforeground='white', font=("Arial", 7))
+        colour_gains_auto_btn= Button(awb_frame,text="AWB OFF", width=6, height=2, command=colour_gain_auto, activebackground='green', activeforeground='white', font=("Arial", 7))
         colour_gains_auto_btn.grid(row=2, column=1)
         colour_gains_auto_btn.pack(side=TOP)
 
@@ -1621,7 +1650,7 @@ def build_ui():
         awb_wait_checkbox.pack(side=TOP)
 
         colour_gains_frame = LabelFrame(experimental_frame, text='Colour Gains', width=8, height=1, font=("Arial", 7))
-        colour_gains_frame.pack(side=LEFT, fill='both', expand=True, padx=10, pady=10)
+        colour_gains_frame.pack(side=LEFT, padx=5)
 
         colour_gains_red_btn_plus = Button(colour_gains_frame,text="Red-", command=colour_gain_red_minus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
         colour_gains_red_btn_plus.grid(row=0, column=1)
@@ -1635,6 +1664,78 @@ def build_ui():
         colour_gains_blue_btn_minus.grid(row=1, column=2)
         colour_gains_blue_value_label = Label(colour_gains_frame, text="Auto", width=8, height=1, font=("Arial", 7))
         colour_gains_blue_value_label.grid(row=1, column=3)
+
+        ccm_11 = StringVar()
+        ccm_12 = StringVar()
+        ccm_13 = StringVar()
+        ccm_21 = StringVar()
+        ccm_22 = StringVar()
+        ccm_23 = StringVar()
+        ccm_31 = StringVar()
+        ccm_32 = StringVar()
+        ccm_33 = StringVar()
+        ccm_frame = LabelFrame(experimental_frame, text='CCM', width=1, height=4, font=("Arial", 7))
+        ccm_frame.pack(side=LEFT, padx=5)
+        matrix_frame = Frame(ccm_frame, width=1, height=1)
+        matrix_frame.pack(side=TOP, padx=5)
+
+        ccm_entry_11 = Entry(matrix_frame, textvariable=ccm_11, font=("Arial", 7), width=5)
+        ccm_entry_11.grid(row=0, column=0)
+        ccm_entry_12 = Entry(matrix_frame, textvariable=ccm_12, font=("Arial", 7), width=5)
+        ccm_entry_12.grid(row=0, column=1)
+        ccm_entry_13 = Entry(matrix_frame, textvariable=ccm_13, font=("Arial", 7), width=5)
+        ccm_entry_13.grid(row=0, column=2)
+        ccm_entry_21 = Entry(matrix_frame, textvariable=ccm_21, font=("Arial", 7), width=5)
+        ccm_entry_21.grid(row=1, column=0)
+        ccm_entry_22 = Entry(matrix_frame, textvariable=ccm_22, font=("Arial", 7), width=5)
+        ccm_entry_22.grid(row=1, column=1)
+        ccm_entry_23 = Entry(matrix_frame, textvariable=ccm_23, font=("Arial", 7), width=5)
+        ccm_entry_23.grid(row=1, column=2)
+        ccm_entry_31 = Entry(matrix_frame, textvariable=ccm_31, font=("Arial", 7), width=5)
+        ccm_entry_31.grid(row=2, column=0)
+        ccm_entry_32 = Entry(matrix_frame, textvariable=ccm_32, font=("Arial", 7), width=5)
+        ccm_entry_32.grid(row=2, column=1)
+        ccm_entry_33 = Entry(matrix_frame, textvariable=ccm_33, font=("Arial", 7), width=5)
+        ccm_entry_33.grid(row=2, column=2)
+        ccm_go = Button(ccm_frame,text="Update CCM", command=ccm_update, activebackground='green', activeforeground='white', font=("Arial", 7), state = NORMAL)
+        ccm_go.pack(side=TOP, pady=2)
+
+        if not SimulatedRun:
+            metadata = camera.capture_metadata()
+            camera_ccm = metadata["ColourCorrectionMatrix"]
+            ccm_11.set(round(camera_ccm[0],2))
+            ccm_12.set(round(camera_ccm[1],2))
+            ccm_13.set(round(camera_ccm[2],2))
+            ccm_21.set(round(camera_ccm[3],2))
+            ccm_22.set(round(camera_ccm[4],2))
+            ccm_23.set(round(camera_ccm[5],2))
+            ccm_31.set(round(camera_ccm[6],2))
+            ccm_32.set(round(camera_ccm[7],2))
+            ccm_33.set(round(camera_ccm[8],2))
+
+        # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
+        # Leave it in the experimental area, disabled, just in case it is reused
+        openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
+        openfolder_frame.pack(side=LEFT, padx=5)
+        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80, state = DISABLED, font=("Arial", 7))
+        OpenFolder_btn.pack(side=TOP, padx=5, pady=2)
+
+        # Display marker for film hole
+        film_hole_frame = Frame(win, width=1, height=11, bg='black')
+        film_hole_frame.pack(side=TOP, padx=1, pady=1)
+        film_hole_frame.place(x=4, y=FilmHoleY)
+        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11, bg='white', fg='white')
+        film_hole_label.pack(side=TOP)
+        # Up/Down buttons to move marker for film hole
+        film_hole_control_frame = LabelFrame(experimental_frame, text="Film hole pos.", width=8, height=2, font=("Arial", 7))
+        film_hole_control_frame.pack(side=LEFT, padx=5)
+        film_hole_control_up = Button(film_hole_control_frame, text="⇑",width=1, height=1, command=film_hole_up,
+                                  activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_up.pack(side=TOP, padx=2, pady=2)
+        film_hole_control_down = Button(film_hole_control_frame, text="⇓",width=1, height=1, command=film_hole_down,
+                                  activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_down.pack(side=TOP, padx=2, pady=2)
+
 
 
 def main(argv):
@@ -1668,3 +1769,4 @@ def main(argv):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
+
