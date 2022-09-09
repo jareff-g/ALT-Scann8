@@ -132,8 +132,7 @@ DeltaX = 0
 DeltaY = 0
 WinInitDone = False
 FolderProcess = 0
-PreviewEnabled = True
-PostviewAllowed = False  # Workaround when preview is disabled with PiCamera2 due to speed issues
+PostviewModule = 1
 # Create enum to consolidate all pre/post view modes in a single variable
 class PreviewType(Enum):
     NO_PREVIEW = 0
@@ -141,7 +140,6 @@ class PreviewType(Enum):
     CAPTURE_1_1 = 2
     CAPTURE_1_10 = 3
 PreviewMode = PreviewType.CAMERA_PREVIEW
-PostviewModule = 1
 PostviewCounter = 0
 FramesPerMinute = 0
 PreviewAreaImage = ''
@@ -174,7 +172,8 @@ SessionData = {
     "TargetFolder": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
     "CurrentExposure": str(CurrentExposure),
-    "FilmHoleY": str(FilmHoleY)
+    "FilmHoleY": str(FilmHoleY),
+    "PreviewMode": PreviewMode.name
 }
 
 #  ######### Special Global variables defined inside functions  ##########
@@ -209,15 +208,16 @@ def exit_app():  # Exit Application
     global SimulatedRun
     global camera
     global win
+    global PreviewMode
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
-        if PreviewEnabled:
+        if PreviewMode == PreviewType.CAMERA_PREVIEW:
             camera.stop_preview()
         camera.close()
-    # Exiting normally: Delete session info
-    # if os.path.isfile(PersistedSessionFilename):
-    #    os.remove(PersistedSessionFilename)
+    # Write session data upon exit
+    with open(PersistedSessionFilename, 'w') as f:
+        json.dump(SessionData, f)
 
     win.destroy()
 
@@ -279,10 +279,12 @@ def set_focus_zoom():
 
 # A couple of helper funtcions to hide/display preview when needed (displaying popups with picamera legacy)
 def hide_preview():
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
+    global PreviewMode
+    if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
         camera.stop_preview()
 def display_preview():
-    if PreviewEnabled and not SimulatedRun and not IsPiCamera2:
+    global PreviewMode
+    if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 def set_new_folder():
@@ -764,11 +766,12 @@ def draw_preview_image(preview_image):
 def single_step_movie():
     global SimulatedRun
     global camera
+    global PreviewMode
 
     if not SimulatedRun:
         i2c.write_byte_data(16, 40, 0)
 
-        if not PreviewEnabled and PostviewAllowed:
+        if PreviewMode == PreviewType.CAPTURE_1_1 or PreviewMode == PreviewType.CAPTURE_1_10:
             # If no preview, capture frame in memory and display it
             # Single step is not a critical operation, waiting 100ms for it to happen should be enough
             # No need to implement confirmation from Arduino, as we have for regular capture during scan
@@ -842,9 +845,8 @@ def open_folder():
 
 def change_preview_status():
     global win
-    global PreviewEnabled
+    global PreviewMode
     global PreviewStatus
-    global PostviewAllowed
     global PostviewModule
     global PostviewCounter
     global capture_config
@@ -852,22 +854,22 @@ def change_preview_status():
 
     choice = PreviewStatus.get()
     if choice == 1:
-        PreviewEnabled = True
-        PostviewAllowed = False
+        PreviewMode = PreviewType.CAMERA_PREVIEW
+        SessionData["PreviewMode"] = PreviewMode.name
     elif choice == 2:
-        PreviewEnabled = False
-        PostviewAllowed = False
+        PreviewMode = PreviewType.NO_PREVIEW
+        SessionData["PreviewMode"] = PreviewMode.name
     elif choice == 3:
-        PreviewEnabled = False
-        PostviewAllowed = True
+        PreviewMode = PreviewType.CAPTURE_1_1
         PostviewModule = 1
+        SessionData["PreviewMode"] = PreviewMode.name
     elif choice == 4:
-        PreviewEnabled = False
-        PostviewAllowed = True
+        PreviewMode = PreviewType.CAPTURE_1_10
         PostviewModule = 10
+        SessionData["PreviewMode"] = PreviewMode.name
 
     if not SimulatedRun:
-        if PreviewEnabled:
+        if PreviewMode == PreviewType.CAMERA_PREVIEW:
             if IsPiCamera2:
                 camera.stop_preview()
                 camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
@@ -937,6 +939,7 @@ def capture():
     global AwbPause
     global PreviousGainRed
     global PreviousGainBlue
+    global PreviewMode
 
 
     os.chdir(CurrentDir)
@@ -992,7 +995,7 @@ def capture():
 
     if not SimulatedRun:
         if IsPiCamera2:
-            if PreviewEnabled:
+            if PreviewMode == PreviewType.CAMERA_PREVIEW:
                 camera.switch_mode_and_capture_file(capture_config, 'picture-%05d.jpg' % CurrentFrame)
             else:
                 # Allow time to stabilize image, too fast with PiCamera2 when no preview.
@@ -1005,8 +1008,8 @@ def capture():
         else:
             camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
 
-        # Treatment for postview common for Picamera2 adn legacy
-        if not PreviewEnabled and PostviewAllowed:
+        # Treatment for postview common for Picamera2 and legacy
+        if PreviewMode == PreviewType.CAPTURE_1_1 or PreviewMode == PreviewType.CAPTURE_1_10:
             # Mitigation when preview is disabled to speed up things in PiCamera2
             # Warning: Displaying the image just captured also has a cost in speed terms
             PostviewCounter += 1
@@ -1313,7 +1316,10 @@ def recover_session():
     global CurrentExposureStr
     global CurrentDir
     global CurrentFrame
-    global film_hole_frame
+    global film_hole_frame, FilmHoleY
+    global PreviewMode
+    global PostviewModule
+    global preview_radio1, preview_radio2, preview_radio3, preview_radio4
 
     # Check if persisted data file exist: If it does, load it
     if os.path.isfile(PersistedSessionFilename):
@@ -1331,9 +1337,21 @@ def recover_session():
             print(SessionData["CurrentFrame"])
             print(SessionData["CurrentExposure"])
             print(SessionData["FilmHoleY"])
+            print(SessionData["PreviewMode"])
             CurrentDir = SessionData["TargetFolder"]
             CurrentFrame = int(SessionData["CurrentFrame"])
             FilmHoleY = int(SessionData["FilmHoleY"])
+            PreviewMode = PreviewType[SessionData["PreviewMode"]]
+            if PreviewMode.name == "NO_PREVIEW":
+                preview_radio1.select()
+            elif PreviewMode.name == "CAMERA_PREVIEW":
+                preview_radio2.select()
+            elif PreviewMode.name == "CAPTURE_1_1":
+                PostviewModule = 1
+                preview_radio3.select()
+            elif PreviewMode.name == "CAPTURE_1_10":
+                PostviewModule = 10
+                preview_radio4.select()
             CurrentExposureStr = SessionData["CurrentExposure"]
             if CurrentExposureStr == "Auto":
                 CurrentExposure = 0
@@ -1369,6 +1387,7 @@ def tscann8_init():
     global preview_config
     global draw_capture_label
     global PreviewAreaImage
+    global PreviewMode
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -1407,7 +1426,7 @@ def tscann8_init():
             capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
                                                                transform=Transform(hflip=True))
             preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
-            if PreviewEnabled:
+            if PreviewMode == PreviewType.CAMERA_PREVIEW:
                 camera.configure(preview_config)
             else:
                 camera.configure(capture_config)
@@ -1474,6 +1493,7 @@ def build_ui():
     global OpenFolder_btn
     global film_hole_frame
     global FilmHoleY
+    global preview_radio1, preview_radio2, preview_radio3, preview_radio4
 
     # Create horizontal button row at bottom
     # Advance movie (slow forward through filmgate)
@@ -1519,11 +1539,11 @@ def build_ui():
     preview_frame.place(x=650, y=700)
 
     PreviewStatus=tk.IntVar()
-    preview_radio1 = Radiobutton(preview_frame,text="From camera", variable=PreviewStatus, value=1, command=change_preview_status)
-    preview_radio1.grid(row=0, column=2)
-    preview_radio1.select()
-    preview_radio2 = Radiobutton(preview_frame,text="None          ", variable=PreviewStatus, value=2, command=change_preview_status)
-    preview_radio2.grid(row=0, column=1)
+    preview_radio1 = Radiobutton(preview_frame,text="None          ", variable=PreviewStatus, value=2, command=change_preview_status)
+    preview_radio1.grid(row=0, column=1)
+    preview_radio2 = Radiobutton(preview_frame,text="From camera", variable=PreviewStatus, value=1, command=change_preview_status)
+    preview_radio2.grid(row=0, column=2)
+    preview_radio2.select()
     preview_radio3 = Radiobutton(preview_frame,text="Capture 1/1", variable=PreviewStatus, value=3, command=change_preview_status)
     preview_radio3.grid(row=1, column=1)
     preview_radio4 = Radiobutton(preview_frame,text="Capture 1/10", variable=PreviewStatus, value=4, command=change_preview_status)
