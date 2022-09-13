@@ -69,6 +69,38 @@
                               - SCAN_FRAME_DETECTED: Frame detected
                               - SCAN_FRAME_DETECTION_ERROR: Error, too many steps advance without finding a frame
                               - SCAN_TERMINATION_REQUESTED: User asked to stop scan process
+      04 Sep 2022 - JRE - Reduce MinFrameStepsS8 from 280 to 275
+                          - A couple of times scanning process went out of control. Even if we go too far in next frame
+                            (which might happen with the new algorithm) normally the hole detection should get us in sync
+                            for the next frame. To be reviewed.
+      1 Sep 2022 - JRE 
+                        - Sometimes the scanner goes out of sync, and does not recover by itself. Stragely enough, if we 
+                          restart the UI it seems to recover, when tgh sync is (should be) mostyl an Arduino thing.
+                          Actions taken:
+                          - Trying to find better values for PerforationThresholdLevel, MinFrameStepsS8, 
+                            DecreaseSpeedFrameStepsS8
+                          - Created an enum to control debug mode. We have 3 modes now:
+                            - PT_Level: Send to serial plotter photo transistor detected level
+                            - FrameSteps: Send to serial plotter number of steps per frame detected
+                            - DebugInfo: Send to Monitor seria debug info
+                            - None: No debug info sent
+      13 Sep 2022 - JRE 
+                        - Finally the problem refered above (out of sync until UI restart) was not a problem in Arduino code (as
+                          the use case shown) but on the UI. The flag indicating a new frame was avalable was not reset at the right time,
+                          so when launching th escan process a second time it was trying to get frames totalyl out of sync with Arduino.
+                          Corrected in the UI
+                        - Changed the debug flag to be able to set 3 different debug modes: Debug info, PT levels, and number of steps per frame
+                          - Also set serial speed to 115200, the restriction raised beforre is not valid (actually, we were logging PT too often)
+                        - Find best values so far (at least for me)
+                          - FetchFrameScanSpeed = 1000
+                          - PerforationThresholdLevel = 140
+                          - MinFrameStepsS8 = 275
+                          - DecreaseSpeedFrameStepsS8 = 270
+                        - UV led left on during all scanning session (until Stop Scan button is pressed)
+                          - Before it was turned off between frames, my mistake
+                        - Enabled once more the 'LastTime' updat ein 'scan' function. Actually it helps to stop at the righ place (but no miracles)
+                        - Prevent inserting in even tqueue events with value 0 (for some reason they arrive, even if Raspberry does not send them)
+
 */
 
 #include <Wire.h>
@@ -76,7 +108,14 @@
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
 
-boolean GlobalDebug = true;
+
+enum {
+  PT_Level,
+  FrameSteps,
+  DebugInfo,
+  None
+} DebugState = DebugInfo;
+
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
 
@@ -143,23 +182,23 @@ int FilteredSignalLevel = 0;
 
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
-unsigned long FetchFrameScanSpeed = 25000;    // Play Slow before trig (Original 15000)
+unsigned long FetchFrameScanSpeed = 1000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;                       // speed Rewind movie
-int PerforationThresholdLevel = 160;          // detector pulse level (Torulf: 250)
+int PerforationThresholdLevel = 140;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
                                               // JRE: After increasing MinFramSteps, this one is not so critical any more
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
-int PerforationMinLevel = 200;      // detector pulse low level, originalyl hardcoded
-int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int MinFrameStepsS8 = 280;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int PerforationMinLevel = 200;      // detector pulse low level, originally hardcoded
+int MinFrameStepsR8 = 255;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 260;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: ??)
-int DecreaseSpeedFrameStepsS8 = 280;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: ??)
+int DecreaseSpeedFrameStepsR8 = 245;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsS8 = 270;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
 
 // -------------------------------------------------------
 
-/*const */int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
+int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 // int Paus = LOW;                          // JRE: Unused
 int FrameStepsDone = 0;                     // Count steps
 int OriginalScanSpeed = ScanSpeed;          // restoration original value
@@ -194,10 +233,8 @@ volatile struct {
 void setup() {
 
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
-  if (GlobalDebug)
-    Serial.begin(115200);  // As fast as possible for debug, otherwise it slows down execution
-  else
-    Serial.begin(9600);  // 9600 for serial plotter (otyherwise it goes too fast)
+  Serial.begin(115200);  // As fast as possible for debug, otherwise it slows down execution
+  
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendEvent);
@@ -243,19 +280,18 @@ void setup() {
 }
 void loop() {
   while (1) {
-    if (dataInQueue())
+    if (dataInQueue()) {
       Ic = pop();   // Get next command from queue if one exists
+    }
     else
       Ic = 0;
 
     // First do some common stuff (set port, push phototransistor level)
     Wire.begin(16);
 
-    // Get phototransistor level in order to make it available via Arduino serial interface
-    // JRE 4/8/22: Check first if we are in debug mode: If yes, serial i/f is dedicated for it
-    int PT_SignalLevelRead = analogRead(PHOTODETECT);
-    if (ScanState == Sts_Scan || ScanState == Sts_SingleStep)
-      SerialPrintInt(PT_SignalLevelRead); // can be read in Arduino IDE - Serial plotter
+    // No need to log PT to Serial Plotter here, otherwise too many trees in the forest. No need to get value either
+    // PT_SignalLevelRead = analogRead(PHOTODETECT);
+    //if (DebugState == PT_Level && (ScanState == Sts_Scan || ScanState == Sts_SingleStep)) SerialPrintInt(PT_SignalLevelRead);
 
     TractionStopActive = digitalRead(TractionStopPin);
 
@@ -274,18 +310,23 @@ void loop() {
 
     switch (ScanState) {
       case Sts_Idle:
-        if (UVLedOn) {
-            analogWrite(11, 0); // Turn off UV LED
-            UVLedOn = false;
-        }
         switch (Ic) {
           case 10:
             DebugPrint(">>>>>> Scan started by user"); 
             ScanState = Sts_Scan;
             //delay(250); 
             StartFrameTime = micros();
-            MinFrameSteps = 5; 
+            ScanSpeed = OriginalScanSpeed; 
+            //MinFrameSteps = 5; 
+            MinFrameSteps = 100; 
             tone(A2, 2000, 50);
+            break;
+          case 11:
+            DebugPrint(">>>>>> UI exiting, turn off UV Led"); 
+            if (UVLedOn) {
+                analogWrite(11, 0); // Turn off UV LED
+                UVLedOn = false;
+            }
             break;
           case 12:  // Continue scan to next frame
             ScanState = Sts_Scan;
@@ -565,6 +606,9 @@ boolean FilmInFilmgate() {
 // Returns false if status should change to idle
 void check() {
   PT_SignalLevelRead = analogRead(PHOTODETECT);
+  // No need to log PT to Serial Plotter here, otherwise too many trees in the forest
+  //if (DebugState == PT_Level) SerialPrintInt(PT_SignalLevelRead);
+
 
   if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
     FilteredSignalLevel = PT_SignalLevelRead;
@@ -572,6 +616,7 @@ void check() {
 
   if (PT_SignalLevelRead >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
     PerforationThresholdLevel = PerforationMaxLevel;
+    DebugPrintAux("!!! Bypassed PerfMaxLevel=", PT_SignalLevelRead);
   }
   else if (PT_SignalLevelRead < PerforationMinLevel) {
     PerforationThresholdLevel = OriginalPerforationThresholdLevel;
@@ -621,6 +666,11 @@ ScanResult scan(int Ic) {
   UVLedOn = true;
 
   PT_SignalLevelRead = analogRead(PHOTODETECT);
+  // Push Phototransistor level unconditionally, we neccesarily are in Scan or SingleStep modes
+  // JRE 4/8/22: SerialPrint used to inhibit regular writes to Serial while in debug mode
+  if (DebugState == PT_Level)
+    SerialPrintInt(PT_SignalLevelRead);
+  
   unsigned long CurrentTime = micros();
 
   TractionStopActive = digitalRead(TractionStopPin);
@@ -659,10 +709,6 @@ ScanResult scan(int Ic) {
   }
 ***/
 
-  // Push Phototransistor level unconditionally, we neccesarily are in Scan or SingleStep modes
-  // JRE 4/8/22: SerialPrint used to inhibit regular writes to Serial while in debug mode
-  SerialPrintInt(PT_SignalLevelRead);
-
   // ------------ Stretching film pickup wheel (C) ------ 
   CollectOutgoingFilm();
 
@@ -675,13 +721,18 @@ ScanResult scan(int Ic) {
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
     TractionStopWaitingTime = 1000; 
     LastFrameSteps = 0;
+    DebugPrint(">>>>>> Scan end  requested, turn off UV Led"); 
+    if (UVLedOn) {
+        analogWrite(11, 0); // Turn off UV LED
+        UVLedOn = false;
+    }
   }
   else {
     check();
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        //LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
+        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
         for (int x = 0; x <= 3; x++) {    // Originally from 0 to 3. Looping more than that required the collection code above to be optimized
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
@@ -699,6 +750,9 @@ ScanResult scan(int Ic) {
     retvalue = SCAN_FRAME_DETECTED;
     DebugPrintAux("Last Frame Steps",LastFrameSteps);
     DebugPrintAux("Last Frame Detect Time",CurrentTime-StartFrameTime);
+    if (DebugState == FrameSteps)
+      SerialPrintInt(LastFrameSteps);
+
   }
   else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
     retvalue = SCAN_FRAME_DETECTION_ERROR;    
@@ -713,13 +767,15 @@ ScanResult scan(int Ic) {
 }
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
-// JRE 04/08/22: Theoretically thia might happen any time, thu Ic might change in the middle of the loop. Adding a queue...
+// JRE 13/09/22: Theoretically this might happen any time, thu Ic might change in the middle of the loop. Adding a queue...
 void receiveEvent(int byteCount) {
   int IncomingIc;
 
   IncomingIc = Wire.read();
 
-  push(IncomingIc); // No error treatment for now
+  if (IncomingIc > 0) {
+    push(IncomingIc); // No error treatment for now
+  }
 }
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
@@ -761,7 +817,7 @@ void DebugPrintAux(const char * str, unsigned long i) {
   static int CurrentRepetitions = 0;
   boolean GoPrint = true;
   
-  if (!GlobalDebug) return;
+  if (DebugState != DebugInfo) return;
 
   if (strlen(str) >= 50) {
     Serial.println("Cannot print debug line, too long");
@@ -800,9 +856,9 @@ void DebugPrint(const char * str) {
 
 
 void SerialPrintStr(const char * str) {
-  if (!GlobalDebug) Serial.println(str);
+  if (DebugState != DebugInfo) Serial.println(str);
 }
 
 void SerialPrintInt(int i) {
-  if (!GlobalDebug) Serial.println(i);
+  if (DebugState != DebugInfo) Serial.println(i);
 }
