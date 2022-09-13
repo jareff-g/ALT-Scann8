@@ -52,14 +52,16 @@
 08/09/2022: JRE
                 - Factorize code to hide/redisplay preview when using PiCamera legacy
                 - Add new hidden UI section for experimental features. Can be enabled with command line parameter '-x'
-                - Add UI controls to allow handling AWT (automatic white balance) in a similar way automatic exposure is handled
-                - Add option to allow waiting for AWB adaptation during capture (same as what is already done for automatic exposure). Needs to be automati cas it slows down the process, and it is not that critical (IMHO)
+                - Add UI controls to allow handling AWT (automatic white balance) in a similar way automatic exposure
+                  is handled
+                - Add option to allow waiting for AWB adaptation during capture (similar to what was done for automatic
+                  exposure). Needs to be automatic as it slows down the process, and it is not that critical (IMHO)
 09/09/2022: JRE
                 - Preview modes consolidated in a single variable: 'PreviewMode'
                 - Persisted PreviewMode in session data
                 - Create enum of preview modes (to consolidate in a single var)
                 - Move hole marker to experimental area. Add button to adjust position of marker
-                - Fix display issues for CCM and AWB values in experimental area (although modification of CCM seems unsupported)
+                - Fix display issues for CCM and AWB in experimental area (although changing CCM seems unsupported)
                 - Move 'Open folder' button to experimental area
 
 """
@@ -82,7 +84,8 @@ import json
 from enum import Enum
 
 from datetime import datetime
-import sys, getopt
+import sys
+import getopt
 
 try:
     import smbus
@@ -91,15 +94,15 @@ try:
         from libcamera import Transform
         # Global variable to isolate camera specific code (Picamera vs PiCamera2)
         IsPiCamera2 = True
-    except:
+    except ImportError:
         # If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
         IsPiCamera2 = False
         import picamera
 
     # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
     SimulatedRun = False
-except:
-    SimulatedRun=True
+except ImportError:
+    SimulatedRun = True
     IsPiCamera2 = False
 
 if SimulatedRun:
@@ -130,8 +133,9 @@ FastForwardActive = False
 FastForwardErrorOutstanding = False
 OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
+ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
-ScanProcessError = False # To be set to true  upon reception of Arduino event
+ScanProcessError = False  # To be set to true  upon reception of Arduino event
 ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedDataFilename = os.path.join(ScriptDir, "T-Scann8.json")
@@ -147,13 +151,17 @@ DeltaY = 0
 WinInitDone = False
 FolderProcess = 0
 PostviewModule = 1
-PostviewModulePartial = 4  # defautl mode for preview partial mode
+PostviewModulePartial = 4  # default mode for preview partial mode
 # Create enum to consolidate all pre/post view modes in a single variable
+
+
 class PreviewType(Enum):
     NO_PREVIEW = 0
     CAMERA_PREVIEW = 1
     CAPTURE_ALL = 2
     CAPTURE_PARTIAL = 3
+
+
 PreviewMode = PreviewType.CAMERA_PREVIEW
 PostviewCounter = 0
 FramesPerMinute = 0
@@ -170,18 +178,23 @@ raw_simulated_capture_image = ''
 simulated_capture_image = ''
 draw_capture_label = ''
 simulated_images_in_list = 0
-FilmHoleY=300
+FilmHoleY = 300
 
 Experimental = False
 CurrentAwbAuto = True
-gain_red = 1 # 2.4
-gain_blue = 1 # 2.8
+gain_red = 1  # 2.4
+gain_blue = 1  # 2.8
 AwbPause = False
 PreviousGainRed = 1
 PreviousGainBlue = 1
-
 PreviewWarnAgain = True
 
+FPM_LastMinuteFrameTimes = list()
+FPM_StartTime = time.ctime()
+FPM_CalculatedValue = -1
+
+
+# Persisted data
 # Persisted data
 SessionData = {
     "CurrentDate": str(datetime.now()),
@@ -193,42 +206,16 @@ SessionData = {
     "NegativeCaptureActive": str(NegativeCaptureActive)
 }
 
-#  ######### Special Global variables defined inside functions  ##########
-"""
-global win
-global AdvanceMovie_btn
-global SingleStep_btn
-global PosNeg_btn
-global DisablePreview_btn
-global Rewind_btn
-global FastForward_btn
-global Free_btn
-global Focus_btn
-global RPi_temp_value_label
-global Exit_btn
-global Start_btn
-global folder_frame_target_dir
-global Scanned_Images_number_label
-global Scanned_Images_fpm
-global exposure_frame_value_label
-global film_type_S8_btn
-global film_type_R8_btn
-global preview_border_frame
-global camera
-global CurrentFrame
-global i2c
-global capture_config
-global preview_config
-"""
 
 def exit_app():  # Exit Application
+    global win
     global SimulatedRun
     global camera
-    global win
     global PreviewMode
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
+        i2c.write_byte_data(16, 11, 0)  # Tell Arduino we stop (to turn off uv led
         if PreviewMode == PreviewType.CAMERA_PREVIEW:
             camera.stop_preview()
         camera.close()
@@ -243,8 +230,7 @@ def exit_app():  # Exit Application
 
 def set_free_mode():
     global FreeWheelActive
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
     global SimulatedRun
     global Free_btn
 
@@ -265,11 +251,9 @@ def set_free_mode():
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
     global SimulatedRun
-    global ZoomSize
-    global Focus_btn
+    global ZoomSize, Focus_btn
 
     if not FocusZoomActive:
         Focus_btn.config(text='Focus Zoom OFF', bg='red', fg='white')
@@ -299,14 +283,16 @@ def hide_preview():
     global PreviewMode
     if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
         camera.stop_preview()
+
+
 def display_preview():
     global PreviewMode
     if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
+
 def set_new_folder():
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame
     global SimulatedRun
     global folder_frame_target_dir
     global Scanned_Images_number_label
@@ -342,10 +328,8 @@ def set_new_folder():
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
-
 def set_existing_folder():
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame
     global SimulatedRun
 
     # Disable preview to make tkinter dialogs visible
@@ -354,7 +338,7 @@ def set_existing_folder():
         CurrentDir = tk.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
     else:
         CurrentDir = tk.filedialog.askdirectory(initialdir=BaseDir,
-                                                     title="Select existing folder with snapshots for simulated run")
+                                                title="Select existing folder with snapshots for simulated run")
     if not CurrentDir:
         return
     else:
@@ -362,12 +346,12 @@ def set_existing_folder():
         SessionData["CurrentDir"] = str(CurrentDir)
 
     current_frame_str = tk.simpledialog.askstring(title="Enter number of last captured frame",
-                                                       prompt="Last frame captured?")
+                                                  prompt="Last frame captured?")
     if current_frame_str is None:
         CurrentFrame = 0
         return
     else:
-        if (current_frame_str==''):
+        if current_frame_str == '':
             current_frame_str = '0'
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
@@ -382,8 +366,7 @@ def set_existing_folder():
 # 'CurrentExposure' = zero wil always be displayed as 'Auto'
 
 def decrease_exp():
-    global CurrentExposure
-    global CurrentExposureStr
+    global CurrentExposure, CurrentExposureStr
     global SimulatedRun
 
     if not SimulatedRun:
@@ -418,8 +401,7 @@ def decrease_exp():
 
 
 def auto_exp():
-    global CurrentExposure
-    global CurrentExposureStr
+    global CurrentExposure, CurrentExposureStr
 
     CurrentExposure = 0
 
@@ -436,9 +418,9 @@ def auto_exp():
 
     auto_exp_wait_checkbox.config(state=NORMAL)
 
+
 def increase_exp():
-    global CurrentExposure
-    global CurrentExposureStr
+    global CurrentExposure, CurrentExposureStr
     global SimulatedRun
 
     if not SimulatedRun:
@@ -462,6 +444,7 @@ def increase_exp():
             camera.shutter_speed = CurrentExposure
     auto_exp_wait_checkbox.config(state=DISABLED)
 
+
 def auto_exposure_change_pause_selection():
     global auto_exposure_change_pause
     global ExposureAdaptPause
@@ -478,66 +461,66 @@ def auto_white_balance_change_pause_selection():
 
 def colour_gain_red_plus():
     global colour_gains_red_value_label
-    global gain_blue
-    global gain_red
+    global gain_blue, gain_red
     gain_red += 0.1
     SessionData["gain_red"] = str(gain_red)
-    colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+    colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
-            #camera.set_controls({"AwbEnable": 0})
+            # camera.set_controls({"AwbEnable": 0})
             camera.set_controls({"ColourGains": (gain_red, gain_blue)})
         else:
-            #camera.awb_mode = 'off'
+            # camera.awb_mode = 'off'
             camera.awb_gains = (gain_red, gain_blue)
+
 
 def colour_gain_red_minus():
     global colour_gains_red_value_label
-    global gain_blue
-    global gain_red
+    global gain_blue, gain_red
     gain_red -= 0.1
     SessionData["gain_red"] = str(gain_red)
-    colour_gains_red_value_label.config(text=str(round(gain_red,1)))
+    colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
-            #camera.set_controls({"AwbEnable": 0})
+            # camera.set_controls({"AwbEnable": 0})
             camera.set_controls({"ColourGains": (gain_red, gain_blue)})
         else:
-            #camera.awb_mode = 'off'
+            # camera.awb_mode = 'off'
             camera.awb_gains = (gain_red, gain_blue)
+
 
 def colour_gain_blue_plus():
     global colour_gains_blue_value_label
-    global gain_blue
-    global gain_red
+    global gain_blue, gain_red
     gain_blue += 0.1
     SessionData["gain_blue"] = str(gain_blue)
-    colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+    colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
-            #camera.set_controls({"AwbEnable": 0})
+            # camera.set_controls({"AwbEnable": 0})
             camera.set_controls({"ColourGains": (gain_red, gain_blue)})
         else:
-            #camera.awb_mode = 'off'
+            # camera.awb_mode = 'off'
             camera.awb_gains = (gain_red, gain_blue)
+
 
 def colour_gain_blue_minus():
     global colour_gains_blue_value_label
-    global gain_blue
-    global gain_red
+    global gain_blue, gain_red
     gain_blue -= 0.1
     SessionData["gain_blue"] = str(gain_blue)
-    colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+    colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
-            #camera.set_controls({"AwbEnable": 0})
+            # camera.set_controls({"AwbEnable": 0})
             camera.set_controls({"ColourGains": (gain_red, gain_blue)})
         else:
-            #camera.awb_mode = 'off'
+            # camera.awb_mode = 'off'
             camera.awb_gains = (gain_red, gain_blue)
 
+
 def ccm_update():
-    global ccm_11,ccm_12,ccm_13,ccm_21,ccm_22,ccm_23,ccm_31,ccm_32,ccm_33
+    global ccm_11, ccm_12, ccm_13, ccm_21, ccm_22, ccm_23, ccm_31, ccm_32, ccm_33
     if IsPiCamera2:
         camera.set_controls({"ColourCorrectionMatrix": (float(ccm_11.get()),
                                                         float(ccm_12.get()),
@@ -549,17 +532,14 @@ def ccm_update():
                                                         float(ccm_32.get()),
                                                         float(ccm_33.get()))})
 
+
 def colour_gain_auto():
     global CurrentAwbAuto
-    global gain_blue
-    global gain_red
+    global gain_blue, gain_red
     global colour_gains_auto_btn, awb_frame
-    global colour_gains_red_btn_plus
-    global colour_gains_red_btn_minus
-    global colour_gains_blue_btn_plus
-    global colour_gains_blue_btn_minus
-    global colour_gains_red_value_label
-    global colour_gains_blue_value_label
+    global colour_gains_red_btn_plus, colour_gains_red_btn_minus
+    global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
+    global colour_gains_red_value_label, colour_gains_blue_value_label
 
     CurrentAwbAuto = not CurrentAwbAuto
     SessionData["CurrentAwbAuto"] = str(CurrentAwbAuto)
@@ -596,34 +576,26 @@ def colour_gain_auto():
                 camera_colour_gains = metadata["ColourGains"]
                 gain_red = camera_colour_gains[0]
                 gain_blue = camera_colour_gains[1]
-                colour_gains_red_value_label.config(text=str(round(gain_red,1)))
-                colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+                colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
+                colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
                 camera.set_controls({"AwbEnable": 0})
             else:
                 gain_red = camera.awb_gains[0]
                 gain_blue = camera.awb_gains[1]
-                colour_gains_red_value_label.config(text=str(round(gain_red,1)))
-                colour_gains_blue_value_label.config(text=str(round(gain_blue,1)))
+                colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
+                colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
                 camera.awb_mode = 'off'
                 camera.awb_gains = (gain_red, gain_blue)
-        else: # Add fake values for simulated run
+        else:  # Add fake values for simulated run
             gain_red = 1
             gain_blue = 1
 
 
 def button_status_change_except(except_button, active):
-    global Free_btn
-    global SingleStep_btn
-    global AdvanceMovie_btn
-    global Rewind_btn
-    global FastForward_btn
-    global Start_btn
-    global PosNeg_btn
-    global Focus_btn
-    global Start_btn
-    global Exit_btn
-    global film_type_S8_btn
-    global film_type_R8_btn
+    global Free_btn, SingleStep_btn, AdvanceMovie_btn
+    global Rewind_btn, FastForward_btn, Start_btn
+    global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
+    global film_type_S8_btn, film_type_R8_btn
 
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -653,8 +625,7 @@ def button_status_change_except(except_button, active):
 
 def advance_movie():
     global AdvanceMovieActive
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
     global SimulatedRun
 
     # Update button text
@@ -677,15 +648,14 @@ def rewind_movie():
     global RewindMovieActive
     global SimulatedRun
     global RewindErrorOutstanding
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
         hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
-                                             message='Have you routed the film via the upper path?')
+                                        message='Have you routed the film via the upper path?')
         display_preview()
         if not answer:
             return()
@@ -693,7 +663,7 @@ def rewind_movie():
         if RewindErrorOutstanding:
             hide_preview()
             tk.messagebox.showerror(title='Error during rewind',
-                                         message='It seems there is film loaded via filmgate. \
+                                    message='It seems there is film loaded via filmgate. \
                                          Please route it via upper path.')
             display_preview()
 
@@ -737,15 +707,14 @@ def fast_forward_movie():
     global FastForwardActive
     global SimulatedRun
     global FastForwardErrorOutstanding
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         # Disable preview to make tkinter dialogs visible
         hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
-                                             message='Have you routed the film via the upper path?')
+                                        message='Have you routed the film via the upper path?')
         display_preview()
         if not answer:
             return ()
@@ -753,7 +722,7 @@ def fast_forward_movie():
         if FastForwardErrorOutstanding:
             hide_preview()
             tk.messagebox.showerror(title='Error during fast forward',
-                                         message='It seems there is film loaded via filmgate. \
+                                    message='It seems there is film loaded via filmgate. \
                                          Please route it via upper path.')
             display_preview()
 
@@ -854,10 +823,12 @@ def negative_capture():
             # Terrible colors with these values, need to tune
             if NegativeCaptureActive:
                 # camera.image_effect = 'negative'
-                camera.set_controls({"ColourGains": (1.0, 1.0), "ColourCorrectionMatrix": (-1,0,0,0,-1,0,0,0,-1)})
+                camera.set_controls({"ColourGains": (1.0, 1.0),
+                                     "ColourCorrectionMatrix": (-1, 0, 0, 0, -1, 0, 0, 0, -1)})
             else:
                 # camera.image_effect = 'none'
-                camera.set_controls({"ColourGains": (1.0, 1.0), "ColourCorrectionMatrix": (1,0,0,0,1,0,0,0,1)})
+                camera.set_controls({"ColourGains": (1.0, 1.0),
+                                     "ColourCorrectionMatrix": (1, 0, 0, 0, 1, 0, 0, 0, 1)})
         else:
             if NegativeCaptureActive:
                 camera.image_effect = 'negative'
@@ -870,8 +841,7 @@ def negative_capture():
 def open_folder():
     global OpenFolderActive
     global FolderProcess
-    global save_bg
-    global save_fg
+    global save_bg, save_fg
     global SimulatedRun
     global OpenFolder_btn
 
@@ -894,10 +864,8 @@ def change_preview_status():
     global win
     global PreviewMode
     global PreviewStatus
-    global PostviewModule
-    global PostviewCounter
-    global capture_config
-    global preview_config
+    global PostviewModule, PostviewCounter
+    global capture_config, preview_config
 
     choice = PreviewStatus.get()
     if choice == 1:
@@ -922,7 +890,7 @@ def change_preview_status():
                 camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
                 time.sleep(0.1)
                 camera.switch_mode(preview_config)
-                #self.canvas.create_rectangle(90, 75, 840, 720, fill="RED")
+                # self.canvas.create_rectangle(90, 75, 840, 720, fill="RED")
             else:
                 camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
         else:
@@ -933,7 +901,6 @@ def change_preview_status():
                 camera.switch_mode(capture_config)
             else:
                 camera.stop_preview()
-
 
 
 def set_s8():
@@ -959,6 +926,7 @@ def set_r8():
     if not SimulatedRun:
         i2c.write_byte_data(16, 18, 0)
 
+
 def film_hole_up():
     global film_hole_frame, FilmHoleY
     if FilmHoleY > 38:
@@ -966,32 +934,54 @@ def film_hole_up():
     film_hole_frame.place(x=4, y=FilmHoleY)
     SessionData["FilmHoleY"] = str(FilmHoleY)
 
+
 def film_hole_down():
     global film_hole_frame, FilmHoleY
     if FilmHoleY < 758:
-        FilmHoleY += 3 # Intentionally different from button up, to allow eventual fine tunning
+        FilmHoleY += 3  # Intentionally different from button up, to allow eventual fine tunning
     film_hole_frame.place(x=4, y=FilmHoleY)
     SessionData["FilmHoleY"] = str(FilmHoleY)
 
+
+def register_frame():
+    global FPM_LastMinuteFrameTimes
+    global FPM_StartTime
+    global FPM_CalculatedValue
+
+    # Get current time
+    frame_time = time.time()
+    # Determine if we should start new count (last capture older than 5 seconds)
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 5:
+        FPM_StartTime = frame_time
+        FPM_LastMinuteFrameTimes.clear()
+        FPM_CalculatedValue = -1
+    # Add current time to list
+    FPM_LastMinuteFrameTimes.append(frame_time)
+    # Remove entries older than one minute
+    FPM_LastMinuteFrameTimes.sort()
+    while FPM_LastMinuteFrameTimes[0] <= frame_time-60:
+        FPM_LastMinuteFrameTimes.remove(FPM_LastMinuteFrameTimes[0])
+    # Calculate current value, only if current count has been going for more than 10 seconds
+    if frame_time - FPM_StartTime > 60:  # no calculations needed, frames in list are all in th elast 60 seconds
+        FPM_CalculatedValue = len(FPM_LastMinuteFrameTimes)
+    elif frame_time - FPM_StartTime > 10:  # some  calculations needed if less than 60 sec
+        FPM_CalculatedValue = int((len(FPM_LastMinuteFrameTimes) * 60) / (frame_time - FPM_StartTime))
+
+
 def capture():
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame, CurrentExposure
     global SessionData
-    global CurrentExposure
     global PreviousCurrentExposure
     global SimulatedRun
     global raw_simulated_capture_image
     global simulated_capture_image
     global draw_capture_label
-    global PostviewCounter
-    global PostviewModule
+    global PostviewCounter, PostviewModule
     global ExposureAdaptPause
     global CurrentAwbAuto
     global AwbPause
-    global PreviousGainRed
-    global PreviousGainBlue
+    global PreviousGainRed, PreviousGainBlue
     global PreviewMode
-
 
     os.chdir(CurrentDir)
 
@@ -1029,20 +1019,20 @@ def capture():
                 aux_gain_red = camera.awb_gains[0]
                 aux_gain_blue = camera.awb_gains[1]
 
-            if round(aux_gain_red,2) != round(PreviousGainRed,2) or round(aux_gain_blue,2) != round(PreviousGainBlue,2):
+            if round(aux_gain_red, 2) != round(PreviousGainRed, 2) or round(aux_gain_blue, 2) \
+                    != round(PreviousGainBlue, 2):
                 curtime = time.ctime()
-                aux_gains_str = "Auto (" + str(round(aux_gain_red,2)) + ", " + str(round(aux_gain_blue,2)) + ")"
+                aux_gains_str = "Auto (" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
                 print(
                     f"{curtime} - Automatic Wait Balance: Waiting for camera to adapt {aux_gains_str})")
-                colour_gains_red_value_label.config(text=str(round(aux_gain_red,1)))
-                colour_gains_blue_value_label.config(text=str(round(aux_gain_blue,1)))
+                colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
+                colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 win.update()
                 time.sleep(0.2)
             else:
                 break
-
 
     if not SimulatedRun:
         if IsPiCamera2:
@@ -1052,7 +1042,7 @@ def capture():
                 # Allow time to stabilize image, too fast with PiCamera2 when no preview.
                 # Need to refine this (shorter time, Arduino specific slowdown?)
                 time.sleep(0.1)  # 100 ms seems OK. Tried with 50 and some frames were blurry
-                #camera.capture_file('picture-%05d.jpg' % CurrentFrame)
+                # camera.capture_file('picture-%05d.jpg' % CurrentFrame)
                 captured_snapshot = camera.capture_image("main")
                 captured_snapshot.save('picture-%05d.jpg' % CurrentFrame)
 
@@ -1073,8 +1063,6 @@ def capture():
                 if not IsPiCamera2:
                     captured_snapshot = Image.open('picture-%05d.jpg' % CurrentFrame)
 
-                #raw_simulated_capture_image = Image.open('picture-%05d.jpg' % CurrentFrame)
-                #draw_preview_image(raw_simulated_capture_image)
                 draw_preview_image(captured_snapshot)
 
     SessionData["CurrentDate"] = str(datetime.now())
@@ -1085,41 +1073,53 @@ def start_scan_simulated():
     global CurrentDir
     global CurrentFrame
     global ScanOngoing
-    global CurrentScanStartFrame
-    global CurrentScanStartTime
-    global save_bg
-    global save_fg
-    global simulated_captured_frame_list
-    global simulated_images_in_list
+    global CurrentScanStartFrame, CurrentScanStartTime
+    global simulated_captured_frame_list, simulated_images_in_list
+    global ScanStopRequested
 
-    if not ScanOngoing and BaseDir == CurrentDir:
-        tk.messagebox.showerror("Error!",
-                                     "Please specify a folder where to retrieve captured images for scan simulation.")
-        return
-
-    if not ScanOngoing:  # Scanner session to be started
-        Start_btn.config(text="STOP Scan", bg='red', fg='white')
-    else:
-        Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg)
-
-    ScanOngoing = not ScanOngoing
-
-    # Enable/Disable related buttons
-    button_status_change_except(Start_btn, ScanOngoing)
-
-    # Invoke capture_loop  a first time shen scan starts
     if ScanOngoing:
+        ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
+    else:
+        if BaseDir == CurrentDir:
+            tk.messagebox.showerror("Error!",
+                                    "Please specify a folder where to retrieve captured images for scan simulation.")
+            return
+
+        Start_btn.config(text="STOP Scan", bg='red', fg='white')
+        SessionData["CurrentDate"] = str(datetime.now())
+        SessionData["CurrentDir"] = CurrentDir
+        SessionData["CurrentFrame"] = str(CurrentFrame)
+        CurrentScanStartTime = datetime.now()
+        CurrentScanStartFrame = CurrentFrame
+
+        ScanOngoing = True
+
+        # Enable/Disable related buttons
+        button_status_change_except(Start_btn, ScanOngoing)
+
         # Get list of previously captured frames for scan simulation
         simulated_captured_frame_list = os.listdir(CurrentDir)
         simulated_captured_frame_list.sort()
         simulated_images_in_list = len(simulated_captured_frame_list)
+        # Invoke capture_loop  a first time shen scan starts
         win.after(500, capture_loop_simulated)
 
 
+def stop_scan_simulated():
+    global ScanOngoing
+    global save_bg
+    global save_fg
+
+    Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg)
+
+    ScanOngoing = False
+
+    # Enable/Disable related buttons
+    button_status_change_except(Start_btn, ScanOngoing)
+
+
 def capture_loop_simulated():
-    global CurrentDir
-    global CurrentFrame
-    global CurrentExposure
+    global CurrentDir, CurrentFrame, CurrentExposure
     global FramesPerMinute
     global NewFrameAvailable
     global ScanOngoing
@@ -1127,32 +1127,32 @@ def capture_loop_simulated():
     global raw_simulated_capture_image
     global simulated_capture_image
     global draw_capture_label
-    global simulated_captured_frame_list
-    global simulated_images_in_list
+    global simulated_captured_frame_list, simulated_images_in_list
+    global ScanStopRequested
 
+    if ScanStopRequested:
+        stop_scan_simulated()
+        ScanStopRequested = False
     if ScanOngoing:
         os.chdir(CurrentDir)
-        curtime = time.ctime()
         frame_to_display = CurrentFrame % simulated_images_in_list
         filename, ext = os.path.splitext(simulated_captured_frame_list[frame_to_display])
         if ext == '.jpg':
-            print(f"{curtime} - Simulated scan: ({CurrentFrame},{simulated_captured_frame_list[frame_to_display]})")
             raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
             draw_preview_image(raw_simulated_capture_image)
 
         CurrentFrame += 1
+        register_frame()
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         # Update number of captured frames
         Scanned_Images_number_label.config(text=str(CurrentFrame))
         # Update Frames per Minute
-        scan_period_time = datetime.now() - CurrentScanStartTime
-        scan_period_seconds = scan_period_time.total_seconds()
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
-        if scan_period_seconds < 10:
-            Scanned_Images_fpm.config(text="??")
+        if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
+            Scanned_Images_fpm.config(text=''.join([char*int(scan_period_frames) for char in '.']), anchor='w')
         else:
-            FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
+            FramesPerMinute = FPM_CalculatedValue
             Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
         win.update()
 
@@ -1161,45 +1161,60 @@ def capture_loop_simulated():
 
 
 def start_scan():
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame
     global SessionData
     global ScanOngoing
-    global CurrentScanStartFrame
-    global CurrentScanStartTime
-    global save_bg
-    global save_fg
+    global CurrentScanStartFrame, CurrentScanStartTime
+    global save_bg, save_fg
     global SimulatedRun
+    global ScanStopRequested
+    global NewFrameAvailable
 
-    if not ScanOngoing and BaseDir == CurrentDir:
-        hide_preview()
-        tk.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-        display_preview()
-        return
+    if ScanOngoing:
+        ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
+    else:
+        if BaseDir == CurrentDir:
+            hide_preview()
+            tk.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
+            display_preview()
+            return
 
-    if not ScanOngoing:  # Scanner session to be started
         Start_btn.config(text="STOP Scan", bg='red', fg='white')
         SessionData["CurrentDate"] = str(datetime.now())
         SessionData["CurrentDir"] = CurrentDir
         SessionData["CurrentFrame"] = str(CurrentFrame)
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
-    else:
-        Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg)
-        CurrentScanStartFrame = CurrentFrame
 
-    ScanOngoing = not ScanOngoing
+        ScanOngoing = True
+
+        # Set new frame indicator to false, in case this is the cause of the strange
+        # behaviour after stopping/restarting the scan process
+        NewFrameAvailable = False
+
+        # Enable/Disable related buttons
+        button_status_change_except(Start_btn, ScanOngoing)
+
+        # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
+        if not SimulatedRun:
+            i2c.write_byte_data(16, 10, 0)
+
+        # Invoke capture_loop a first time shen scan starts
+        win.after(5, capture_loop)
+
+
+def stop_scan():
+    global ScanOngoing
+    global save_bg
+    global save_fg
+
+    if ScanOngoing:  # Scanner session to be stopped
+        Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg)
+
+    ScanOngoing = False
 
     # Enable/Disable related buttons
     button_status_change_except(Start_btn, ScanOngoing)
-
-    # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
-    if not SimulatedRun and ScanOngoing:
-        i2c.write_byte_data(16, 10, 0)
-
-    # Invoke capture_loop a first time shen scan starts
-    if ScanOngoing:
-        win.after(5, capture_loop)
 
 
 def capture_loop():
@@ -1212,10 +1227,16 @@ def capture_loop():
     global ScanProcessError
     global ScanOngoing
     global SimulatedRun
+    global ScanStopRequested
 
-    if ScanOngoing:
+    if ScanStopRequested:
+        stop_scan()
+        ScanStopRequested = False
+    elif ScanOngoing:
         if NewFrameAvailable:
+            curtime = time.ctime()
             CurrentFrame += 1
+            register_frame()
             capture()
             if not SimulatedRun:
                 try:
@@ -1226,7 +1247,6 @@ def capture_loop():
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
                     # Log error to console
-                    curtime = time.ctime()
                     print(f"{curtime} - Error while telling Arduino to move to next Frame.")
                     print(f"    Frame {CurrentFrame} capture to be tried again.")
                     win.after(5, capture_loop)
@@ -1245,24 +1265,22 @@ def capture_loop():
             # Update number of captured frames
             Scanned_Images_number_label.config(text=str(CurrentFrame))
             # Update Frames per Minute
-            scan_period_time = datetime.now() - CurrentScanStartTime
-            scan_period_seconds = scan_period_time.total_seconds()
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
-            if scan_period_seconds < 10:
-                Scanned_Images_fpm.config(text="??")
+            if FPM_CalculatedValue == -1:   # FPM not calculated yet, display some indication
+                Scanned_Images_fpm.config(text=''.join([char * int(scan_period_frames) for char in '.']), anchor='w')
             else:
-                FramesPerMinute = scan_period_frames * 60 / scan_period_seconds
-                Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+                FramesPerMinute = FPM_CalculatedValue
+                Scanned_Images_fpm.config(text=str(int(FPM_CalculatedValue)))
             win.update()
         elif ScanProcessError:
             curtime = time.ctime()
             print(f"{curtime} - Error during scan process.")
             ScanProcessError = False
             if ScanOngoing:
-                start_scan()  # If scan ongoing (not single step) call start_scan to get back to normal state
+                stop_scan()  # If scan ongoing call stop_scan to get back to normal state (Scan stopped)
             return
         # Invoke capture_loop one more time, as long as scan is ongoing
-        win.after(0, capture_loop)
+        win.after(5, capture_loop)
 
 
 def temp_in_fahrenheit_selection():
@@ -1283,7 +1301,7 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
     update_rpi_temp()
     if last_temp != RPiTemp or LastTempInFahrenheit != TempInFahrenheit:
         if TempInFahrenheit:
-            rounded_temp = round(RPiTemp*1.8+32,1)
+            rounded_temp = round(RPiTemp*1.8+32, 1)
             temp_str = str(rounded_temp) + 'ºF'
         else:
             temp_str = str(RPiTemp) + 'º'
@@ -1304,32 +1322,32 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     global ScanProcessError
     global ScanOngoing
 
+    curtime = time.ctime()
     if not SimulatedRun:
         try:
             ArduinoTrigger = i2c.read_byte_data(16, 0)
         except IOError:
             # Log error to console
-            curtime = time.ctime()
             print(f"{curtime} - Error while checking incoming event ({ArduinoTrigger}) from Arduino. Will check again.")
 
     if ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
-        print("Received scan error from Arduino")
+        print(f"{curtime} - Received scan error from Arduino")
         ScanProcessError = True
     elif ArduinoTrigger == 61:  # Error during Rewind
         RewindErrorOutstanding = True
-        print("Received rewind error from Arduino")
+        print(f"{curtime} - Received rewind error from Arduino")
     elif ArduinoTrigger == 81:  # Error during FastForward
         FastForwardErrorOutstanding = True
-        print("Received fast forward error from Arduino")
+        print(f"{curtime} - Received fast forward error from Arduino")
 
     ArduinoTrigger = 0
 
     win.after(5, arduino_listen_loop)
 
 
-def on_form_event(test):
+def on_form_event(dummy):
     global TopWinX
     global TopWinY
     global DeltaX
@@ -1360,6 +1378,7 @@ def on_form_event(test):
     print()
     """
 
+
 def preview_do_not_warn_again_selection():
     global preview_warn_again
     global PreviewWarnAgain
@@ -1368,11 +1387,13 @@ def preview_do_not_warn_again_selection():
     PreviewWarnAgain = preview_warn_again.get()
     SessionData["PreviewWarnAgain"] = str(PreviewWarnAgain)
 
+
 def close_preview_warning():
     global preview_warning
 
     preview_warning.destroy()
     preview_warning.quit()
+
 
 def display_preview_warning():
     global win
@@ -1384,26 +1405,30 @@ def display_preview_warning():
     if not PreviewWarnAgain:
         return
 
+    hide_preview()
     warn_again_from_toplevel = tk.BooleanVar()
     preview_warning = Toplevel(win)
     preview_warning.title('*** PiCamera2 Preview warning ***')
     preview_warning.geometry('500x400')
     preview_warning.geometry('+250+250')  # setting the position of the window
-    preview_label = Label(preview_warning,text='\rThe preview mode provided by PiCamera2 for use in '\
-                                               'X-Window environment is not really usable for '\
-                                               'T-Scann 8 during the film scanning process.\r\n'\
-                                               'Compared to the preview provided by PiCamera legacy it is:\r'\
-                                               '- Much slower (due to context switch between preview/capture)\r'\
-                                               '- Very imprecise (preview does not match captured image)\r\n'\
-                                               'PiCamera2 preview mode can and should still be used in some '\
-                                               'cases (typically for the focus procedure), however for the '\
-                                               'scanning process one of the other three provided modes is recommended:\r'\
-                                               '- Capture 1/1: Displays each frame post-capture (legacy-like speed)\r'\
-                                               '- Capture 1/4: Displays one of four frames post-capture (faster)\r'\
-                                               '- None: No preview at all (fastest)\r\n', wraplength=450, justify=LEFT)
+    preview_label = Label(preview_warning, text='\rThe preview mode provided by PiCamera2 for use in '
+                                                'X-Window environment is not really usable for '
+                                                'T-Scann 8 during the film scanning process.\r\n'
+                                                'Compared to the preview provided by PiCamera legacy it is:\r'
+                                                '- Much slower (due to context switch between preview/capture)\r'
+                                                '- Very imprecise (preview does not match captured image)\r\n'
+                                                'PiCamera2 preview mode can and should still be used in some '
+                                                'cases (typically for the focus procedure), however for the '
+                                                'scanning process one of the other three provided modes is '
+                                                'recommended:\r'
+                                                '- Capture 1/1: Displays each frame post-capture (legacy-like speed)\r'
+                                                '- Capture 1/4: Displays one of four frames post-capture (faster)\r'
+                                                '- None: No preview at all (fastest)\r\n', wraplength=450, justify=LEFT)
     preview_warn_again = tk.BooleanVar(value=PreviewWarnAgain)
     preview_btn = Button(preview_warning, text="OK", width=2, height=1, command=close_preview_warning)
-    preview_checkbox = tk.Checkbutton(preview_warning, text='Do not show this warning again', height=1, variable=preview_warn_again, onvalue=False, offvalue=True, command=preview_do_not_warn_again_selection)
+    preview_checkbox = tk.Checkbutton(preview_warning, text='Do not show this warning again', height=1,
+                                      variable=preview_warn_again, onvalue=False, offvalue=True,
+                                      command=preview_do_not_warn_again_selection)
 
     preview_label.pack(side=TOP)
     preview_btn.pack(side=TOP, pady=10)
@@ -1411,6 +1436,7 @@ def display_preview_warning():
 
     preview_warning.mainloop()
 
+    display_preview()
 
 
 def load_persisted_data_from_disk():
@@ -1425,6 +1451,7 @@ def load_persisted_data_from_disk():
         persisted_data_file.close()
         PersistedDataLoaded = True
 
+
 def load_config_data():
     global film_hole_frame, FilmHoleY
     global SessionData
@@ -1436,6 +1463,8 @@ def load_config_data():
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
 
+    for item in SessionData:
+        print(item)
     if PersistedDataLoaded:
         print("SessionData loaded from disk:")
         if 'CurrentDate' in SessionData:
@@ -1457,7 +1486,7 @@ def load_config_data():
             elif PreviewMode.name == "CAPTURE_PARTIAL":
                 PostviewModule = PostviewModulePartial
                 preview_radio4.select()
-            if PreviewMode.name != "CAMERA_PREVIEW":    # This is the default, no action needed if this was selected before
+            if PreviewMode.name != "CAMERA_PREVIEW":    # Default, no action needed if selected before
                 change_preview_status()
         if 'PreviewWarnAgain' in SessionData:
             print(SessionData["PreviewWarnAgain"])
@@ -1465,8 +1494,9 @@ def load_config_data():
         if 'TempInFahrenheit' in SessionData:
             print(SessionData["TempInFahrenheit"])
             TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
-            if (TempInFahrenheit):
+            if TempInFahrenheit:
                 temp_in_fahrenheit_checkbox.select()
+
 
 def load_session_data():
     global SessionData
@@ -1484,8 +1514,8 @@ def load_session_data():
     if PersistedDataLoaded:
         hide_preview()
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
-                                              message='It seems T-Scann 8 was interrupted during the last session.\
-                                                        \r\nDo you want to continue from where it was stopped?')
+                                         message='It seems T-Scann 8 was interrupted during the last session.\
+                                         \r\nDo you want to continue from where it was stopped?')
         if confirm:
             print("SessionData loaded from disk:")
             if 'CurrentDate' in SessionData:
@@ -1525,13 +1555,13 @@ def load_session_data():
             if 'ExposureAdaptPause' in SessionData:
                 print(SessionData["ExposureAdaptPause"])
                 ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
-                if (ExposureAdaptPause):
+                if ExposureAdaptPause:
                     auto_exp_wait_checkbox.select()
             if 'CurrentAwbAuto' in SessionData:
                 print(SessionData["CurrentAwbAuto"])
                 CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
-                if not CurrentAwbAuto:  # AWB enabled by defautl, if not enabled, call button action to disable and perform associated actions
-                    CurrentAwbAuto = True   # Set back to true, as button actino will invert the value
+                if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
+                    CurrentAwbAuto = True   # Set back to true, as button action will invert the value
                     colour_gain_auto()
                 awb_frame.config(text='Automatic White Balance ON' if CurrentAwbAuto else 'Automatic White Balance OFF')
             if 'AwbPause' in SessionData:
@@ -1579,7 +1609,7 @@ def tscann8_init():
     # Prevent window resize
     win.minsize(1100, 830)
     win.maxsize(1100, 830)
-    if (Experimental):
+    if Experimental:
         win.geometry('1100x950')  # setting the size of the window
         win.minsize(1100, 950)
         win.maxsize(1100, 950)
@@ -1615,7 +1645,7 @@ def tscann8_init():
                 camera.configure(capture_config)
             camera.set_controls({"ExposureTime": CurrentExposure, "AnalogueGain": 1.0})
             camera.set_controls({"AwbEnable": 1})
-            #camera.set_controls({"ColourGains": (2.4, 2.8)}) # Red 2.4, Blue 2.8 seem to be OK
+            # camera.set_controls({"ColourGains": (2.4, 2.8)}) # Red 2.4, Blue 2.8 seem to be OK
             camera.start(show_preview=True)
             ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         else:
@@ -1627,11 +1657,11 @@ def tscann8_init():
             camera.sharpness = 100
             camera.hflip = True
             camera.awb_mode = 'auto'
-            #camera.awb_gains = (3.5, 1.0)
+            # camera.awb_gains = (3.5, 1.0)
             camera.start_preview(fullscreen=False, window=(90, 75, 840, 720))
             camera.shutter_speed = CurrentExposure
 
-# Enable events on windows movements, to allow preview to follow
+    # Enable events on windows movements, to allow preview to follow
     # lblText = tk.Label(win, text='')
     # lblText.pack()
     if not SimulatedRun and not IsPiCamera2:
@@ -1672,7 +1702,7 @@ def build_ui():
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
     global awb_wait_checkbox
-    global ccm_11,ccm_12,ccm_13,ccm_21,ccm_22,ccm_23,ccm_31,ccm_32,ccm_33
+    global ccm_11, ccm_12, ccm_13, ccm_21, ccm_22, ccm_23, ccm_31, ccm_32, ccm_33
     global OpenFolder_btn
     global film_hole_frame, FilmHoleY
     global preview_radio1, preview_radio2, preview_radio3, preview_radio4
@@ -1707,13 +1737,13 @@ def build_ui():
     Free_btn.place(x=350, y=710)
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(win, text="Negative image", width=8, height=3, command=negative_capture, activebackground='green',
-                        activeforeground='white', wraplength=80)
+    PosNeg_btn = Button(win, text="Negative image", width=8, height=3, command=negative_capture,
+                        activebackground='green', activeforeground='white', wraplength=80)
     PosNeg_btn.place(x=450, y=710)
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom, activebackground='green',
-                       activeforeground='white', wraplength=80)
+    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
+                       activebackground='green', activeforeground='white', wraplength=80)
     Focus_btn.place(x=550, y=710)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
@@ -1721,15 +1751,19 @@ def build_ui():
     preview_frame.pack(side=TOP, padx=1, pady=1)
     preview_frame.place(x=650, y=700)
 
-    PreviewStatus=tk.IntVar()
-    preview_radio1 = Radiobutton(preview_frame,text="None          ", variable=PreviewStatus, value=2, command=change_preview_status)
+    PreviewStatus = tk.IntVar()
+    preview_radio1 = Radiobutton(preview_frame, text="None          ", variable=PreviewStatus, value=2,
+                                 command=change_preview_status)
     preview_radio1.grid(row=0, column=1)
-    preview_radio2 = Radiobutton(preview_frame,text="From camera", variable=PreviewStatus, value=1, command=change_preview_status)
+    preview_radio2 = Radiobutton(preview_frame, text="From camera", variable=PreviewStatus, value=1,
+                                 command=change_preview_status)
     preview_radio2.grid(row=0, column=2)
     preview_radio2.select()
-    preview_radio3 = Radiobutton(preview_frame,text="Capture 1/1", variable=PreviewStatus, value=3, command=change_preview_status)
+    preview_radio3 = Radiobutton(preview_frame, text="Capture 1/1", variable=PreviewStatus, value=3,
+                                 command=change_preview_status)
     preview_radio3.grid(row=1, column=1)
-    preview_radio4 = Radiobutton(preview_frame,text="Capture 1/4", variable=PreviewStatus, value=4, command=change_preview_status)
+    preview_radio4 = Radiobutton(preview_frame, text="Capture 1/4", variable=PreviewStatus, value=4,
+                                 command=change_preview_status)
     preview_radio4.grid(row=1, column=2)
     PreviewStatus.set(1)
 
@@ -1754,7 +1788,7 @@ def build_ui():
     folder_frame.place(x=925, y=150)
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=22, height=3, font=("Arial", 8),
-                                      wraplength=120)
+                                    wraplength=120)
     folder_frame_target_dir.pack(side=TOP)
 
     folder_frame_buttons = Frame(folder_frame, width=16, height=4, bd=2)
@@ -1805,7 +1839,9 @@ def build_ui():
     increase_exp_btn.pack(side=LEFT)
 
     auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
-    auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Adapt. wait', height=1, variable=auto_exposure_change_pause, onvalue=True, offvalue=False, command=auto_exposure_change_pause_selection)
+    auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Adapt. wait', height=1,
+                                            variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
+                                            command=auto_exposure_change_pause_selection)
     auto_exp_wait_checkbox.pack(side=TOP)
 
     # Create frame to select S8/R8 film
@@ -1832,7 +1868,9 @@ def build_ui():
     RPi_temp_value_label.pack(side=TOP, fill='x')
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
-    temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1, variable=temp_in_fahrenheit, onvalue=True, offvalue=False, command=temp_in_fahrenheit_selection)
+    temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1,
+                                                 variable=temp_in_fahrenheit, onvalue=True, offvalue=False,
+                                                 command=temp_in_fahrenheit_selection)
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
     # Create experimental frame to play with ColourGains
@@ -1841,25 +1879,37 @@ def build_ui():
         experimental_frame.pack(side=TOP)
         experimental_frame.place(x=30, y=790)
 
-        awb_frame = LabelFrame(experimental_frame, text='Automatic White Balance ON', width=8, height=1, font=("Arial", 7))
+        awb_frame = LabelFrame(experimental_frame, text='Automatic White Balance ON', width=8, height=1,
+                               font=("Arial", 7))
         awb_frame.pack(side=LEFT, padx=5)
 
-        colour_gains_auto_btn= Button(awb_frame,text="AWB OFF", width=6, height=1, command=colour_gain_auto, activebackground='green', activeforeground='white', font=("Arial", 7))
+        colour_gains_auto_btn = Button(awb_frame, text="AWB OFF", width=6, height=1, command=colour_gain_auto,
+                                       activebackground='green', activeforeground='white', font=("Arial", 7))
         colour_gains_auto_btn.grid(row=0, column=0)
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
-        awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Adapt. wait', height=1, variable=auto_white_balance_change_pause, onvalue=True, offvalue=False, command=auto_white_balance_change_pause_selection, font=("Arial", 7))
+        awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Adapt. wait', height=1,
+                                           variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
+                                           command=auto_white_balance_change_pause_selection, font=("Arial", 7))
         awb_wait_checkbox.grid(row=1, column=0)
 
-        colour_gains_red_btn_plus = Button(awb_frame,text="Red-", command=colour_gain_red_minus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_red_btn_plus = Button(awb_frame, text="Red-", command=colour_gain_red_minus,
+                                           activebackground='green', activeforeground='white', font=("Arial", 7),
+                                           state=DISABLED)
         colour_gains_red_btn_plus.grid(row=0, column=1)
-        colour_gains_red_btn_minus = Button(awb_frame,text="Red+", command=colour_gain_red_plus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_red_btn_minus = Button(awb_frame, text="Red+", command=colour_gain_red_plus,
+                                            activebackground='green', activeforeground='white', font=("Arial", 7),
+                                            state=DISABLED)
         colour_gains_red_btn_minus.grid(row=0, column=2)
         colour_gains_red_value_label = Label(awb_frame, text="Auto", width=8, height=1, font=("Arial", 7))
         colour_gains_red_value_label.grid(row=0, column=3)
-        colour_gains_blue_btn_plus = Button(awb_frame,text="Blue-", command=colour_gain_blue_minus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_blue_btn_plus = Button(awb_frame, text="Blue-", command=colour_gain_blue_minus,
+                                            activebackground='green', activeforeground='white', font=("Arial", 7),
+                                            state=DISABLED)
         colour_gains_blue_btn_plus.grid(row=1, column=1)
-        colour_gains_blue_btn_minus = Button(awb_frame,text="Blue+", command=colour_gain_blue_plus, activebackground='green', activeforeground='white', font=("Arial", 7), state = DISABLED)
+        colour_gains_blue_btn_minus = Button(awb_frame, text="Blue+", command=colour_gain_blue_plus,
+                                             activebackground='green', activeforeground='white', font=("Arial", 7),
+                                             state=DISABLED)
         colour_gains_blue_btn_minus.grid(row=1, column=2)
         colour_gains_blue_value_label = Label(awb_frame, text="Auto", width=8, height=1, font=("Arial", 7))
         colour_gains_blue_value_label.grid(row=1, column=3)
@@ -1896,45 +1946,49 @@ def build_ui():
         ccm_entry_32.grid(row=2, column=1)
         ccm_entry_33 = Entry(matrix_frame, textvariable=ccm_33, font=("Arial", 7), width=5)
         ccm_entry_33.grid(row=2, column=2)
-        ccm_go = Button(ccm_frame,text="Update CCM (KO)", command=ccm_update, activebackground='green', activeforeground='white', font=("Arial", 7), state = NORMAL)
+        ccm_go = Button(ccm_frame, text="Update CCM (KO)", command=ccm_update, activebackground='green',
+                        activeforeground='white', font=("Arial", 7), state=NORMAL)
         ccm_go.pack(side=TOP, pady=2)
 
         if not SimulatedRun:
             metadata = camera.capture_metadata()
             camera_ccm = metadata["ColourCorrectionMatrix"]
-            ccm_11.set(round(camera_ccm[0],2))
-            ccm_12.set(round(camera_ccm[1],2))
-            ccm_13.set(round(camera_ccm[2],2))
-            ccm_21.set(round(camera_ccm[3],2))
-            ccm_22.set(round(camera_ccm[4],2))
-            ccm_23.set(round(camera_ccm[5],2))
-            ccm_31.set(round(camera_ccm[6],2))
-            ccm_32.set(round(camera_ccm[7],2))
-            ccm_33.set(round(camera_ccm[8],2))
+            ccm_11.set(round(camera_ccm[0], 2))
+            ccm_12.set(round(camera_ccm[1], 2))
+            ccm_13.set(round(camera_ccm[2], 2))
+            ccm_21.set(round(camera_ccm[3], 2))
+            ccm_22.set(round(camera_ccm[4], 2))
+            ccm_23.set(round(camera_ccm[5], 2))
+            ccm_31.set(round(camera_ccm[6], 2))
+            ccm_32.set(round(camera_ccm[7], 2))
+            ccm_33.set(round(camera_ccm[8], 2))
 
         # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
         # Leave it in the experimental area, disabled, just in case it is reused
         openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
         openfolder_frame.pack(side=LEFT, padx=5)
-        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder, activebackground='green', activeforeground='white', wraplength=80, state = DISABLED, font=("Arial", 7))
+        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
+                                activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
+                                font=("Arial", 7))
         OpenFolder_btn.pack(side=TOP, padx=5, pady=2)
 
         # Display marker for film hole
         film_hole_frame = Frame(win, width=1, height=11, bg='black')
         film_hole_frame.pack(side=TOP, padx=1, pady=1)
         film_hole_frame.place(x=4, y=FilmHoleY)
-        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11, bg='white', fg='white')
+        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11,
+                                bg='white', fg='white')
         film_hole_label.pack(side=TOP)
         # Up/Down buttons to move marker for film hole
-        film_hole_control_frame = LabelFrame(experimental_frame, text="Film hole pos.", width=8, height=2, font=("Arial", 7))
+        film_hole_control_frame = LabelFrame(experimental_frame, text="Film hole pos.", width=8, height=2,
+                                             font=("Arial", 7))
         film_hole_control_frame.pack(side=LEFT, padx=5)
-        film_hole_control_up = Button(film_hole_control_frame, text="⇑",width=1, height=1, command=film_hole_up,
-                                  activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=1, height=1, command=film_hole_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
         film_hole_control_up.pack(side=TOP, padx=2, pady=2)
-        film_hole_control_down = Button(film_hole_control_frame, text="⇓",width=1, height=1, command=film_hole_down,
-                                  activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=1, height=1, command=film_hole_down,
+                                        activebackground='green', activeforeground='white', font=("Arial", 7))
         film_hole_control_down.pack(side=TOP, padx=2, pady=2)
-
 
 
 def main(argv):
@@ -1946,7 +2000,7 @@ def main(argv):
     for opt, arg in opts:
         if opt == '-s':
             SimulatedRun = True
-        elif opt  == '-x':
+        elif opt == '-x':
             Experimental = True
 
     tscann8_init()
@@ -1957,6 +2011,8 @@ def main(argv):
 
     load_config_data()
 
+    if PreviewWarnAgain:  # schedule hiding preview in 4 seconds to make warning visible
+        win.after(4000, hide_preview)
     display_preview_warning()
 
     load_session_data()
@@ -1975,4 +2031,3 @@ def main(argv):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
-
