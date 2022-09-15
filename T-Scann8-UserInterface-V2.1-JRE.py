@@ -135,7 +135,7 @@ OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
 ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
-ScanProcessError = False  # To be set to true  upon reception of Arduino event
+ScanProcessError = False  # To be set to true upon reception of Arduino event
 ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedDataFilename = os.path.join(ScriptDir, "T-Scann8.json")
@@ -1344,7 +1344,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
 
     ArduinoTrigger = 0
 
-    win.after(5, arduino_listen_loop)
+    win.after(50, arduino_listen_loop)
 
 
 def on_form_event(dummy):
@@ -1469,10 +1469,6 @@ def load_config_data():
         print("SessionData loaded from disk:")
         if 'CurrentDate' in SessionData:
             print(SessionData["CurrentDate"])
-        if 'FilmHoleY' in SessionData:
-            print(SessionData["FilmHoleY"])
-            FilmHoleY = int(SessionData["FilmHoleY"])
-            film_hole_frame.place(x=4, y=FilmHoleY)
         if 'PreviewMode' in SessionData:
             print(SessionData["PreviewMode"])
             PreviewMode = PreviewType[SessionData["PreviewMode"]]
@@ -1496,6 +1492,11 @@ def load_config_data():
             TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
             if TempInFahrenheit:
                 temp_in_fahrenheit_checkbox.select()
+        if Experimental:
+            if 'FilmHoleY' in SessionData:
+                print(SessionData["FilmHoleY"])
+                FilmHoleY = int(SessionData["FilmHoleY"])
+                film_hole_frame.place(x=4, y=FilmHoleY)
 
 
 def load_session_data():
@@ -1557,26 +1558,29 @@ def load_session_data():
                 ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                 if ExposureAdaptPause:
                     auto_exp_wait_checkbox.select()
-            if 'CurrentAwbAuto' in SessionData:
-                print(SessionData["CurrentAwbAuto"])
-                CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
-                if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
-                    CurrentAwbAuto = True   # Set back to true, as button action will invert the value
-                    colour_gain_auto()
-                awb_frame.config(text='Automatic White Balance ON' if CurrentAwbAuto else 'Automatic White Balance OFF')
-            if 'AwbPause' in SessionData:
-                print(SessionData["AwbPause"])
-                AwbPause = eval(SessionData["AwbPause"])
-                if AwbPause:
-                    awb_wait_checkbox.select()
-            if 'gain_red' in SessionData:
-                print(SessionData["gain_red"])
-                gain_red = float(SessionData["gain_red"])
-                colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
-            if 'gain_blue' in SessionData:
-                print(SessionData["gain_blue"])
-                gain_blue = float(SessionData["gain_blue"])
-                colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+            if Experimental:
+                if 'CurrentAwbAuto' in SessionData:
+                    print(SessionData["CurrentAwbAuto"])
+                    CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
+                    if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
+                        CurrentAwbAuto = True  # Set back to true, as button action will invert the value
+                        colour_gain_auto()
+                    awb_frame.config(
+                        text='Automatic White Balance ON' if CurrentAwbAuto else 'Automatic White Balance OFF')
+                if 'AwbPause' in SessionData:
+                    print(SessionData["AwbPause"])
+                    AwbPause = eval(SessionData["AwbPause"])
+                    if AwbPause:
+                        awb_wait_checkbox.select()
+                if 'gain_red' in SessionData:
+                    print(SessionData["gain_red"])
+                    gain_red = float(SessionData["gain_red"])
+                    colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
+                if 'gain_blue' in SessionData:
+                    print(SessionData["gain_blue"])
+                    gain_blue = float(SessionData["gain_blue"])
+                    colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+
         display_preview()
 
 
@@ -1604,15 +1608,15 @@ def tscann8_init():
 
     win = Tk()  # creating the main window and storing the window object in 'win'
     win.title('T-Scann 8')  # setting title of the window
-    win.geometry('1100x830')  # setting the size of the window
+    win.geometry('1100x810')  # setting the size of the window
     win.geometry('+50+50')  # setting the position of the window
     # Prevent window resize
-    win.minsize(1100, 830)
-    win.maxsize(1100, 830)
+    win.minsize(1100, 810)
+    win.maxsize(1100, 810)
     if Experimental:
-        win.geometry('1100x950')  # setting the size of the window
-        win.minsize(1100, 950)
-        win.maxsize(1100, 950)
+        win.geometry('1100x930')  # setting the size of the window
+        win.minsize(1100, 930)
+        win.maxsize(1100, 930)
 
     if SimulatedRun:
         win.wm_title(string='*** T-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
@@ -1754,23 +1758,23 @@ def build_ui():
     PreviewStatus = tk.IntVar()
     preview_radio1 = Radiobutton(preview_frame, text="None          ", variable=PreviewStatus, value=2,
                                  command=change_preview_status)
-    preview_radio1.grid(row=0, column=1)
+    preview_radio1.grid(row=0, column=1, pady=2)
     preview_radio2 = Radiobutton(preview_frame, text="From camera", variable=PreviewStatus, value=1,
                                  command=change_preview_status)
-    preview_radio2.grid(row=0, column=2)
+    preview_radio2.grid(row=0, column=2, pady=2)
     preview_radio2.select()
     preview_radio3 = Radiobutton(preview_frame, text="Capture 1/1", variable=PreviewStatus, value=3,
                                  command=change_preview_status)
-    preview_radio3.grid(row=1, column=1)
+    preview_radio3.grid(row=1, column=1, pady=2)
     preview_radio4 = Radiobutton(preview_frame, text="Capture 1/4", variable=PreviewStatus, value=4,
                                  command=change_preview_status)
-    preview_radio4.grid(row=1, column=2)
+    preview_radio4.grid(row=1, column=2, pady=2)
     PreviewStatus.set(1)
 
     # Application Exit button
     Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80)
-    Exit_btn.place(x=925, y=700)
+    Exit_btn.place(x=925, y=675)
 
     # Create vertical button column at right
     # Start scan button
@@ -1807,7 +1811,7 @@ def build_ui():
 
     Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", 24), width=5,
                                         height=1)
-    Scanned_Images_number_label.pack(side=TOP)
+    Scanned_Images_number_label.pack(side=TOP, padx=21)
 
     scanned_images_fpm_frame = Frame(scanned_images_frame, width=16, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
@@ -1824,7 +1828,7 @@ def build_ui():
     exposure_frame.place(x=925, y=350)
 
     exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1, font=("Arial", 16))
-    exposure_frame_value_label.pack(side=TOP)
+    exposure_frame_value_label.pack(side=TOP, padx=18)
 
     exposure_frame_buttons = Frame(exposure_frame, width=8, height=1)
     exposure_frame_buttons.pack(side=TOP)
@@ -1847,10 +1851,10 @@ def build_ui():
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(win, text='Film type', width=16, height=1)
     film_type_frame.pack(side=TOP)
-    film_type_frame.place(x=925, y=490)
+    film_type_frame.place(x=925, y=475)
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
-    film_type_buttons.pack(side=TOP)
+    film_type_buttons.pack(side=TOP, padx=4, pady=5)
     film_type_S8_btn = Button(film_type_buttons, text='S8', width=3, height=1, font=("Arial", 16, 'bold'),
                               command=set_s8, activebackground='green', activeforeground='white',
                               relief=SUNKEN)
@@ -1862,10 +1866,10 @@ def build_ui():
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(win, text='RPi Temp.', width=8, height=1)
     rpi_temp_frame.pack(side=TOP)
-    rpi_temp_frame.place(x=925, y=580)
+    rpi_temp_frame.place(x=925, y=555)
     temp_str = str(RPiTemp)+'º'
-    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=1, height=1)
-    RPi_temp_value_label.pack(side=TOP, fill='x')
+    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=3, height=1)
+    RPi_temp_value_label.pack(side=TOP, padx=47)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1,
@@ -1885,34 +1889,34 @@ def build_ui():
 
         colour_gains_auto_btn = Button(awb_frame, text="AWB OFF", width=6, height=1, command=colour_gain_auto,
                                        activebackground='green', activeforeground='white', font=("Arial", 7))
-        colour_gains_auto_btn.grid(row=0, column=0)
+        colour_gains_auto_btn.grid(row=0, column=0, pady=2)
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Adapt. wait', height=1,
                                            variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                            command=auto_white_balance_change_pause_selection, font=("Arial", 7))
-        awb_wait_checkbox.grid(row=1, column=0)
+        awb_wait_checkbox.grid(row=1, column=0, pady=2)
 
         colour_gains_red_btn_plus = Button(awb_frame, text="Red-", command=colour_gain_red_minus,
                                            activebackground='green', activeforeground='white', font=("Arial", 7),
                                            state=DISABLED)
-        colour_gains_red_btn_plus.grid(row=0, column=1)
+        colour_gains_red_btn_plus.grid(row=0, column=1, pady=2)
         colour_gains_red_btn_minus = Button(awb_frame, text="Red+", command=colour_gain_red_plus,
                                             activebackground='green', activeforeground='white', font=("Arial", 7),
                                             state=DISABLED)
-        colour_gains_red_btn_minus.grid(row=0, column=2)
+        colour_gains_red_btn_minus.grid(row=0, column=2, pady=2)
         colour_gains_red_value_label = Label(awb_frame, text="Auto", width=8, height=1, font=("Arial", 7))
-        colour_gains_red_value_label.grid(row=0, column=3)
+        colour_gains_red_value_label.grid(row=0, column=3, pady=2)
         colour_gains_blue_btn_plus = Button(awb_frame, text="Blue-", command=colour_gain_blue_minus,
                                             activebackground='green', activeforeground='white', font=("Arial", 7),
                                             state=DISABLED)
-        colour_gains_blue_btn_plus.grid(row=1, column=1)
+        colour_gains_blue_btn_plus.grid(row=1, column=1, pady=2)
         colour_gains_blue_btn_minus = Button(awb_frame, text="Blue+", command=colour_gain_blue_plus,
                                              activebackground='green', activeforeground='white', font=("Arial", 7),
                                              state=DISABLED)
-        colour_gains_blue_btn_minus.grid(row=1, column=2)
+        colour_gains_blue_btn_minus.grid(row=1, column=2, pady=2)
         colour_gains_blue_value_label = Label(awb_frame, text="Auto", width=8, height=1, font=("Arial", 7))
-        colour_gains_blue_value_label.grid(row=1, column=3)
+        colour_gains_blue_value_label.grid(row=1, column=3, pady=2)
 
         ccm_11 = StringVar()
         ccm_12 = StringVar()
@@ -1948,7 +1952,7 @@ def build_ui():
         ccm_entry_33.grid(row=2, column=2)
         ccm_go = Button(ccm_frame, text="Update CCM (KO)", command=ccm_update, activebackground='green',
                         activeforeground='white', font=("Arial", 7), state=NORMAL)
-        ccm_go.pack(side=TOP, pady=2)
+        ccm_go.pack(side=TOP, padx=2, pady=2)
 
         if not SimulatedRun:
             metadata = camera.capture_metadata()
@@ -1970,7 +1974,7 @@ def build_ui():
         OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
                                 activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
                                 font=("Arial", 7))
-        OpenFolder_btn.pack(side=TOP, padx=5, pady=2)
+        OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
 
         # Display marker for film hole
         film_hole_frame = Frame(win, width=1, height=11, bg='black')
@@ -1980,15 +1984,17 @@ def build_ui():
                                 bg='white', fg='white')
         film_hole_label.pack(side=TOP)
         # Up/Down buttons to move marker for film hole
-        film_hole_control_frame = LabelFrame(experimental_frame, text="Film hole pos.", width=8, height=2,
+        film_hole_control_frame = LabelFrame(experimental_frame, text="Hole mark pos.", width=8, height=2,
                                              font=("Arial", 7))
         film_hole_control_frame.pack(side=LEFT, padx=5)
-        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=1, height=1, command=film_hole_up,
+        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=5, height=1, command=film_hole_up,
                                       activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_up.pack(side=TOP, padx=2, pady=2)
-        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=1, height=1, command=film_hole_down,
+        film_hole_control_up.pack(side=TOP)
+        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=5, height=1, command=film_hole_down,
                                         activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_down.pack(side=TOP, padx=2, pady=2)
+        film_hole_control_down.pack(side=TOP)
+        film_hole_bottom_frame = Frame(film_hole_control_frame, height=5)   # frame just to add space at the bottom
+        film_hole_bottom_frame.pack(side=BOTTOM)
 
 
 def main(argv):
