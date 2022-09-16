@@ -87,7 +87,7 @@
       13 Sep 2022 - JRE 
                         - Finally the problem refered above (out of sync until UI restart) was not a problem in Arduino code (as
                           the use case shown) but on the UI. The flag indicating a new frame was avalable was not reset at the right time,
-                          so when launching th escan process a second time it was trying to get frames totalyl out of sync with Arduino.
+                          so when launching the scan process a second time it was trying to get frames totalyl out of sync with Arduino.
                           Corrected in the UI
                         - Changed the debug flag to be able to set 3 different debug modes: Debug info, PT levels, and number of steps per frame
                           - Also set serial speed to 115200, the restriction raised beforre is not valid (actually, we were logging PT too often)
@@ -98,9 +98,14 @@
                           - DecreaseSpeedFrameStepsS8 = 270
                         - UV led left on during all scanning session (until Stop Scan button is pressed)
                           - Before it was turned off between frames, my mistake
-                        - Enabled once more the 'LastTime' updat ein 'scan' function. Actually it helps to stop at the righ place (but no miracles)
+                        - Enabled once more the 'LastTime' update in 'scan' function. Actually it helps to stop at the righ place (but no miracles)
                         - Prevent inserting in even tqueue events with value 0 (for some reason they arrive, even if Raspberry does not send them)
-
+      16 Sep 2022 - JRE 
+                        - Ran out of dynamic memory, too many debug strings: Supress those non-essential, shorten the others
+                        - Implement new API to allow reducing rwnd/ff speed from UI (to perform film cleaning)
+                        - Bug fixed: After rewind/FF, neutral was not reset for motors B and C 
+                        - Renamed 'check' to 'IsHoleDetected', an dalso moved some of the logic outside of it, to make it more atomic.
+                        - Removed some redundant code from 'scan' (already done by check/IsHoleDetected)
 */
 
 #include <Wire.h>
@@ -135,16 +140,6 @@ const int MotorC_Direction = 10;  // direction
 
 
 const int TractionStopPin = 12; // Traction stop
-// Command list
-/*
-int ScanFilm = false;       // Scan film
-int UnlockReels = false;    // Unlock reels
-int Rewind = false;         // Rewind film (Spola in Torulf original module)
-int FastForward = false;    // FastForward
-int SlowForward = false;    // Advance film (move forward without scanning)
-//int Frame = LOW;          // Unused
-int SingleStep = false;     // Single step
-*/
 
 enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
 
@@ -163,16 +158,6 @@ ScanState=Sts_Idle;
 boolean FrameDetected = false;  // Used for frame detection, in play ond single step modes
 
 boolean UVLedOn = false;
-// Last status for each command: I think this is useless, the base variable can be used instead
-/*
-int lastScanFilm = LOW;
-int lastUnlockReels = LOW;
-int lastRewind = LOW;
-int lastFastForward = LOW;
-int lastSlowForward = LOW;
-int lastFrame = LOW;
-int LastWstep = 0;  // Unused
-*/
 int FilteredSignalLevel = 0;
 // int waveC = 0;  // Not used
 // int waveCS = 0;  // Not used
@@ -183,8 +168,9 @@ int FilteredSignalLevel = 0;
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
 unsigned long FetchFrameScanSpeed = 1000;    // Play Slow before trig (Original 15000)
-int RewindSpeed = 4000;                       // speed Rewind movie
-int PerforationThresholdLevel = 140;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
+int RewindSpeed = 4000;                       // speed Rewind movie (delay in rewind loop, progressibly reduced down to 200)
+int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
+int PerforationThresholdLevel = 120;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
                                               // JRE: After increasing MinFramSteps, this one is not so critical any more
 int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 200;      // detector pulse low level, originally hardcoded
@@ -192,7 +178,7 @@ int MinFrameStepsR8 = 255;            // Minimum number of steps to allow frame 
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int DecreaseSpeedFrameStepsR8 = 245;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
-int DecreaseSpeedFrameStepsS8 = 270;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
+int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
 
@@ -203,7 +189,6 @@ int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores val
 int FrameStepsDone = 0;                     // Count steps
 int OriginalScanSpeed = ScanSpeed;          // restoration original value
 int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
-int FilmTypeFrameCount = 0;                 // counts to 2 before S8 / R8 is determined
 int LastFrameSteps = 0;                     // stores number of steps
 
 
@@ -312,7 +297,7 @@ void loop() {
       case Sts_Idle:
         switch (Ic) {
           case 10:
-            DebugPrint(">>>>>> Scan started by user"); 
+            DebugPrint(">Scan"); 
             ScanState = Sts_Scan;
             //delay(250); 
             StartFrameTime = micros();
@@ -322,7 +307,6 @@ void loop() {
             tone(A2, 2000, 50);
             break;
           case 11:
-            DebugPrint(">>>>>> UI exiting, turn off UV Led"); 
             if (UVLedOn) {
                 analogWrite(11, 0); // Turn off UV LED
                 UVLedOn = false;
@@ -333,39 +317,34 @@ void loop() {
             MinFrameSteps = OriginalMinFrameSteps; 
             StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
-            DebugPrintAux("Last picture save time",StartFrameTime-StartPictureSaveTime);
-            DebugPrint(">>>>>> Scan next frame");
-            FilmTypeFrameCount = FilmTypeFrameCount + 1;
+            DebugPrintAux("Save t.",StartFrameTime-StartPictureSaveTime);
+            DebugPrint(">Next fr.");
             break;
           case 18:  // Select R8 film
-            DebugPrint("Idle -> Select R8"); 
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
             MinFrameSteps = MinFrameStepsR8;
             break;
           case 19:  // Select S8 film
-            DebugPrint("Idle -> Select S8"); 
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
             MinFrameSteps = MinFrameStepsS8;
             break;
           case 20:
-            DebugPrint("Idle -> UnlockReels"); 
             ScanState = Sts_UnlockReels;
             delay(50);
             break;
           case 30:
-            DebugPrint("Idle -> SlowForward"); 
             ScanState = Sts_SlowForward;
             delay(50);
             break;
           case 40:
-            DebugPrint("Idle -> SingleStep"); 
+            DebugPrint(">SStep"); 
             ScanState = Sts_SingleStep;
             MinFrameSteps = 100; // Used to be 100
             delay(50);
             break;
           case 60:
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
-              DebugPrint("Rewind error"); 
+              DebugPrint("Rwnd err"); 
               EventForRPi = 61; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -373,7 +352,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
-              DebugPrint("Idle -> Rewind"); 
+              DebugPrint("Rwnd"); 
               ScanState = Sts_Rewind;
               delay (500); 
               digitalWrite(MotorA_Neutral, LOW); 
@@ -388,9 +367,17 @@ void loop() {
             }
             delay(50);
             break;
+          case 61:  // Tune Rewind speed delay up, allowing to slow down the rewind/ff speed
+            if (TargetRewindSpeedLoop < 2000)
+              TargetRewindSpeedLoop += 20;
+            break;
+          case 62:  // Tune Rewind speed delay down, allowing to speed up the rewind/ff speed
+            if (TargetRewindSpeedLoop > 200)
+              TargetRewindSpeedLoop -= 20;
+            break;
           case 80:
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
-              DebugPrint("FF error"); 
+              DebugPrint("FF err"); 
               EventForRPi = 81; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -398,7 +385,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
-              DebugPrint("Idle -> FastForward"); 
+              DebugPrint(">FF"); 
               ScanState = Sts_FastForward;
               delay (500); 
               digitalWrite(MotorA_Neutral, HIGH); 
@@ -420,11 +407,10 @@ void loop() {
           digitalWrite(MotorC_Stepper, HIGH);
         }
         if (Ic == 10) {
-          DebugPrint("Scan stopped by user command"); 
+          DebugPrint("-Scan"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         else if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
-          //DebugPrint("Exiting scan state"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         else {
@@ -440,7 +426,6 @@ void loop() {
         break;
       case Sts_SingleStep:
         if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
-          //DebugPrint("Exiting single step state"); 
           ScanState = Sts_Idle;
         }
         break;
@@ -450,7 +435,6 @@ void loop() {
           digitalWrite(MotorB_Neutral, LOW); 
           digitalWrite(MotorC_Neutral, LOW);
           ScanState = Sts_Idle;
-          DebugPrint("Exiting Unlock Reels state"); 
         }
         else {
           if (not ReelsUnlocked){
@@ -462,13 +446,13 @@ void loop() {
         break;
       case Sts_Rewind:
         if (!RewindFilm(Ic)) {
-          DebugPrint("Exiting rewind state"); 
+          DebugPrint("-rwnd"); 
           ScanState = Sts_Idle;
         }
         break;
       case Sts_FastForward:
         if (!FastForwardFilm(Ic)) {
-          DebugPrint("Exiting FastForward state"); 
+          DebugPrint("-FF"); 
           ScanState = Sts_Idle;
         }
         break;
@@ -476,7 +460,6 @@ void loop() {
         if (Ic == 30) { // Stop slow forward
           delay(50);
           ScanState = Sts_Idle;
-          DebugPrint("Exiting slow forward"); 
         }
         else {
           if (!TractionStopActive) {
@@ -506,13 +489,15 @@ boolean RewindFilm(int Ic) {
   if (Ic == 60) {
     retvalue = false;
     digitalWrite(MotorA_Neutral, HIGH);
+    digitalWrite(MotorB_Neutral, LOW);  
+    digitalWrite(MotorC_Neutral, LOW); 
     delay (100);
   }
   else {
     digitalWrite(MotorA_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
-    if (RewindSpeed >= 200) {
+    if (RewindSpeed >= TargetRewindSpeedLoop) {
       RewindSpeed -= 2;
     }
   }
@@ -528,6 +513,8 @@ boolean FastForwardFilm(int Ic) {
   if (Ic == 80) {
     retvalue = false;
     digitalWrite(MotorC_Neutral, HIGH); 
+    digitalWrite(MotorB_Neutral, LOW);
+    digitalWrite(MotorC_Neutral, LOW); 
     delay (100);
   }
   else {
@@ -535,7 +522,7 @@ boolean FastForwardFilm(int Ic) {
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorC_Stepper, LOW);
   }
-    if (RewindSpeed >= 250) {
+    if (RewindSpeed >= TargetRewindSpeedLoop) {
       RewindSpeed = RewindSpeed - 2;
     }
   return(retvalue);
@@ -580,15 +567,13 @@ boolean FilmInFilmgate() {
   delay(200);  // Give time to FT to stabilize
 
   PreviousSignalLevel = analogRead(PHOTODETECT);
-  //DebugPrintAux("Signal=", PreviousSignalLevel );
 
   // MinFrameSteps used here as a reference, just to skip two frames in worst case
   // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
-  for (int x = 0; x <= 2*MinFrameSteps; x++) {
+  for (int x = 0; x <= 300; x++) {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = analogRead(PHOTODETECT);
-    //DebugPrintAux("Signal=", SignalLevel );
     if (abs(SignalLevel - PreviousSignalLevel) > 50) {
       retvalue = true;
       break;
@@ -604,7 +589,9 @@ boolean FilmInFilmgate() {
 
 // ------------- is the film perforation in position to take picture? ---------------
 // Returns false if status should change to idle
-void check() {
+boolean IsHoleDetected() {
+  boolean hole_detected = false;
+  
   PT_SignalLevelRead = analogRead(PHOTODETECT);
   // No need to log PT to Serial Plotter here, otherwise too many trees in the forest
   //if (DebugState == PT_Level) SerialPrintInt(PT_SignalLevelRead);
@@ -616,7 +603,6 @@ void check() {
 
   if (PT_SignalLevelRead >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
     PerforationThresholdLevel = PerforationMaxLevel;
-    DebugPrintAux("!!! Bypassed PerfMaxLevel=", PT_SignalLevelRead);
   }
   else if (PT_SignalLevelRead < PerforationMinLevel) {
     PerforationThresholdLevel = OriginalPerforationThresholdLevel;
@@ -627,31 +613,17 @@ void check() {
   }
 
   // ------------- Frame detection ----
-  if (FilteredSignalLevel >= PerforationThresholdLevel && Pulse == LOW && FrameStepsDone >= MinFrameSteps ) {
-    DebugPrint("check - Frame detected"); 
+  if (FrameStepsDone >= MinFrameSteps && FilteredSignalLevel >= PerforationThresholdLevel && Pulse == LOW) {
+    hole_detected = true;
     Pulse = HIGH; 
-    FrameDetected = true; 
-    LastFrameSteps = FrameStepsDone; 
-    FrameStepsDone = 0; 
     analogWrite(A1, 255); // Light green led
-    StartPictureSaveTime = micros();
-    // Tell UI (Raspberry PI) a new frame is available for processing
-    EventForRPi = 11; 
-    digitalWrite(13, HIGH);
   }
   else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
-    DebugPrint("check - Previous frame has now passed"); 
     Pulse = LOW; 
     analogWrite(A1, 0); // Turn off green led
   }
 
-  // -- One step frame --
-  if (ScanState == Sts_SingleStep && FrameDetected) {
-    DebugPrint("check - Single step mode, exit scan"); 
-    EventForRPi = 0; 
-    // Leave FrameDetected as true, will be disable in 'scan' after we exit here
-    tone(A2, 2000, 35); 
-  }
+  return(hole_detected);
 }
 
 
@@ -675,60 +647,28 @@ ScanResult scan(int Ic) {
 
   TractionStopActive = digitalRead(TractionStopPin);
 
-  if (PT_SignalLevelRead >= PerforationThresholdLevel) {
-    FilteredSignalLevel = PT_SignalLevelRead;
-  }
-
-  if (PT_SignalLevelRead >= PerforationMaxLevel) {
-    PerforationThresholdLevel = PerforationMaxLevel;
-  }
-
-  else if (PT_SignalLevelRead < PerforationMinLevel) {
-    PerforationThresholdLevel = OriginalPerforationThresholdLevel;
-  }
-
-  if (PT_SignalLevelRead < PerforationThresholdLevel) {
-    FilteredSignalLevel = 0;
-  }
-
-  if (FrameStepsDone >= DecreaseSpeedFrameSteps && FilmTypeFrameCount >= 2 ) {
+  if (FrameStepsDone >= DecreaseSpeedFrameSteps) {
     ScanSpeed = FetchFrameScanSpeed;
-    DebugPrintAux("ScanSpeed",ScanSpeed);
+    DebugPrintAux("SSpeed",ScanSpeed);
   }
-
-/*** Disable automatic detection
-  // Detect whether Super 8 or Regular 8
-  if (FilmTypeFrameCount >= 2 && LastFrameSteps > 280 && LastFrameSteps < 300 ) {
-    DebugPrint("scan - R8 detected"); 
-    DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8; //R8
-  }
-
-  if (FilmTypeFrameCount >= 2 && LastFrameSteps > 300) {
-    DebugPrint("scan - S8 detected"); 
-    DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8; //S8
-  }
-***/
 
   // ------------ Stretching film pickup wheel (C) ------ 
   CollectOutgoingFilm();
 
   //-------------ScanFilm-----------
   if (Ic == 10) {   // UI Requesting to end current scan
-    DebugPrint("scan - RPi asks to end scan"); 
     retvalue = SCAN_TERMINATION_REQUESTED; 
     FrameDetected = false; 
-    FilmTypeFrameCount = 0; 
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
     TractionStopWaitingTime = 1000; 
     LastFrameSteps = 0;
-    DebugPrint(">>>>>> Scan end  requested, turn off UV Led"); 
     if (UVLedOn) {
         analogWrite(11, 0); // Turn off UV LED
         UVLedOn = false;
     }
   }
   else {
-    check();
+    FrameDetected = IsHoleDetected();
     if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
@@ -737,7 +677,7 @@ ScanResult scan(int Ic) {
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
-          check();
+          FrameDetected = IsHoleDetected();
           if (FrameDetected || FrameStepsDone > 3*DecreaseSpeedFrameSteps) break;
         }
         digitalWrite(MotorB_Stepper, LOW);
@@ -746,18 +686,30 @@ ScanResult scan(int Ic) {
   }
 
   if (FrameDetected) {
+    DebugPrint("Frame!"); 
+    LastFrameSteps = FrameStepsDone; 
+    FrameStepsDone = 0; 
+    StartPictureSaveTime = micros();
+    // Tell UI (Raspberry PI) a new frame is available for processing
+    if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
+      tone(A2, 2000, 35); 
+    }
+    else {
+      EventForRPi = 11; 
+      digitalWrite(13, HIGH);
+    }
+    
     FrameDetected = false;
     retvalue = SCAN_FRAME_DETECTED;
-    DebugPrintAux("Last Frame Steps",LastFrameSteps);
-    DebugPrintAux("Last Frame Detect Time",CurrentTime-StartFrameTime);
+    DebugPrintAux("FrmS",LastFrameSteps);
+    DebugPrintAux("FrmT",CurrentTime-StartFrameTime);
     if (DebugState == FrameSteps)
       SerialPrintInt(LastFrameSteps);
-
   }
   else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
     retvalue = SCAN_FRAME_DETECTION_ERROR;    
     FrameStepsDone = 0;
-    DebugPrint("Error during scanning");
+    DebugPrint("Err/scan");
     // Tell UI (Raspberry PI) an error happened during scanning
     EventForRPi = 12; 
     digitalWrite(13, HIGH);
