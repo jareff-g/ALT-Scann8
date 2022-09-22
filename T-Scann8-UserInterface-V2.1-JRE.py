@@ -84,6 +84,22 @@
                 - Set button for ongoing action as SUNKEN
                 - Add button to take a snapshot of current image, with differentiated filename, and dedicated sequential
                   number (from Torulf's 3.0)
+21/09/2020: JRE
+                - Experimental area: Change rwnd/ff speed to RPM
+                - Handle asynchronous notification of rwnd/ff end from Arduino
+                - Remove question about film routing before rwnd/ff. Now the algorythm of 'FilmInFilmgate' is reliable
+                - Split 'experimental' mode in two: 'ExpertMode' and 'ExperimentalMode'
+                - Move auto-exposure to expert area
+                - Reorganize how AE and AWB work so that they are homogeneous
+                - Implement asynchronous mode for PiCamera2 'postview'
+                    - Image is drawn by a separate thread, so does not introduce additional delay in the processing
+                    - Because of this, preview modes CAPTURE_PARTIAL and NO_PREVIEW are useless, will be removed
+                    - Since images need to be displayed sequentially, it does not make sense to have more than one
+                      thread of this type. The important thing is to have this out of the main scan loop. Only as a
+                      precaution, frames might be skipper when queue is getting full
+                - Asynchronous thread also implemented to save image to file
+                    - Contrary to preview display, here we do not have problem with the processign order,
+                      so 3 threads are started
 """
 
 # ######### Imports section ##########
@@ -104,6 +120,7 @@ import json
 from enum import Enum
 
 from datetime import datetime
+import logging
 import sys
 import getopt
 
@@ -125,10 +142,8 @@ except ImportError:
     SimulatedRun = True
     IsPiCamera2 = False
 
-if SimulatedRun:
-    print("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
-else:
-    print("Running on Raspberry Pi")
+import threading
+import queue
 
 
 #  ######### Global variable definition ##########
@@ -142,17 +157,15 @@ CurrentFrame = 0  # bild in original code from Torulf
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
-CurrentExposure = 0
-PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
-CurrentExposureStr = "Auto"
-ExposureAdaptPause = False
 NegativeCaptureActive = False
 AdvanceMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
 RewindErrorOutstanding = False
+RewindEndOutstanding = False
 rwnd_speed_delay = 200   # informational only, should be in sync with Arduino, but for now we do not secure it
 FastForwardActive = False
 FastForwardErrorOutstanding = False
+FastForwardEndOutstanding = False
 OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
 ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
@@ -164,7 +177,10 @@ ScriptDir = os.path.dirname(
 PersistedDataFilename = os.path.join(ScriptDir, "T-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
-# Variables to track windows movement adn set preview accordingly
+# Token to be sent on program closure, to allow threads to shut down cleanly
+END_TOKEN = object()
+
+# Variables to track windows movement and set preview accordingly
 TopWinX = 0
 TopWinY = 0
 PreviewWinX = 90
@@ -173,22 +189,14 @@ DeltaX = 0
 DeltaY = 0
 WinInitDone = False
 FolderProcess = 0
-PostviewModule = 1
-PostviewModulePartial = 4  # default mode for preview partial mode
-# Create enum to consolidate all pre/post view modes in a single variable
+LoggingMode = "WARNING"
+LogLevel = 0
+draw_capture_label = 0
 
-
-class PreviewType(Enum):
-    NO_PREVIEW = 0
-    CAMERA_PREVIEW = 1
-    CAPTURE_ALL = 2
-    CAPTURE_PARTIAL = 3
-
-
-PreviewMode = PreviewType.CAMERA_PREVIEW
+PiCam2PreviewEnabled=False
+CaptureStabilizationDelay = 0.1
 PostviewCounter = 0
 FramesPerMinute = 0
-PreviewAreaImage = ''
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
 TempInFahrenheit = False
@@ -199,25 +207,31 @@ ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
-draw_capture_label = ''
 simulated_images_in_list = 0
 FilmHoleY = 300
-MatchWaitMargin = 50
 SharpnessValue = 1
 
-Experimental = False
-CurrentAwbAuto = False
-gain_red = 2.2  # 2.4
-gain_blue = 2.2  # 2.8
-AwbPause = False
+# Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
+ExpertMode = False
+ExperimentalMode = False
+MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
+                        # % of absolute value (1 for AWB color gain, and 8000 for exposure)
+                        # That ,means we wait until the difference between a frame and the previous one is less
+                        # than a percentage of the tolerance value
+Tolerance_AE = 8000
+Tolerance_AWB = 1
+CurrentExposure = 0     # Zero means automatic exposure
+ExposureAdaptPause = True   # by default (non-expert) we wait for camera to stabilize when AE changes
+PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
+CurrentExposureStr = "Auto"
+CurrentAwbAuto = True   # AWB enabled by default
+AwbPause = True   # by default (non-expert) we wait for camera to stabilize when AWB changes
+GainRed = 2.2  # 2.4
+GainBlue = 2.2  # 2.8
 PreviousGainRed = 1
 PreviousGainBlue = 1
-PreviewWarnAgain = True
 
-FPM_LastMinuteFrameTimes = list()
-FPM_StartTime = time.ctime()
-FPM_CalculatedValue = -1
-
+# Statistical information about where time is spent (expert mode only)
 total_wait_time_preview_display = 0
 total_wait_time_awb = 0
 total_wait_time_autoexp = 0
@@ -225,6 +239,14 @@ session_start_time = 0
 session_frames=0
 max_wait_time = 5000
 last_click_time = 0
+
+
+
+PreviewWarnAgain = True
+
+FPM_LastMinuteFrameTimes = list()
+FPM_StartTime = time.ctime()
+FPM_CalculatedValue = -1
 
 # Persisted data
 # Persisted data
@@ -234,7 +256,6 @@ SessionData = {
     "CurrentFrame": str(CurrentFrame),
     "CurrentExposure": str(CurrentExposure),
     "FilmHoleY": str(FilmHoleY),
-    "PreviewMode": PreviewMode.name,
     "NegativeCaptureActive": str(NegativeCaptureActive)
 }
 
@@ -248,7 +269,8 @@ def exit_app():  # Exit Application
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
         i2c.write_byte_data(16, 11, 0)  # Tell Arduino we stop (to turn off uv led
-        if PreviewMode == PreviewType.CAMERA_PREVIEW:
+        # Close preview if required
+        if not IsPiCamera2 or PiCam2PreviewEnabled:
             camera.stop_preview()
         camera.close()
     # Write session data upon exit
@@ -312,14 +334,12 @@ def set_focus_zoom():
 
 # A couple of helper funtcions to hide/display preview when needed (displaying popups with picamera legacy)
 def hide_preview():
-    global PreviewMode
-    if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
+    if not SimulatedRun and not IsPiCamera2:
         camera.stop_preview()
 
 
 def display_preview():
-    global PreviewMode
-    if PreviewMode == PreviewType.CAMERA_PREVIEW and not SimulatedRun and not IsPiCamera2:
+    if not SimulatedRun and not IsPiCamera2:
         camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
 
 
@@ -424,6 +444,8 @@ def decrease_exp():
         SessionData["CurrentExposure"] = str(CurrentExposure)
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
+    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
+
     if not SimulatedRun:
         if IsPiCamera2:
             camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
@@ -435,20 +457,34 @@ def decrease_exp():
 def auto_exp():
     global CurrentExposure, CurrentExposureStr
 
-    CurrentExposure = 0
-
-    CurrentExposureStr = "Auto"
-
-    SessionData["CurrentExposure"] = CurrentExposureStr
+    if (CurrentExposure != 0):
+        CurrentExposure = 0
+        CurrentExposureStr = "Auto"
+        SessionData["CurrentExposure"] = CurrentExposureStr
+        exposure_frame_value_label.config(text=CurrentExposureStr)
+        if not SimulatedRun:
+            if IsPiCamera2:
+                camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
+            else:
+                camera.shutter_speed = CurrentExposure
+    else:
+        if not SimulatedRun:
+            # Since we are in auto exposure mode, retrieve current value to start from there
+            if IsPiCamera2:
+                metadata = camera.capture_metadata()
+                CurrentExposure = metadata["ExposureTime"]
+                # CurrentExposure = camera.controls.ExposureTime # Does not work, need to get all metadata
+            else:
+                CurrentExposure = camera.exposure_speed
+        else:
+            CurrentExposure = 3500  # Arbitrary Value for Simulated run
+        CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
-    if not SimulatedRun:
-        if IsPiCamera2:
-            camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
-        else:
-            camera.shutter_speed = CurrentExposure
-
-    auto_exp_wait_checkbox.config(state=NORMAL)
+    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
+    auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
+    decrease_exp_btn.config(state=NORMAL if CurrentExposure != 0 else DISABLED)
+    increase_exp_btn.config(state=NORMAL if CurrentExposure != 0 else DISABLED)
 
 
 def increase_exp():
@@ -469,6 +505,8 @@ def increase_exp():
     SessionData["CurrentExposure"] = str(CurrentExposure)
 
     exposure_frame_value_label.config(text=CurrentExposureStr)
+    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
+
     if not SimulatedRun:
         if IsPiCamera2:
             camera.controls.ExposureTime = CurrentExposure
@@ -493,62 +531,62 @@ def auto_white_balance_change_pause_selection():
 
 def colour_gain_red_plus():
     global colour_gains_red_value_label
-    global gain_blue, gain_red
-    gain_red += 0.1
-    SessionData["gain_red"] = str(gain_red)
-    colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
+    global GainBlue, GainRed
+    GainRed += 0.1
+    SessionData["GainRed"] = str(GainRed)
+    colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
             # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
         else:
             # camera.awb_mode = 'off'
-            camera.awb_gains = (gain_red, gain_blue)
+            camera.awb_gains = (GainRed, GainBlue)
 
 
 def colour_gain_red_minus():
     global colour_gains_red_value_label
-    global gain_blue, gain_red
-    gain_red -= 0.1
-    SessionData["gain_red"] = str(gain_red)
-    colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
+    global GainBlue, GainRed
+    GainRed -= 0.1
+    SessionData["GainRed"] = str(GainRed)
+    colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
             # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
         else:
             # camera.awb_mode = 'off'
-            camera.awb_gains = (gain_red, gain_blue)
+            camera.awb_gains = (GainRed, GainBlue)
 
 
 def colour_gain_blue_plus():
     global colour_gains_blue_value_label
-    global gain_blue, gain_red
-    gain_blue += 0.1
-    SessionData["gain_blue"] = str(gain_blue)
-    colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+    global GainBlue, GainRed
+    GainBlue += 0.1
+    SessionData["GainBlue"] = str(GainBlue)
+    colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
             # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
         else:
             # camera.awb_mode = 'off'
-            camera.awb_gains = (gain_red, gain_blue)
+            camera.awb_gains = (GainRed, GainBlue)
 
 
 def colour_gain_blue_minus():
     global colour_gains_blue_value_label
-    global gain_blue, gain_red
-    gain_blue -= 0.1
-    SessionData["gain_blue"] = str(gain_blue)
-    colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+    global GainBlue, GainRed
+    GainBlue -= 0.1
+    SessionData["GainBlue"] = str(GainBlue)
+    colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
             # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (gain_red, gain_blue)})
+            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
         else:
             # camera.awb_mode = 'off'
-            camera.awb_gains = (gain_red, gain_blue)
+            camera.awb_gains = (GainRed, GainBlue)
 
 
 def ccm_update():
@@ -567,7 +605,7 @@ def ccm_update():
 
 def colour_gain_auto():
     global CurrentAwbAuto
-    global gain_blue, gain_red
+    global GainBlue, GainRed
     global colour_gains_auto_btn, awb_frame
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
@@ -579,24 +617,20 @@ def colour_gain_auto():
     if CurrentAwbAuto:
         awb_frame.config(text='Automatic White Balance ON')
         awb_wait_checkbox.config(state=NORMAL)
-        colour_gains_auto_btn.config(text='AWB OFF')
         colour_gains_red_btn_plus.config(state=DISABLED)
         colour_gains_red_btn_minus.config(state=DISABLED)
         colour_gains_blue_btn_plus.config(state=DISABLED)
         colour_gains_blue_btn_minus.config(state=DISABLED)
+        colour_gains_red_value_label.config(text="Auto")
+        colour_gains_blue_value_label.config(text="Auto")
         if not SimulatedRun:
             if IsPiCamera2:
                 camera.set_controls({"AwbEnable": 1})
-                colour_gains_red_value_label.config(text="Auto")
-                colour_gains_blue_value_label.config(text="Auto")
             else:
                 camera.awb_mode = 'auto'
-                colour_gains_red_value_label.config(text="Auto")
-                colour_gains_blue_value_label.config(text="Auto")
     else:
         awb_frame.config(text='Automatic White Balance OFF')
         awb_wait_checkbox.config(state=DISABLED)
-        colour_gains_auto_btn.config(text='AWB ON')
         colour_gains_red_btn_plus.config(state=NORMAL)
         colour_gains_red_btn_minus.config(state=NORMAL)
         colour_gains_blue_btn_plus.config(state=NORMAL)
@@ -606,41 +640,65 @@ def colour_gain_auto():
                 # Retrieve current gain values from Camera
                 metadata = camera.capture_metadata()
                 camera_colour_gains = metadata["ColourGains"]
-                gain_red = camera_colour_gains[0]
-                gain_blue = camera_colour_gains[1]
-                colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
-                colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+                GainRed = camera_colour_gains[0]
+                GainBlue = camera_colour_gains[1]
+                colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
+                colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
                 camera.set_controls({"AwbEnable": 0})
             else:
-                gain_red = camera.awb_gains[0]
-                gain_blue = camera.awb_gains[1]
-                colour_gains_red_value_label.config(text=str(round(gain_red, 1)))
-                colour_gains_blue_value_label.config(text=str(round(gain_blue, 1)))
+                GainRed = camera.awb_gains[0]
+                GainBlue = camera.awb_gains[1]
+                colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
+                colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
                 camera.awb_mode = 'off'
-                camera.awb_gains = (gain_red, gain_blue)
+                camera.awb_gains = (GainRed, GainBlue)
         else:  # Add fake values for simulated run
-            gain_red = 1
-            gain_blue = 1
+            colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
+            colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
 
+def stabilization_delay_down():
+    global stabilization_delay, CaptureStabilizationDelay
+
+    if (CaptureStabilizationDelay > 0):
+        CaptureStabilizationDelay -= 0.01
+        CaptureStabilizationDelay = round(CaptureStabilizationDelay, 2)
+    stabilization_delay.config(text=str(round(CaptureStabilizationDelay * 1000))+' ms')
+    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
+
+def stabilization_delay_up():
+    global stabilization_delay, CaptureStabilizationDelay
+
+    if (CaptureStabilizationDelay < 0.5):
+        CaptureStabilizationDelay += 0.01
+        CaptureStabilizationDelay = round(CaptureStabilizationDelay, 2)
+    stabilization_delay.config(text=str(round(CaptureStabilizationDelay * 1000))+' ms')
+    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
+
+def rwnd_speed_down():
+    global rwnd_speed_delay
+    global rwnd_speed_control_delay
+
+    if not SimulatedRun:
+        i2c.write_byte_data(16, 62, 0)
+    if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
+        rwnd_speed_delay += rwnd_speed_delay*0.1
+    else:
+        rwnd_speed_delay = 4000
+    #rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
+    rwnd_speed_control_delay.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
 
 def rwnd_speed_up():
     global rwnd_speed_delay
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        i2c.write_byte_data(16, 62, 0)
-    if rwnd_speed_delay > 200:
-        rwnd_speed_delay -= 20
-    rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
-def rwnd_speed_down():
-    global rwnd_speed_delay
-    global rwnd_speed_control_delay
-
-    if not SimulatedRun:
-        i2c.write_byte_data(16, 61, 0)
-    if rwnd_speed_delay < 2000:
-        rwnd_speed_delay += 20
-    rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
+        i2c.write_byte_data(16, 63, 0)
+    if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
+        rwnd_speed_delay -= rwnd_speed_delay*0.1
+    else:
+        rwnd_speed_delay = 200
+    #rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
+    rwnd_speed_control_delay.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
 
 
 def button_status_change_except(except_button, active):
@@ -648,6 +706,7 @@ def button_status_change_except(except_button, active):
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
+    global PiCam2_preview_btn
 
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -661,13 +720,13 @@ def button_status_change_except(except_button, active):
         Rewind_btn.config(state=DISABLED if active else NORMAL)
     if except_button != FastForward_btn:
         FastForward_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Start_btn:
-        Start_btn.config(state=DISABLED if active else NORMAL)
     if except_button != PosNeg_btn:
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Focus_btn:
+    if except_button != Focus_btn and not IsPiCamera2:
         Focus_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Start_btn:
+    if except_button != PiCam2_preview_btn:
+        PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != Start_btn and not PiCam2PreviewEnabled:
         Start_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Exit_btn:
         Exit_btn.config(state=DISABLED if active else NORMAL)
@@ -701,11 +760,12 @@ def advance_movie():
 def rewind_movie():
     global RewindMovieActive
     global SimulatedRun
-    global RewindErrorOutstanding
+    global RewindErrorOutstanding, RewindEndOutstanding
     global save_bg, save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
+        """ # Since algorithm to detect film in filmgate is nto secured, this warning is no longer needed
         # Disable preview to make tkinter dialogs visible
         hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
@@ -713,35 +773,40 @@ def rewind_movie():
         display_preview()
         if not answer:
             return()
-    else:
-        if RewindErrorOutstanding:
-            hide_preview()
-            tk.messagebox.showerror(title='Error during rewind',
-                                    message='It seems there is film loaded via filmgate. \
-                                         Please route it via upper path.')
-            display_preview()
+        """
+        RewindMovieActive = True
+    elif RewindErrorOutstanding:
+        hide_preview()
+        tk.messagebox.showerror(title='Error during rewind',
+                                message='It seems there is film loaded via filmgate. \
+                                     Please route it via upper path.')
+        display_preview()
+        RewindMovieActive = False
+    elif RewindEndOutstanding:
+        RewindMovieActive = False
+
+    if not RewindMovieActive:
+        Rewind_btn.config(text='<<', bg=save_bg, fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+        # Enable/Disable related buttons
+        button_status_change_except(Rewind_btn, RewindMovieActive)
 
     # Update button text
-    if not RewindMovieActive:  # Rewind movie is about to start...
-        Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
-    else:
-        Rewind_btn.config(text='<<', bg=save_bg, fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
-    # Send instruction to Arduino
-    RewindMovieActive = not RewindMovieActive
-
-    # Enable/Disable related buttons
-    button_status_change_except(Rewind_btn, RewindMovieActive)
-
-    if RewindErrorOutstanding:
-        RewindErrorOutstanding = False
-    else:
+    if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
             i2c.write_byte_data(16, 60, 0)
-
-        # Invoke rewind_loop a first time shen rewind starts
         if RewindMovieActive:
-            win.after(5, rewind_loop)
+            Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+            # Enable/Disable related buttons
+            button_status_change_except(Rewind_btn, RewindMovieActive)
+        # Invoke rewind_loop to continue processign until error or end event
+        win.after(5, rewind_loop)
+
+    if RewindErrorOutstanding:
+        RewindErrorOutstanding = False
+    if RewindEndOutstanding:
+        RewindEndOutstanding = False
+
 
 
 def rewind_loop():
@@ -751,7 +816,7 @@ def rewind_loop():
 
     if RewindMovieActive:
         # Invoke rewind_loop one more time, as long as rewind is ongoing
-        if not RewindErrorOutstanding:
+        if not RewindErrorOutstanding and not RewindEndOutstanding:
             win.after(5, rewind_loop)
         else:
             rewind_movie()
@@ -760,11 +825,12 @@ def rewind_loop():
 def fast_forward_movie():
     global FastForwardActive
     global SimulatedRun
-    global FastForwardErrorOutstanding
+    global FastForwardErrorOutstanding, FastForwardEndOutstanding
     global save_bg, save_fg
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
+        """ # Since algorithm to detect film in filmgate is nto secured, this warning is no longer needed
         # Disable preview to make tkinter dialogs visible
         hide_preview()
         answer = tk.messagebox.askyesno(title='Security check ',
@@ -772,36 +838,39 @@ def fast_forward_movie():
         display_preview()
         if not answer:
             return ()
-    else:
-        if FastForwardErrorOutstanding:
-            hide_preview()
-            tk.messagebox.showerror(title='Error during fast forward',
-                                    message='It seems there is film loaded via filmgate. \
-                                         Please route it via upper path.')
-            display_preview()
+        """
+        FastForwardActive = True
+    elif FastForwardErrorOutstanding:
+        hide_preview()
+        tk.messagebox.showerror(title='Error during fast forward',
+                                message='It seems there is film loaded via filmgate. \
+                                     Please route it via upper path.')
+        display_preview()
+        FastForwardActive = False
+    elif FastForwardEndOutstanding:
+        FastForwardActive = False
+
+    if not FastForwardActive:
+        FastForward_btn.config(text='>>', bg=save_bg, fg=save_fg, relief=RAISED)
+        # Enable/Disable related buttons
+        button_status_change_except(FastForward_btn, FastForwardActive)
 
     # Update button text
-    if not FastForwardActive:  # Fast-forward movie is about to start...
-        FastForward_btn.config(text='Stop\n>>', bg='red',
-                               fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
-    else:
-        FastForward_btn.config(text='>>', bg=save_bg,
-                               fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
-    FastForwardActive = not FastForwardActive
-
-    # Enable/Disable related buttons
-    button_status_change_except(FastForward_btn, FastForwardActive)
+    if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
+        time.sleep(0.2)
+        if not SimulatedRun:
+            i2c.write_byte_data(16, 61, 0)
+        if FastForwardActive:  # Fast-forward movie is about to start...
+            FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
+            # Enable/Disable related buttons
+            button_status_change_except(FastForward_btn, FastForwardActive)
+        # Invoke fast_forward_loop a first time shen fast-forward starts
+        win.after(5, fast_forward_loop)
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
-    else:
-        # Send instruction to Arduino
-        time.sleep(0.2)
-        if not SimulatedRun:
-            i2c.write_byte_data(16, 80, 0)
-        # Invoke fast_forward_loop a first time shen fast-forward starts
-        if FastForwardActive:
-            win.after(5, fast_forward_loop)
+    if FastForwardEndOutstanding:
+        FastForwardEndOutstanding = False
 
 
 def fast_forward_loop():
@@ -811,16 +880,48 @@ def fast_forward_loop():
 
     if FastForwardActive:
         # Invoke fast_forward_loop one more time, as long as rewind is ongoing
-        if not FastForwardErrorOutstanding:
+        if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:
             win.after(5, fast_forward_loop)
         else:
             fast_forward_movie()
 
 
+def capture_display_thread(queue, event, id):
+    global message
+
+    # logging.info("I'll be updating the preview image outside of the main scanning loop, to optimize speed")
+    logging.debug("Started capture_display_thread")
+    while not event.is_set() or not queue.empty():
+        message = queue.get()
+        logging.debug("Retrieved message from capture display queue")
+        if message == END_TOKEN:
+            break
+        if (queue.qsize() < 8):
+            draw_preview_image(message[0])
+        else:
+            logging.debug("Display queue almost full: Dropping frame")
+    logging.debug("Exiting capture_display_thread")
+
+
+def capture_save_thread(queue, event, id):
+    global CurrentDir
+    global message
+
+    # logging.info("I'll be updating the preview image outside of the main scanning loop, to optimize speed")
+    os.chdir(CurrentDir)
+    logging.debug("Started capture_save_thread n.%i", id)
+    while not event.is_set() or not queue.empty():
+        message = queue.get()
+        logging.info("Thread %i: Retrieved message from capture save queue", id)
+        if message == END_TOKEN:
+            break
+        message[0].save('picture-%05d.jpg' % message[1])
+    logging.debug("Exiting capture_save_thread n.%i", id)
+
 def draw_preview_image(preview_image):
     global draw_capture_label
     global preview_border_frame
-    global PreviewAreaImage
+    # global PreviewAreaImage
     global win
     global total_wait_time_preview_display
 
@@ -829,12 +930,17 @@ def draw_preview_image(preview_image):
     preview_image = preview_image.resize((844, 634))
     PreviewAreaImage = ImageTk.PhotoImage(preview_image)
     # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
-    draw_capture_label = tk.Label(preview_border_frame, image=PreviewAreaImage)
+    ####draw_capture_label = tk.Label(preview_border_frame, image=PreviewAreaImage)
+    # next two lines to avoid flickering. However, they might cause memory problems
+    draw_capture_label.config(image=PreviewAreaImage)
+    draw_capture_label.image = PreviewAreaImage
+    draw_capture_label.pack()
+
     # The Pack geometry manager packs widgets in rows or columns.
     draw_capture_label.place(x=0, y=0)
 
     total_wait_time_preview_display += (time.time() - curtime)
-    #print(f"Display preview image: {str(round((time.time() - curtime) * 1000,1))} ms")
+    logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
 
 
 def capture_single_step():
@@ -845,13 +951,12 @@ def capture_single_step():
 def single_step_movie():
     global SimulatedRun
     global camera
-    global PreviewMode
 
     if not SimulatedRun:
         i2c.write_byte_data(16, 40, 0)
 
-        if PreviewMode == PreviewType.CAPTURE_ALL or PreviewMode == PreviewType.CAPTURE_PARTIAL:
-            # If no preview, capture frame in memory and display it
+        if IsPiCamera2:
+            # If no camera preview, capture frame in memory and display it
             # Single step is not a critical operation, waiting 100ms for it to happen should be enough
             # No need to implement confirmation from Arduino, as we have for regular capture during scan
             time.sleep(0.5)
@@ -929,45 +1034,39 @@ def open_folder():
     OpenFolderActive = not OpenFolderActive
 
 
-def change_preview_status():
+# Function to enable 'real' preview with PiCamera2
+# Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
+#  - Focus
+#  - Color adjustment
+#  - Exposure adjustment
+def PiCamera2_preview():
+#def change_preview_status(mode):
     global win
-    global PreviewMode
-    global PreviewStatus
-    global PostviewModule, PostviewCounter
     global capture_config, preview_config
+    global PiCam2PreviewEnabled
+    global PiCam2_preview_btn, Start_btn
 
-    choice = PreviewStatus.get()
-    if choice == 1:
-        PreviewMode = PreviewType.CAMERA_PREVIEW
-    elif choice == 2:
-        PreviewMode = PreviewType.NO_PREVIEW
-    elif choice == 3:
-        PreviewMode = PreviewType.CAPTURE_ALL
-        PostviewModule = 1
-    elif choice == 4:
-        PreviewMode = PreviewType.CAPTURE_PARTIAL
-        PostviewModule = PostviewModulePartial
-
-    SessionData["PreviewMode"] = PreviewMode.name
-
-    if not SimulatedRun:
-        if PreviewMode == PreviewType.CAMERA_PREVIEW:
-            if IsPiCamera2:
-                camera.stop_preview()
-                camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
-                time.sleep(0.1)
-                camera.switch_mode(preview_config)
-                # self.canvas.create_rectangle(90, 75, 840, 720, fill="RED")
-            else:
-                camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
+    PiCam2PreviewEnabled = not PiCam2PreviewEnabled
+    if not SimulatedRun and IsPiCamera2:
+        if (PiCam2PreviewEnabled):
+            camera.stop_preview()
+            camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
+            time.sleep(0.1)
+            camera.switch_mode(preview_config)
         else:
-            if IsPiCamera2:
-                camera.stop_preview()
-                camera.start_preview(False)
-                time.sleep(0.1)
-                camera.switch_mode(capture_config)
-            else:
-                camera.stop_preview()
+            camera.stop_preview()
+            camera.start_preview(False)
+            time.sleep(0.1)
+            camera.switch_mode(capture_config)
+
+    PiCam2_preview_btn.config(text='Real Time display ' + ('OFF' if PiCam2PreviewEnabled else 'ON'),
+                      relief=SUNKEN if PiCam2PreviewEnabled else RAISED,
+                      bg='red' if PiCam2PreviewEnabled else save_bg,
+                      fg='white' if PiCam2PreviewEnabled else save_fg)
+
+    # Do not allow scan to start while PiCam2 preview is active
+    Start_btn.config(state=DISABLED if PiCam2PreviewEnabled else NORMAL)
+    Focus_btn.config(state=NORMAL if PiCam2PreviewEnabled else DISABLED)
 
 
 def set_s8():
@@ -1080,15 +1179,13 @@ def capture(still):
     global SimulatedRun
     global raw_simulated_capture_image
     global simulated_capture_image
-    global draw_capture_label
-    global PostviewCounter, PostviewModule
     global ExposureAdaptPause
     global CurrentAwbAuto
     global AwbPause
     global PreviousGainRed, PreviousGainBlue
-    global PreviewMode
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
+    global capture_display_queue, capture_save_queue
 
     if SimulatedRun:
         return()
@@ -1109,10 +1206,11 @@ def capture(still):
             # Finally changed to allow a percentage of the value used previously
             # As we initialize this percentage to 50%, we start with double the original value
             #if abs(aux_current_exposure - PreviousCurrentExposure) > 4000:
-            if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * 8000)/100:
+            if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
                     aux_exposure_str = "Auto (" + str(round((aux_current_exposure - 20000) / 2000)) + ")"
-                    print(f"Adapting exposure: ({aux_current_exposure},{aux_exposure_str})")
+                    #print(f"AE match: ({aux_current_exposure},{aux_exposure_str})")
+                    logging.info("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
                 exposure_frame_value_label.config(text=aux_exposure_str)
                 PreviousCurrentExposure = aux_current_exposure
@@ -1122,8 +1220,10 @@ def capture(still):
                     break;
             else:
                 break
-        total_wait_time_autoexp+=(time.time() - curtime)
-        print(f"Auto Exp. adjustment delay: {str(round((time.time() - curtime) * 1000,1))} ms")
+        if wait_loop_count > 0:
+            total_wait_time_autoexp+=(time.time() - curtime)
+            #print(f"AE match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
+            logging.info("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     # Wait for auto white balance to adapt only if allowed
     if CurrentAwbAuto and AwbPause:
@@ -1140,10 +1240,12 @@ def capture(still):
                 aux_gain_blue = camera.awb_gains[1]
             # Same as for exposure, difference allowed is a percentage of the maximum value
             #if abs(aux_gain_red-PreviousGainRed) >= 0.5 or abs(aux_gain_blue-PreviousGainBlue) >= 0.5:
-            if abs(aux_gain_red-PreviousGainRed) >= (MatchWaitMargin * 1/100) or abs(aux_gain_blue-PreviousGainBlue) >= (MatchWaitMargin * 1/100):
+            if abs(aux_gain_red-PreviousGainRed) >= (MatchWaitMargin * Tolerance_AWB/100) or \
+               abs(aux_gain_blue-PreviousGainBlue) >= (MatchWaitMargin * Tolerance_AWB/100):
                 if (wait_loop_count % 10 == 0):
-                    aux_gains_str = "Auto (" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
-                    print(f"Adapting AWB: {aux_gains_str})")
+                    aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
+                    #print(f"AWB Match: {aux_gains_str})")
+                    logging.info("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
                 colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
                 colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
@@ -1155,50 +1257,39 @@ def capture(still):
                     break;
             else:
                 break
-        total_wait_time_awb+=(time.time() - curtime)
-        print(f"AWB adjustment delay: {str(round((time.time() - curtime) * 1000,1))} ms")
+        if wait_loop_count > 0:
+            total_wait_time_awb+=(time.time() - curtime)
+            #print(f"AWB Match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
+            logging.info("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     if not SimulatedRun:
         if IsPiCamera2:
-            if PreviewMode == PreviewType.CAMERA_PREVIEW:
+            if PiCam2PreviewEnabled:
                 if still:
                     camera.switch_mode_and_capture_file(capture_config, 'still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
+                    # This one should not happen, will not allow PiCam2 scan in preview mode
                     camera.switch_mode_and_capture_file(capture_config, 'picture-%05d.jpg' % CurrentFrame)
             else:
                 # Allow time to stabilize image, too fast with PiCamera2 when no preview.
                 # Need to refine this (shorter time, Arduino specific slowdown?)
-                time.sleep(0.1)  # 100 ms seems OK. Tried with 50 and some frames were blurry
-                # camera.capture_file('picture-%05d.jpg' % CurrentFrame)
+                time.sleep(CaptureStabilizationDelay)  # 100 ms seems OK. Tried with 50 and some frames were blurry
                 captured_snapshot = camera.capture_image("main")
                 if still:
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
-                    captured_snapshot.save('picture-%05d.jpg' % CurrentFrame)
+                    # For PiCamera2, preview and save to file are handled in asynchronous threads
+                    queue_item = tuple((captured_snapshot, CurrentFrame))
+                    capture_display_queue.put(queue_item)
+                    capture_save_queue.put(queue_item)
         else:
             if still:
                 camera.capture('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill), quality=100)
                 CurrentStill += 1
             else:
                 camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
-
-        # Treatment for postview common for Picamera2 and legacy
-        if PreviewMode == PreviewType.CAPTURE_ALL or PreviewMode == PreviewType.CAPTURE_PARTIAL:
-            # Mitigation when preview is disabled to speed up things in PiCamera2
-            # Warning: Displaying the image just captured also has a cost in speed terms
-            PostviewCounter += 1
-            PostviewCounter %= PostviewModule
-            if PostviewCounter == 0:
-                # Even if there's no gain using postview in PiCamera legacy, support is implemented
-                # to allow comparing same modes with PiCamera2. So now, for the case of PiCamera legacy,
-                # we need to get the captured image in memory, by reading it from disk (recapturing it 
-                # in memory directly implies importing yet another library so, no thanks)
-                if not IsPiCamera2:
-                    captured_snapshot = Image.open('picture-%05d.jpg' % CurrentFrame)
-
-                draw_preview_image(captured_snapshot)
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -1270,7 +1361,6 @@ def capture_loop_simulated():
     global preview_border_frame
     global raw_simulated_capture_image
     global simulated_capture_image
-    global draw_capture_label
     global simulated_captured_frame_list, simulated_images_in_list
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
@@ -1280,10 +1370,20 @@ def capture_loop_simulated():
         stop_scan_simulated()
         ScanStopRequested = False
         curtime = time.time()
-        print(f"Total session time: {str(round((curtime-session_start_time),1))} seg for {session_frames} frames, ({round(((curtime-session_start_time)*1000/session_frames),1)} ms per frame)")
-        print(f"Total time to display preview image: {str(round((total_wait_time_preview_display),1))} seg, ({round((total_wait_time_preview_display*1000/session_frames),1)} ms per frame)")
-        print(f"Total time waiting for awb adjustment: {str(round((total_wait_time_awb),1))} seg, ({round((total_wait_time_awb*1000/session_frames),1)} ms per frame)")
-        print(f"Total time waiting for auto exposition adjustment: {str(round((total_wait_time_autoexp),1))} seg, ({round((total_wait_time_autoexp*1000/session_frames),1)} ms per frame)")
+        if ExpertMode:
+            logging.info("Total session time: %s seg for %i frames (%i ms per frame)",
+                         str(round((curtime-session_start_time),1)),
+                         session_frames,
+                         round(((curtime-session_start_time)*1000/session_frames),1))
+            logging.info("Total time to display preview image: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_preview_display),1)),
+                         round((total_wait_time_preview_display*1000/session_frames),1))
+            logging.info("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_awb),1)),
+                         round((total_wait_time_awb*1000/session_frames),1))
+            logging.info("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_autoexp),1)),
+                         round((total_wait_time_autoexp*1000/session_frames),1))
     if ScanOngoing:
         os.chdir(CurrentDir)
         frame_to_display = CurrentFrame % simulated_images_in_list
@@ -1327,7 +1427,7 @@ def start_scan():
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
-        if BaseDir == CurrentDir:
+        if BaseDir == CurrentDir or not os.path.isdir(CurrentDir):
             hide_preview()
             tk.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
             display_preview()
@@ -1396,10 +1496,20 @@ def capture_loop():
         stop_scan()
         ScanStopRequested = False
         curtime = time.time()
-        print(f"Total session time: {str(round((curtime-session_start_time),1))} seg for {session_frames} frames, ({round(((curtime-session_start_time)*1000/session_frames),1)} ms per frame)")
-        print(f"Total time to display preview image: {str(round((total_wait_time_preview_display),1))} seg, (average: {round((total_wait_time_preview_display*1000/session_frames),1)} ms per frame)")
-        print(f"Total time waiting for awb adjustment: {str(round((total_wait_time_awb),1))} seg, (average: {round((total_wait_time_awb*1000/session_frames),1)} ms per frame)")
-        print(f"Total time waiting for auto exposition adjustment: {str(round((total_wait_time_autoexp),1))} seg, (average: {round((total_wait_time_autoexp*1000/session_frames),1)} ms per frame)")
+        if ExpertMode:
+            logging.info("Total session time: %s seg for %i frames (%i ms per frame)",
+                         str(round((curtime-session_start_time),1)),
+                         session_frames,
+                         round(((curtime-session_start_time)*1000/session_frames),1))
+            logging.info("Total time to display preview image: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_preview_display),1)),
+                         round((total_wait_time_preview_display*1000/session_frames),1))
+            logging.info("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_awb),1)),
+                         round((total_wait_time_awb*1000/session_frames),1))
+            logging.info("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_autoexp),1)),
+                         round((total_wait_time_autoexp*1000/session_frames),1))
     elif ScanOngoing:
         if NewFrameAvailable:
             curtime = time.ctime()
@@ -1417,8 +1527,8 @@ def capture_loop():
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
                     # Log error to console
-                    print(f"{curtime} - Error while telling Arduino to move to next Frame.")
-                    print(f"    Frame {CurrentFrame} capture to be tried again.")
+                    logging.warning("Error while telling Arduino to move to next Frame.")
+                    logging.warning("Frame %i capture to be tried again.", CurrentFrame)
                     win.after(5, capture_loop)
                     return
 
@@ -1446,7 +1556,7 @@ def capture_loop():
             if ScanProcessError_LastTime != 0:
                 if time.time() - ScanProcessError_LastTime <= 5:     # Second error in less than 5 seconds: Stop
                     curtime = time.ctime()
-                    print(f"{curtime} - Error during scan process.")
+                    logging.warning("Error during scan process.")
                     ScanProcessError = False
                     if ScanOngoing:
                         ScanStopRequested = True  # Stop in next capture loop
@@ -1491,8 +1601,8 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
 
 def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatches accordingly
     global NewFrameAvailable
-    global RewindErrorOutstanding
-    global FastForwardErrorOutstanding
+    global RewindErrorOutstanding, RewindEndOutstanding
+    global FastForwardErrorOutstanding, FastForwardEndOutstanding
     global ArduinoTrigger
     global SimulatedRun
     global ScanProcessError
@@ -1504,19 +1614,25 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
             ArduinoTrigger = i2c.read_byte_data(16, 0)
         except IOError:
             # Log error to console
-            print(f"{curtime} - Error while checking incoming event ({ArduinoTrigger}) from Arduino. Will check again.")
+            logging.warning("Error while checking incoming event (%i) from Arduino. Will check again.", ArduinoTrigger)
 
     if ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
-        print(f"{curtime} - Received scan error from Arduino")
+        logging.warning("Received scan error from Arduino")
         ScanProcessError = True
-    elif ArduinoTrigger == 61:  # Error during Rewind
+    elif ArduinoTrigger == 60:  # Rewind ended, we can re-enable buttons
+        RewindEndOutstanding = True
+        logging.warning("Received rewind end event from Arduino")
+    elif ArduinoTrigger == 61:  # FastForward ended, we can re-enable buttons
+        FastForwardEndOutstanding = True
+        logging.warning("Received fast forward end event from Arduino")
+    elif ArduinoTrigger == 64:  # Error during Rewind
         RewindErrorOutstanding = True
-        print(f"{curtime} - Received rewind error from Arduino")
-    elif ArduinoTrigger == 81:  # Error during FastForward
+        logging.warning("Received rewind error from Arduino")
+    elif ArduinoTrigger == 65:  # Error during FastForward
         FastForwardErrorOutstanding = True
-        print(f"{curtime} - Received fast forward error from Arduino")
+        logging.warning("Received fast forward error from Arduino")
 
     ArduinoTrigger = 0
 
@@ -1551,8 +1667,7 @@ def on_form_event(dummy):
     # Uncomment to have the details of each event
     for key in dir(event):
         if not key.startswith('_'):
-            print('%s=%s' % (key, getattr(event, key)))
-    print()
+            logging.debug("%s=%s", key, getattr(event, key))
     """
 
 
@@ -1596,11 +1711,8 @@ def display_preview_warning():
                                                 '- Very imprecise (preview does not match captured image)\r\n'
                                                 'PiCamera2 preview mode can and should still be used in some '
                                                 'cases (typically for the focus procedure), however for the '
-                                                'scanning process one of the other three provided modes is '
-                                                'recommended:\r'
-                                                '- Capture 1/1: Displays each frame post-capture (legacy-like speed)\r'
-                                                '- Capture 1/4: Displays one of four frames post-capture (faster)\r'
-                                                '- None: No preview at all (fastest)\r\n', wraplength=450, justify=LEFT)
+                                                'scanning process the image just captured is displayed instead\r\n',
+                                                wraplength=450, justify=LEFT)
     preview_warn_again = tk.BooleanVar(value=PreviewWarnAgain)
     preview_btn = Button(preview_warning, text="OK", width=2, height=1, command=close_preview_warning)
     preview_checkbox = tk.Checkbutton(preview_warning, text='Do not show this warning again', height=1,
@@ -1632,9 +1744,7 @@ def load_persisted_data_from_disk():
 def load_config_data():
     global film_hole_frame, FilmHoleY
     global SessionData
-    global PreviewMode
     global PostviewModule
-    global preview_radio1, preview_radio2, preview_radio3, preview_radio4
     global PreviewWarnAgain
     global TempInFahrenheit
     global temp_in_fahrenheit_checkbox
@@ -1643,46 +1753,28 @@ def load_config_data():
     global SharpnessValue
 
     for item in SessionData:
-        print(item)
+        logging.info("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
-        print("SessionData loaded from disk:")
-        if 'CurrentDate' in SessionData:
-            print(SessionData["CurrentDate"])
-        if 'PreviewMode' in SessionData:
-            print(SessionData["PreviewMode"])
-            PreviewMode = PreviewType[SessionData["PreviewMode"]]
-            if PreviewMode.name == "NO_PREVIEW":
-                preview_radio1.select()
-            elif PreviewMode.name == "CAMERA_PREVIEW":
-                preview_radio2.select()
-            elif PreviewMode.name == "CAPTURE_ALL":
-                PostviewModule = 1
-                preview_radio3.select()
-            elif PreviewMode.name == "CAPTURE_PARTIAL":
-                PostviewModule = PostviewModulePartial
-                preview_radio4.select()
-            # No preview by default at init time, set it once config is loaded
-            #if PreviewMode.name != "CAMERA_PREVIEW":    # Default, no action needed if selected before
-            change_preview_status()
+        logging.info("SessionData loaded from disk:")
         if 'PreviewWarnAgain' in SessionData:
-            print(SessionData["PreviewWarnAgain"])
             PreviewWarnAgain = eval(SessionData["PreviewWarnAgain"])
         if 'TempInFahrenheit' in SessionData:
-            print(SessionData["TempInFahrenheit"])
             TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
             if TempInFahrenheit:
                 temp_in_fahrenheit_checkbox.select()
-        if Experimental:
+        if ExpertMode:
             if 'FilmHoleY' in SessionData:
-                print(SessionData["FilmHoleY"])
                 FilmHoleY = int(SessionData["FilmHoleY"])
                 film_hole_frame.place(x=4, y=FilmHoleY)
             if 'MatchWaitMargin' in SessionData:
-                print(SessionData["MatchWaitMargin"])
                 MatchWaitMargin = int(SessionData["MatchWaitMargin"])
                 match_wait_margin_value.config(text=str(MatchWaitMargin)+'%')
+            if 'CaptureStabilizationDelay' in SessionData:
+                CaptureStabilizationDelay = float(SessionData["CaptureStabilizationDelay"])
+                stabilization_delay.config(text=str(round(CaptureStabilizationDelay*1000)) + ' ms')
+
+        if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
-                print(SessionData["SharpnessValue"])
                 SharpnessValue = int(SessionData["SharpnessValue"])
                 sharpness_control_value.config(text=str(SharpnessValue))
 
@@ -1693,7 +1785,7 @@ def load_session_data():
     global CurrentFrame
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
-    global CurrentAwbAuto, AwbPause, gain_red, gain_blue
+    global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
     global film_type_R8_btn, film_type_S8_btn
@@ -1705,19 +1797,14 @@ def load_session_data():
                                          message='It seems T-Scann 8 was interrupted during the last session.\
                                          \r\nDo you want to continue from where it was stopped?')
         if confirm:
-            print("SessionData loaded from disk:")
-            if 'CurrentDate' in SessionData:
-                print(SessionData["CurrentDate"])
+            logging.info("SessionData loaded from disk:")
             if 'CurrentDir' in SessionData:
-                print(SessionData["CurrentDir"])
                 CurrentDir = SessionData["CurrentDir"]
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
-                print(SessionData["CurrentFrame"])
                 CurrentFrame = int(SessionData["CurrentFrame"])
                 Scanned_Images_number_label.config(text=SessionData["CurrentFrame"])
             if 'FilmType' in SessionData:
-                print(SessionData["FilmType"])
                 if SessionData["FilmType"] == "R8":
                     if not SimulatedRun:
                         i2c.write_byte_data(16, 18, 0)
@@ -1731,41 +1818,38 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
-            if 'CurrentExposure' in SessionData:
-                print(SessionData["CurrentExposure"])
-                CurrentExposureStr = SessionData["CurrentExposure"]
-                if CurrentExposureStr == "Auto":
-                    CurrentExposure = 0
-                else:
-                    CurrentExposure = int(CurrentExposureStr)
-                    CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-                exposure_frame_value_label.config(text=CurrentExposureStr)
-            if 'ExposureAdaptPause' in SessionData:
-                print(SessionData["ExposureAdaptPause"])
-                ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
-                if ExposureAdaptPause:
-                    auto_exp_wait_checkbox.select()
-            if Experimental:
+            if ExpertMode:
+                if 'CurrentExposure' in SessionData:
+                    CurrentExposureStr = SessionData["CurrentExposure"]
+                    if CurrentExposureStr == "Auto":
+                        CurrentExposure = 0
+                    else:
+                        CurrentExposure = int(CurrentExposureStr)
+                        CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
+                    exposure_frame_value_label.config(text=CurrentExposureStr)
+                    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
+                    decrease_exp_btn.config(state=DISABLED if CurrentExposure == 0 else NORMAL)
+                    increase_exp_btn.config(state=DISABLED if CurrentExposure == 0 else NORMAL)
+                if 'ExposureAdaptPause' in SessionData:
+                    ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
+                    if ExposureAdaptPause:
+                        auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
-                    print(SessionData["CurrentAwbAuto"])
                     CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
                     #if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
                     CurrentAwbAuto = not CurrentAwbAuto  # Invert value, as button action will invert the value again
                     colour_gain_auto()
                     #awb_frame.config(text='Automatic White Balance ON' if CurrentAwbAuto else 'Automatic White Balance OFF')
                 if 'AwbPause' in SessionData:
-                    print(SessionData["AwbPause"])
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
                         awb_wait_checkbox.select()
-                if 'gain_red' in SessionData:
-                    print(SessionData["gain_red"])
-                    gain_red = float(SessionData["gain_red"])
-                    colour_gains_red_value_label.config(text="Auto" if CurrentAwbAuto else str(round(gain_red, 1)))
-                if 'gain_blue' in SessionData:
-                    print(SessionData["gain_blue"])
-                    gain_blue = float(SessionData["gain_blue"])
-                    colour_gains_blue_value_label.config(text="Auto" if CurrentAwbAuto else str(round(gain_blue, 1)))
+                if 'GainRed' in SessionData:
+                    GainRed = float(SessionData["GainRed"])
+                    colour_gains_red_value_label.config(text="Auto" if CurrentAwbAuto else str(round(GainRed, 1)))
+                if 'GainBlue' in SessionData:
+                    GainBlue = float(SessionData["GainBlue"])
+                    colour_gains_blue_value_label.config(text="Auto" if CurrentAwbAuto else str(round(GainBlue, 1)))
 
         display_preview()
 
@@ -1786,8 +1870,31 @@ def tscann8_init():
     global capture_config
     global preview_config
     global draw_capture_label
-    global PreviewAreaImage
-    global PreviewMode, PreviewWinX, PreviewWinY
+    global PreviewWinX, PreviewWinY
+    global LogLevel
+    global capture_display_queue, capture_display_event
+    global capture_save_queue, capture_save_event
+
+    # Initialize logging
+    log_path = os.path.dirname(__file__)
+    if log_path == "":
+        log_path = os.getcwd()
+    log_file_fullpath = log_path + "/T-Scann8.debug.log"
+    logging.basicConfig(
+        level=LogLevel,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=[
+            logging.FileHandler(log_file_fullpath),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
+
+    logging.info("Log file: %s", log_file_fullpath)
+
+    if SimulatedRun:
+        logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
+    else:
+        logging.info("Running on Raspberry Pi")
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -1799,7 +1906,7 @@ def tscann8_init():
     # Prevent window resize
     win.minsize(1100, 810)
     win.maxsize(1100, 810)
-    if Experimental:
+    if ExperimentalMode or ExpertMode:
         win.geometry('1100x930')  # setting the size of the window
         win.minsize(1100, 930)
         win.maxsize(1100, 930)
@@ -1830,16 +1937,12 @@ def tscann8_init():
             camera = Picamera2()
             capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
                                                                transform=Transform(hflip=True))
-            # Try to use 6 buffers instead of the default 4 for preview, to see if this makes preview any better
-            preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True),
-                                                                 buffer_count=6)
-            if PreviewMode == PreviewType.CAMERA_PREVIEW:
-                camera.configure(preview_config)
-            else:
-                camera.configure(capture_config)
+            preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
+            # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
+            camera.configure(capture_config)
             camera.set_controls({"ExposureTime": CurrentExposure})
             camera.set_controls({"AnalogueGain": 1.0})
-            camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"AwbEnable": 1 if CurrentAwbAuto else 0})
             camera.set_controls({"ColourGains": (2.2, 2.2)}) # Red 2.2, Blue 2.2 seem to be OK
             # In PiCamera2, '1' is the standard sharpness
             # It can be a floating point number from 0.0 to 16.0
@@ -1851,6 +1954,22 @@ def tscann8_init():
             # No preview by default
             camera.start(show_preview=False)
             ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
+            # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
+            # displayed in the preview area by a dedicated thread, so that time consumed in this task
+            # does not impact the scan process speed
+            capture_display_queue = queue.Queue(maxsize=10)
+            capture_display_event = threading.Event()
+            capture_save_queue = queue.Queue(maxsize=10)
+            capture_save_event = threading.Event()
+            display_thread = threading.Thread(target=capture_display_thread, args=(capture_display_queue, capture_display_event,0))
+            save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
+            save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
+            save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
+            display_thread.start()
+            save_thread_1.start()
+            save_thread_2.start()
+            save_thread_3.start()
+            logging.debug("Threads initialized")
         else:
             camera = picamera.PiCamera()
             # From version 3.0 of UI (and implicitly for PiCamera legacy) Torulf recommends not to use mode 3 anymore,
@@ -1874,10 +1993,12 @@ def tscann8_init():
     if not SimulatedRun and not IsPiCamera2:
         win.bind('<Configure>', on_form_event)
 
+    logging.debug("T-Scann 8 initialized")
+
 
 def build_ui():
     global win
-    global Experimental
+    global ExperimentalMode
     global AdvanceMovie_btn
     global SingleStep_btn
     global Snapshot_btn
@@ -1893,13 +2014,14 @@ def build_ui():
     global folder_frame_target_dir
     global Scanned_Images_number_label
     global Scanned_Images_fpm
-    global exposure_frame_value_label
+    global exposure_frame_value_label, exposure_frame
     global film_type_S8_btn
     global film_type_R8_btn
     global save_bg, save_fg
     global PreviewStatus
     global auto_exposure_change_pause
     global auto_exp_wait_checkbox
+    global decrease_exp_btn, increase_exp_btn
     global ExposureAdaptPause
     global temp_in_fahrenheit
     global TempInFahrenheit
@@ -1913,11 +2035,12 @@ def build_ui():
     global ccm_11, ccm_12, ccm_13, ccm_21, ccm_22, ccm_23, ccm_31, ccm_32, ccm_33
     global OpenFolder_btn
     global film_hole_frame, FilmHoleY
-    global preview_radio1, preview_radio2, preview_radio3, preview_radio4
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
     global match_wait_margin_value
     global sharpness_control_value
+    global PiCam2_preview_btn
+    global stabilization_delay
 
     # Create horizontal button row at bottom
     # Advance movie (slow forward through filmgate)
@@ -1958,29 +2081,14 @@ def build_ui():
     # Activate focus zoom, to facilitate focusing the camera
     Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
     Focus_btn.place(x=550, y=710)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    preview_frame = LabelFrame(win, text='Preview', width=8, height=3)
-    preview_frame.pack(side=TOP, padx=1, pady=1)
-    preview_frame.place(x=650, y=700)
-
-    PreviewStatus = tk.IntVar()
-    preview_radio1 = Radiobutton(preview_frame, text="None          ", variable=PreviewStatus, value=2,
-                                 command=change_preview_status)
-    preview_radio1.grid(row=0, column=1, pady=2)
-    preview_radio2 = Radiobutton(preview_frame, text="From camera", variable=PreviewStatus, value=1,
-                                 command=change_preview_status)
-    preview_radio2.grid(row=0, column=2, pady=2)
-    preview_radio2.select()
-    preview_radio3 = Radiobutton(preview_frame, text="Capture 1/1", variable=PreviewStatus, value=3,
-                                 command=change_preview_status)
-    preview_radio3.grid(row=1, column=1, pady=2)
-    preview_radio4 = Radiobutton(preview_frame, text="Capture 1/4", variable=PreviewStatus, value=4,
-                                 command=change_preview_status)
-    preview_radio4.grid(row=1, column=2, pady=2)
-    PreviewStatus.set(1)
-
+    if IsPiCamera2 or SimulatedRun:
+        PiCam2_preview_btn = Button(win, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
+                           activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+        PiCam2_preview_btn.place(x=650, y=710)
     # Application Exit button
     Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80)
@@ -2032,36 +2140,10 @@ def build_ui():
                                height=1)
     Scanned_Images_fpm.pack(side=LEFT)
 
-    # Create frame to select exposure value
-    exposure_frame = LabelFrame(win, text='Exposure', width=16, height=2)
-    exposure_frame.pack(side=TOP)
-    exposure_frame.place(x=925, y=350)
-
-    exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1, font=("Arial", 16))
-    exposure_frame_value_label.pack(side=TOP, padx=18)
-
-    exposure_frame_buttons = Frame(exposure_frame, width=8, height=1)
-    exposure_frame_buttons.pack(side=TOP)
-    decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=decrease_exp, activebackground='green', activeforeground='white')
-    decrease_exp_btn.pack(side=LEFT)
-    auto_exp_btn = Button(exposure_frame_buttons, text='A', width=2, height=1, font=("Arial", 16, 'bold'),
-                          command=auto_exp, activebackground='green', activeforeground='white')
-    auto_exp_btn.pack(side=LEFT)
-    increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 16, 'bold'),
-                              command=increase_exp, activebackground='green', activeforeground='white')
-    increase_exp_btn.pack(side=LEFT)
-
-    auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
-    auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Match wait', height=1,
-                                            variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
-                                            command=auto_exposure_change_pause_selection)
-    auto_exp_wait_checkbox.pack(side=TOP)
-
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(win, text='Film type', width=16, height=1)
     film_type_frame.pack(side=TOP)
-    film_type_frame.place(x=925, y=475)
+    film_type_frame.place(x=925, y=350)
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=5)
@@ -2076,61 +2158,175 @@ def build_ui():
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(win, text='RPi Temp.', width=8, height=1)
     rpi_temp_frame.pack(side=TOP)
-    rpi_temp_frame.place(x=925, y=555)
+    rpi_temp_frame.place(x=925, y=440)
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=5, height=1)
-    RPi_temp_value_label.pack(side=TOP, padx=47)
+    RPi_temp_value_label.pack(side=TOP, padx=34)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
-    temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit   ', height=1,
+    temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit', height=1,
                                                  variable=temp_in_fahrenheit, onvalue=True, offvalue=False,
                                                  command=temp_in_fahrenheit_selection)
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
-    # Create experimental frame to play with ColourGains
-    if Experimental:
-        experimental_frame = LabelFrame(win, text='Experimental', width=8, height=5, font=("Arial", 7))
-        experimental_frame.pack(side=TOP)
-        experimental_frame.place(x=30, y=790)
+    # Create Experimental frame to play with ColourGains
+    if ExpertMode:
+        expert_frame = LabelFrame(win, text='Expert Area', width=8, height=5, font=("Arial", 7))
+        expert_frame.pack(side=TOP)
+        expert_frame.place(x=30, y=790)
 
-        awb_frame = LabelFrame(experimental_frame, text='Automatic White Balance ' + ('ON' if CurrentAwbAuto else 'OFF'), width=8, height=1,
+        # Exposure
+        exposure_frame = LabelFrame(expert_frame, text='Auto Exposure ' + ('ON' if CurrentExposure == 0 else 'OFF'),
+                                    width=16, height=2, font=("Arial", 7))
+        exposure_frame.pack(side=LEFT, padx=5, pady=5)
+
+        exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1,
+                                           font=("Arial", 7))
+        exposure_frame_value_label.pack(side=TOP, padx=18)
+
+        exposure_frame_buttons = Frame(exposure_frame, width=8, height=1)
+        exposure_frame_buttons.pack(side=TOP)
+        decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 7),
+                                  command=decrease_exp, activebackground='green', activeforeground='white',
+                                  state=DISABLED if CurrentExposure == 0 else NORMAL)
+        decrease_exp_btn.pack(side=LEFT)
+        auto_exp_btn = Button(exposure_frame_buttons, text='AE', width=2, height=1, font=("Arial", 7),
+                              command=auto_exp, activebackground='green', activeforeground='white')
+        auto_exp_btn.pack(side=LEFT)
+        increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 7),
+                                  command=increase_exp, activebackground='green', activeforeground='white',
+                                  state=DISABLED if CurrentExposure == 0 else NORMAL)
+        increase_exp_btn.pack(side=LEFT)
+
+        auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
+        auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Match wait', height=1,
+                                                variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
+                                                command=auto_exposure_change_pause_selection, font=("Arial", 7))
+        auto_exp_wait_checkbox.pack(side=TOP)
+
+        # Automatic White Balance
+        awb_frame = LabelFrame(expert_frame, text='Automatic White Balance ' + ('ON' if CurrentAwbAuto else 'OFF'), width=8, height=1,
                                font=("Arial", 7))
-        awb_frame.pack(side=LEFT, padx=5)
+        awb_frame.pack(side=LEFT, padx=5, pady=5)
 
-        colour_gains_auto_btn = Button(awb_frame, text='AWB ' + ('OFF' if CurrentAwbAuto else 'ON'), width=6, height=1, command=colour_gain_auto,
+        awb_buttons_frame = Frame(awb_frame, width=10, height=1)
+        awb_buttons_frame.pack(side=TOP, pady=2)
+
+        colour_gains_red_btn_plus = Button(awb_buttons_frame, text="Red-", command=colour_gain_red_minus,
+                                           activebackground='green', activeforeground='white', font=("Arial", 7),
+                                           state=DISABLED if CurrentAwbAuto else NORMAL)
+        colour_gains_red_btn_plus.grid(row=0, column=0, pady=2)
+        colour_gains_auto_btn1 = Button(awb_buttons_frame, text='AWB', width=2, height=1, command=colour_gain_auto,
                                        activebackground='green', activeforeground='white', font=("Arial", 7))
-        colour_gains_auto_btn.grid(row=0, column=0, pady=2)
+        colour_gains_auto_btn1.grid(row=0, column=1, pady=2)
+        colour_gains_red_btn_minus = Button(awb_buttons_frame, text="Red+", command=colour_gain_red_plus,
+                                            activebackground='green', activeforeground='white', font=("Arial", 7),
+                                            state=DISABLED if CurrentAwbAuto else NORMAL)
+        colour_gains_red_btn_minus.grid(row=0, column=2, pady=2)
+        colour_gains_red_value_label = Label(awb_buttons_frame, text='Auto' if CurrentAwbAuto else str(GainRed), width=5, height=1, font=("Arial", 7))
+        colour_gains_red_value_label.grid(row=0, column=3, pady=2)
+        colour_gains_blue_btn_plus = Button(awb_buttons_frame, text="Blue-", command=colour_gain_blue_minus,
+                                            activebackground='green', activeforeground='white', font=("Arial", 7),
+                                            state=DISABLED if CurrentAwbAuto else NORMAL)
+        colour_gains_blue_btn_plus.grid(row=1, column=0, pady=2)
+        colour_gains_auto_btn2 = Button(awb_buttons_frame, text='AWB', width=2, height=1, command=colour_gain_auto,
+                                       activebackground='green', activeforeground='white', font=("Arial", 7))
+        colour_gains_auto_btn2.grid(row=1, column=1, pady=2)
+        colour_gains_blue_btn_minus = Button(awb_buttons_frame, text="Blue+", command=colour_gain_blue_plus,
+                                             activebackground='green', activeforeground='white', font=("Arial", 7),
+                                             state=DISABLED if CurrentAwbAuto else NORMAL)
+        colour_gains_blue_btn_minus.grid(row=1, column=2, pady=2)
+        colour_gains_blue_value_label = Label(awb_buttons_frame, text='Auto' if CurrentAwbAuto else str(GainBlue), width=5, height=1, font=("Arial", 7))
+        colour_gains_blue_value_label.grid(row=1, column=3, pady=2)
+
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Match wait', height=1,
                                            variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                            command=auto_white_balance_change_pause_selection, font=("Arial", 7),
                                            state=NORMAL if CurrentAwbAuto else DISABLED)
-        awb_wait_checkbox.grid(row=1, column=0, pady=2)
+        awb_wait_checkbox.pack(side=TOP, pady=2)
 
-        colour_gains_red_btn_plus = Button(awb_frame, text="Red-", command=colour_gain_red_minus,
-                                           activebackground='green', activeforeground='white', font=("Arial", 7),
-                                           state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_red_btn_plus.grid(row=0, column=1, pady=2)
-        colour_gains_red_btn_minus = Button(awb_frame, text="Red+", command=colour_gain_red_plus,
-                                            activebackground='green', activeforeground='white', font=("Arial", 7),
-                                            state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_red_btn_minus.grid(row=0, column=2, pady=2)
-        colour_gains_red_value_label = Label(awb_frame, text='Auto' if CurrentAwbAuto else '2.2', width=8, height=1, font=("Arial", 7))
-        colour_gains_red_value_label.grid(row=0, column=3, pady=2)
-        colour_gains_blue_btn_plus = Button(awb_frame, text="Blue-", command=colour_gain_blue_minus,
-                                            activebackground='green', activeforeground='white', font=("Arial", 7),
-                                            state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_blue_btn_plus.grid(row=1, column=1, pady=2)
-        colour_gains_blue_btn_minus = Button(awb_frame, text="Blue+", command=colour_gain_blue_plus,
-                                             activebackground='green', activeforeground='white', font=("Arial", 7),
-                                             state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_blue_btn_minus.grid(row=1, column=2, pady=2)
-        colour_gains_blue_value_label = Label(awb_frame, text='Auto' if CurrentAwbAuto else '2.2', width=8, height=1, font=("Arial", 7))
-        colour_gains_blue_value_label.grid(row=1, column=3, pady=2)
+        # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
+        match_wait_margin_frame = LabelFrame(expert_frame, text="Match margin", width=8, height=2,
+                                             font=("Arial", 7))
+        match_wait_margin_frame.pack(side=LEFT, padx=2)
+
+        match_wait_margin_value = Label(match_wait_margin_frame, text=str(MatchWaitMargin)+'%',
+                                         width=4, height=1, font=("Arial", 7))
+        match_wait_margin_value.pack(side=TOP)
+        match_wait_margin_down = Button(match_wait_margin_frame, text="-", width=1, height=1, command=match_wait_down,
+                                        activebackground='green', activeforeground='white', font=("Arial", 8))
+        match_wait_margin_down.pack(side=LEFT)
+        match_wait_margin_up = Button(match_wait_margin_frame, text="+", width=1, height=1, command=match_wait_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 8))
+        match_wait_margin_up.pack(side=RIGHT)
+        match_wait_margin_bottom_frame = Frame(match_wait_margin_frame, height=10)   # frame just to add space at the bottom
+        match_wait_margin_bottom_frame.pack(side=TOP, pady=14)
+
+        # Display entry to adjust capture stabilization delay (100 ms by default)
+        stabilization_delay_frame = LabelFrame(expert_frame, text="Stabilization", width=8, height=1,
+                                              font=("Arial", 7))
+        stabilization_delay_frame.pack(side=LEFT, padx=2)
+
+        stabilization_delay = Label(stabilization_delay_frame,
+                                         text=str(round(CaptureStabilizationDelay*1000)) + ' ms',
+                                         width=8, height=1, font=("Arial", 7))
+        stabilization_delay.pack(side=TOP)
+        stabilization_delay_down_btn = Button(stabilization_delay_frame, text="-", width=1, height=1, command=stabilization_delay_down,
+                                         activebackground='green', activeforeground='white', font=("Arial", 8))
+        stabilization_delay_down_btn.pack(side=LEFT)
+        stabilization_delay_up_btn = Button(stabilization_delay_frame, text="+", width=1, height=1, command=stabilization_delay_up,
+                                       activebackground='green', activeforeground='white', font=("Arial", 8))
+        stabilization_delay_up_btn.pack(side=RIGHT)
+        stabilization_delay_bottom_frame = Frame(stabilization_delay_frame)  # frame just to add space at the bottom
+        stabilization_delay_bottom_frame.pack(side=BOTTOM, pady=18)
+
+        # Display entry to throttle Rwnd/FF speed
+        rwnd_speed_control_frame = LabelFrame(expert_frame, text="RW/FF speed", width=8, height=2,
+                                              font=("Arial", 7))
+        rwnd_speed_control_frame.pack(side=LEFT, padx=2)
+
+        rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
+                                         text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
+                                         width=8, height=1, font=("Arial", 7))
+        rwnd_speed_control_delay.pack(side=TOP)
+        rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
+                                         activebackground='green', activeforeground='white', font=("Arial", 8))
+        rwnd_speed_control_down.pack(side=LEFT)
+        rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
+                                       activebackground='green', activeforeground='white', font=("Arial", 8))
+        rwnd_speed_control_up.pack(side=RIGHT)
+        rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
+        rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
+
+        # Display marker for film hole
+        film_hole_frame = Frame(win, width=1, height=11, bg='black')
+        film_hole_frame.pack(side=TOP, padx=1, pady=1)
+        film_hole_frame.place(x=4, y=FilmHoleY)
+        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11,
+                                bg='white', fg='white')
+        film_hole_label.pack(side=TOP)
+        # Up/Down buttons to move marker for film hole
+        film_hole_control_frame = LabelFrame(expert_frame, text="Hole mark pos.", width=8, height=2,
+                                             font=("Arial", 7))
+        film_hole_control_frame.pack(side=LEFT, padx=5)
+        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=5, height=1, command=film_hole_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_up.pack(side=TOP)
+        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=5, height=1, command=film_hole_down,
+                                        activebackground='green', activeforeground='white', font=("Arial", 7))
+        film_hole_control_down.pack(side=TOP)
+        film_hole_bottom_frame = Frame(film_hole_control_frame)  # frame just to add space at the bottom
+        film_hole_bottom_frame.pack(side=BOTTOM, pady=1)
+
+    if ExperimentalMode:
+        experimental_frame = LabelFrame(win, text='Experimental Area', width=8, height=5, font=("Arial", 7))
+        experimental_frame.pack(side=TOP)
+        experimental_frame.place(x=700, y=790)
 
         # Colour Correction Matrix - Only for PiCamera2
-        if IsPiCamera2:
+        if IsPiCamera2 or True:
             ccm_11 = StringVar()
             ccm_12 = StringVar()
             ccm_13 = StringVar()
@@ -2180,69 +2376,6 @@ def build_ui():
                 ccm_32.set(round(camera_ccm[7], 2))
                 ccm_33.set(round(camera_ccm[8], 2))
 
-        # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
-        # Leave it in the experimental area, disabled, just in case it is reused
-        openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
-        openfolder_frame.pack(side=LEFT, padx=5)
-        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
-                                activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
-                                font=("Arial", 7))
-        OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
-
-        # Display marker for film hole
-        film_hole_frame = Frame(win, width=1, height=11, bg='black')
-        film_hole_frame.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame.place(x=4, y=FilmHoleY)
-        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11,
-                                bg='white', fg='white')
-        film_hole_label.pack(side=TOP)
-        # Up/Down buttons to move marker for film hole
-        film_hole_control_frame = LabelFrame(experimental_frame, text="Hole mark pos.", width=8, height=2,
-                                             font=("Arial", 7))
-        film_hole_control_frame.pack(side=LEFT, padx=5)
-        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=5, height=1, command=film_hole_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_up.pack(side=TOP)
-        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=5, height=1, command=film_hole_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_down.pack(side=TOP)
-        film_hole_bottom_frame = Frame(film_hole_control_frame)   # frame just to add space at the bottom
-        film_hole_bottom_frame.pack(side=BOTTOM, pady=5)
-
-        # Display entry to throttle Rwnd/FF speed
-        rwnd_speed_control_frame = LabelFrame(experimental_frame, text="Rwnd/FF speed", width=8, height=2,
-                                             font=("Arial", 7))
-        rwnd_speed_control_frame.pack(side=LEFT, padx=2)
-
-        rwnd_speed_control_delay = Label(rwnd_speed_control_frame, text=str(round((2000-rwnd_speed_delay)*100/1800))+'%',
-                                         width=4, height=1, font=("Arial", 7))
-        rwnd_speed_control_delay.pack(side=TOP)
-        rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=2, height=1, command=rwnd_speed_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_down.pack(side=LEFT)
-        rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=2, height=1, command=rwnd_speed_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_up.pack(side=RIGHT)
-        rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame, height=10)   # frame just to add space at the bottom
-        rwnd_speed_bottom_frame.pack(side=TOP, pady=10)
-
-        # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
-        match_wait_margin_frame = LabelFrame(experimental_frame, text="Match wait margin", width=8, height=2,
-                                             font=("Arial", 7))
-        match_wait_margin_frame.pack(side=LEFT, padx=2)
-
-        match_wait_margin_value = Label(match_wait_margin_frame, text=str(MatchWaitMargin)+'%',
-                                         width=4, height=1, font=("Arial", 7))
-        match_wait_margin_value.pack(side=TOP)
-        match_wait_margin_down = Button(match_wait_margin_frame, text="-", width=2, height=1, command=match_wait_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_down.pack(side=LEFT)
-        match_wait_margin_up = Button(match_wait_margin_frame, text="+", width=2, height=1, command=match_wait_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_up.pack(side=RIGHT)
-        match_wait_margin_bottom_frame = Frame(match_wait_margin_frame, height=10)   # frame just to add space at the bottom
-        match_wait_margin_bottom_frame.pack(side=TOP, pady=10)
-
         # Sharpness, control to allow playign with the values and see the results
         sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
                                              font=("Arial", 7))
@@ -2251,27 +2384,55 @@ def build_ui():
         sharpness_control_value = Label(sharpness_control_frame, text=str(SharpnessValue),
                                          width=4, height=1, font=("Arial", 7))
         sharpness_control_value.pack(side=TOP)
-        sharpness_control_value_down = Button(sharpness_control_frame, text="-", width=2, height=1, command=sharpness_down,
+        sharpness_control_value_down = Button(sharpness_control_frame, text="-", width=1, height=1, command=sharpness_down,
                                         activebackground='green', activeforeground='white', font=("Arial", 8))
         sharpness_control_value_down.pack(side=LEFT)
-        sharpness_control_value_up = Button(sharpness_control_frame, text="+", width=2, height=1, command=sharpness_up,
+        sharpness_control_value_up = Button(sharpness_control_frame, text="+", width=1, height=1, command=sharpness_up,
                                       activebackground='green', activeforeground='white', font=("Arial", 8))
         sharpness_control_value_up.pack(side=RIGHT)
         sharpness_control_bottom_frame = Frame(sharpness_control_frame, height=10)   # frame just to add space at the bottom
-        sharpness_control_bottom_frame.pack(side=TOP, pady=10)
+        sharpness_control_bottom_frame.pack(side=TOP, pady=13)
+
+        # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
+        # Leave it in the expert area, disabled, just in case it is reused
+        openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
+        openfolder_frame.pack(side=LEFT, padx=5)
+        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
+                                activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
+                                font=("Arial", 7))
+        OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
+
 
 
 def main(argv):
     global SimulatedRun
-    global Experimental
+    global ExpertMode, ExperimentalMode
+    global LogLevel, LoggingMode
+    global capture_display_event, capture_save_event
+    global capture_display_queue, capture_save_queue
 
-    opts, args = getopt.getopt(argv, "sx")
+    opts, args = getopt.getopt(argv, "sexl:h")
 
     for opt, arg in opts:
         if opt == '-s':
             SimulatedRun = True
+        elif opt == '-e':
+            ExpertMode = True
         elif opt == '-x':
-            Experimental = True
+            ExperimentalMode = True
+        elif opt == '-l':
+            LoggingMode = arg
+        elif opt == '-h':
+            print("T-Scann 8 Command line parameters")
+            print("  -s             Start Simulated session (for developers only)")
+            print("  -e             Activate expert mode")
+            print("  -x             Activate experimental mode (for developers only)")
+            print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
+            exit()
+
+    LogLevel = getattr(logging, LoggingMode.upper(), None)
+    if not isinstance(LogLevel, int):
+        raise ValueError('Invalid log level: %s' % LogLevel)
 
     tscann8_init()
 
@@ -2294,6 +2455,14 @@ def main(argv):
 
     # Main Loop
     win.mainloop()  # running the loop that works as a trigger
+
+    if IsPiCamera2:
+        capture_display_event.set()
+        capture_save_event.set()
+        capture_display_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
 
     if not SimulatedRun:
         camera.close()
