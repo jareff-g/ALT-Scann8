@@ -106,6 +106,15 @@
                         - Bug fixed: After rewind/FF, neutral was not reset for motors B and C 
                         - Renamed 'check' to 'IsHoleDetected', an dalso moved some of the logic outside of it, to make it more atomic.
                         - Removed some redundant code from 'scan' (already done by check/IsHoleDetected)
+      19 Sep 2022 - JRE 
+                        - Improve algorithm of 'FilmInFilmGate' to avoid false positives
+                          - Because of this improvement, warning before proceeding with RW/FF is removed
+                        - Improve (and simplify) algorithm of movie forward
+      20 Sep 2022 - JRE 
+                        - Implement Progressive deceleration when stopping rwnd/FF
+                          - Implement equivalent algorythm for acceleration
+                        - Implement notification of rwnd/ff termination to RPi
+                        - Reorganize command numbers: BEWARE NOT TO MIX WITH OLDER VERSIONS OF JRE UI (numbers for command in Torulf version do not change)
 */
 
 #include <Wire.h>
@@ -119,7 +128,7 @@ enum {
   FrameSteps,
   DebugInfo,
   None
-} DebugState = DebugInfo;
+} DebugState = PT_Level;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -167,7 +176,7 @@ int FilteredSignalLevel = 0;
 
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
-unsigned long FetchFrameScanSpeed = 1000;    // Play Slow before trig (Original 15000)
+unsigned long FetchFrameScanSpeed = 5000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;                       // speed Rewind movie (delay in rewind loop, progressibly reduced down to 200)
 int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
 int PerforationThresholdLevel = 120;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
@@ -195,7 +204,7 @@ int LastFrameSteps = 0;                     // stores number of steps
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
 
-unsigned long TractionStopWaitingTime = 20000;  // winding wheel C Start value, changed by program. 2000 in Original code (JRE: 20000, after the change in the collecting film code in scan function)
+unsigned long TractionStopWaitingTime = 100000;  // winding wheel C Start value, changed by program. 2000 in Original code (JRE: 20000, after the change in the collecting film code in scan function. Later changed to 100000 (100 ms) to simplify)
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 unsigned long TractionStopLastWaitEventTime = 0;
@@ -203,7 +212,7 @@ unsigned long TractionStopLastWaitEventTime = 0;
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
-int EventForRPi = 0;    // 11-Frame ready for exposure, 61-Rewind error, 81-FF error
+int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60-Rewind end, 61-FF end, 64-Rewind error, 65-FF error
 
 int PT_SignalLevelRead;   // Level out signal phototransistor detection
 
@@ -274,10 +283,6 @@ void loop() {
     // First do some common stuff (set port, push phototransistor level)
     Wire.begin(16);
 
-    // No need to log PT to Serial Plotter here, otherwise too many trees in the forest. No need to get value either
-    // PT_SignalLevelRead = analogRead(PHOTODETECT);
-    //if (DebugState == PT_Level && (ScanState == Sts_Scan || ScanState == Sts_SingleStep)) SerialPrintInt(PT_SignalLevelRead);
-
     TractionStopActive = digitalRead(TractionStopPin);
 
     if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
@@ -342,10 +347,10 @@ void loop() {
             MinFrameSteps = 100; // Used to be 100
             delay(50);
             break;
-          case 60:
+          case 60: // Rewind
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
               DebugPrint("Rwnd err"); 
-              EventForRPi = 61; 
+              EventForRPi = 64;
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -354,7 +359,7 @@ void loop() {
             else {
               DebugPrint("Rwnd"); 
               ScanState = Sts_Rewind;
-              delay (500); 
+              delay (100); 
               digitalWrite(MotorA_Neutral, LOW); 
               digitalWrite(MotorB_Neutral, HIGH);  
               digitalWrite(MotorC_Neutral, HIGH); 
@@ -367,18 +372,10 @@ void loop() {
             }
             delay(50);
             break;
-          case 61:  // Tune Rewind speed delay up, allowing to slow down the rewind/ff speed
-            if (TargetRewindSpeedLoop < 2000)
-              TargetRewindSpeedLoop += 20;
-            break;
-          case 62:  // Tune Rewind speed delay down, allowing to speed up the rewind/ff speed
-            if (TargetRewindSpeedLoop > 200)
-              TargetRewindSpeedLoop -= 20;
-            break;
-          case 80:
+          case 61:  // Fast Forward
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
               DebugPrint("FF err"); 
-              EventForRPi = 81; 
+              EventForRPi = 65; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -387,7 +384,7 @@ void loop() {
             else {
               DebugPrint(">FF"); 
               ScanState = Sts_FastForward;
-              delay (500); 
+              delay (100); 
               digitalWrite(MotorA_Neutral, HIGH); 
               digitalWrite(MotorB_Neutral, HIGH);  
               digitalWrite(MotorC_Neutral, LOW); 
@@ -398,6 +395,14 @@ void loop() {
               tone(A2, 2200, 200); 
               RewindSpeed = 4000;
             }
+            break;
+          case 62:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
+            if (TargetRewindSpeedLoop < 4000)
+              TargetRewindSpeedLoop += 20;
+            break;
+          case 63:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
+            if (TargetRewindSpeedLoop > 200)
+              TargetRewindSpeedLoop -= 20;
             break;
         }
         break;
@@ -462,11 +467,8 @@ void loop() {
           ScanState = Sts_Idle;
         }
         else {
-          if (!TractionStopActive) {
-            TractionStopEventCount = TractionStopEventCount + 1; 
-            delay(10); 
-            digitalWrite(MotorC_Stepper, HIGH);
-          }
+          CollectOutgoingFilm();
+          delay(1); 
           digitalWrite(MotorB_Stepper, HIGH);
         }
         break;
@@ -483,22 +485,37 @@ void loop() {
 // ------ rewind the movie ------
 boolean RewindFilm(int Ic) {
   boolean retvalue = true;
+  static boolean stopping = false;
   
   Wire.begin(16);
 
   if (Ic == 60) {
-    retvalue = false;
-    digitalWrite(MotorA_Neutral, HIGH);
-    digitalWrite(MotorB_Neutral, LOW);  
-    digitalWrite(MotorC_Neutral, LOW); 
-    delay (100);
+    stopping = true;
+  }
+  else if (stopping) {
+    if (RewindSpeed < 4000) {
+      digitalWrite(MotorA_Stepper, HIGH); 
+      delayMicroseconds(RewindSpeed); 
+      digitalWrite(MotorA_Stepper, LOW);
+      RewindSpeed += round(max(1,RewindSpeed/400));
+    }
+    else {
+      retvalue = false;
+      stopping = false;
+      digitalWrite(MotorA_Neutral, HIGH);
+      digitalWrite(MotorB_Neutral, LOW);  
+      digitalWrite(MotorC_Neutral, LOW); 
+      delay (100);
+      EventForRPi = 60; 
+      digitalWrite(13, HIGH);
+    }
   }
   else {
     digitalWrite(MotorA_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorA_Stepper, LOW);
     if (RewindSpeed >= TargetRewindSpeedLoop) {
-      RewindSpeed -= 2;
+      RewindSpeed -= round(max(1,RewindSpeed/400));
     }
   }
   return(retvalue);
@@ -507,24 +524,39 @@ boolean RewindFilm(int Ic) {
 // ------ fast forward the movie ------
 boolean FastForwardFilm(int Ic) {
   boolean retvalue = true;
+  static boolean stopping = false;
 
   Wire.begin(16);  // join I2c bus with address #16
 
-  if (Ic == 80) {
-    retvalue = false;
-    digitalWrite(MotorC_Neutral, HIGH); 
-    digitalWrite(MotorB_Neutral, LOW);
-    digitalWrite(MotorC_Neutral, LOW); 
-    delay (100);
+  if (Ic == 61) {
+    stopping = true;
+  }
+  else if (stopping) {
+    if (RewindSpeed < 4000) {
+      digitalWrite(MotorC_Stepper, HIGH); 
+      delayMicroseconds(RewindSpeed); 
+      digitalWrite(MotorC_Stepper, LOW);
+      RewindSpeed += round(max(1,RewindSpeed/400));
+    }
+    else {
+      retvalue = false;
+      stopping = false;
+      digitalWrite(MotorC_Neutral, HIGH); 
+      digitalWrite(MotorB_Neutral, LOW);
+      digitalWrite(MotorC_Neutral, LOW); 
+      delay (100);
+      EventForRPi = 61; 
+      digitalWrite(13, HIGH);
+    }
   }
   else {
     digitalWrite(MotorC_Stepper, HIGH); 
     delayMicroseconds(RewindSpeed); 
     digitalWrite(MotorC_Stepper, LOW);
-  }
     if (RewindSpeed >= TargetRewindSpeedLoop) {
-      RewindSpeed = RewindSpeed - 2;
+      RewindSpeed -= round(max(1,RewindSpeed/400));
     }
+  }
   return(retvalue);
 }
 
@@ -548,10 +580,12 @@ void CollectOutgoingFilm(void) {
       }
       else {
         TractionStopLastWaitEventTime = CurrentTime;
+        /* This algorythm ois a bit complicated, and not sure it is that useful. Better to have a fixed time to avoid checking too often for traction  stop
         TractionStopWaitingTime = TractionStopWaitingTime + 2000;
         if (TractionStopWaitingTime >= 120000)
           TractionStopWaitingTime = 70000;
         break;
+        */
       }
     } while (!TractionStopActive && StepCount < 10); // 10 should be enough. This function is called only from scan, and each pass it performs a max of 4 steps
   } 
@@ -559,14 +593,14 @@ void CollectOutgoingFilm(void) {
 
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
-  int SignalLevel,PreviousSignalLevel=0;
+  int SignalLevel;
   boolean retvalue = false;
+  int min=300, max=0;
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
   UVLedOn = true;
   delay(200);  // Give time to FT to stabilize
 
-  PreviousSignalLevel = analogRead(PHOTODETECT);
 
   // MinFrameSteps used here as a reference, just to skip two frames in worst case
   // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
@@ -574,15 +608,19 @@ boolean FilmInFilmgate() {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = analogRead(PHOTODETECT);
-    if (abs(SignalLevel - PreviousSignalLevel) > 50) {
-      retvalue = true;
-      break;
-    }
-    PreviousSignalLevel = SignalLevel;
+    if (SignalLevel > max) max = SignalLevel;
+    if (SignalLevel < min) min = SignalLevel;
+    if (DebugState == PT_Level)
+      SerialPrintInt(SignalLevel);
   }
   digitalWrite(MotorB_Stepper, LOW); 
   analogWrite(11, 0); // Turn off UV LED
   UVLedOn = false;
+
+
+  if (abs(max-min) > 200)
+    retvalue = true;
+
   return(retvalue);
 }
 
@@ -593,10 +631,6 @@ boolean IsHoleDetected() {
   boolean hole_detected = false;
   
   PT_SignalLevelRead = analogRead(PHOTODETECT);
-  // No need to log PT to Serial Plotter here, otherwise too many trees in the forest
-  //if (DebugState == PT_Level) SerialPrintInt(PT_SignalLevelRead);
-
-
   if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
     FilteredSignalLevel = PT_SignalLevelRead;
   }
