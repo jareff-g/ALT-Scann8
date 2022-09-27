@@ -123,6 +123,7 @@ from datetime import datetime
 import logging
 import sys
 import getopt
+import numpy
 
 try:
     import smbus
@@ -150,6 +151,10 @@ import queue
 FocusState = True
 lastFocus = True
 FocusZoomActive = False
+FocusZoomPosX = 0.35
+FocusZoomPosY = 0.35
+FocusZoomFactorX = 0.2
+FocusZoomFactorY = 0.2
 FreeWheelActive = False
 BaseDir = '/home/juan/Vídeos/'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
@@ -179,7 +184,7 @@ PersistedDataLoaded = False
 ArduinoTrigger = 0
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
-
+FrameArrivalTime = 0
 # Variables to track windows movement and set preview accordingly
 TopWinX = 0
 TopWinY = 0
@@ -308,6 +313,7 @@ def set_focus_zoom():
     global save_bg, save_fg
     global SimulatedRun
     global ZoomSize, Focus_btn
+    global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
 
     if not FocusZoomActive:
         Focus_btn.config(text='Focus Zoom OFF', bg='red', fg='white', relief=SUNKEN)
@@ -330,6 +336,88 @@ def set_focus_zoom():
 
     # Enable/Disable related buttons
     button_status_change_except(Focus_btn, FocusZoomActive)
+    # Enable disable buttons for focus move
+    if ExpertMode:
+        focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+        focus_up_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+        focus_dn_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+        focus_rt_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+        focus_plus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+        focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+
+def adjust_focus_zoom():
+    if not SimulatedRun:
+        if IsPiCamera2:
+            camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
+                                               (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
+        else:
+            camera.crop = (FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)  # Activate camera zoom
+
+
+def set_focus_up():
+    global FocusZoomPosX, FocusZoomPosY
+    if FocusZoomPosY > 0.05:
+        FocusZoomPosY = round(FocusZoomPosY - 0.05, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom up (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
+
+def set_focus_left():
+    global FocusZoomPosX, FocusZoomPosY
+    if FocusZoomPosX > 0.05:
+        FocusZoomPosX = round(FocusZoomPosX - 0.05, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom left (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
+
+
+def set_focus_right():
+    global FocusZoomPosX, FocusZoomPosY
+    if FocusZoomPosX < (1-(FocusZoomFactorX - 0.05)):
+        FocusZoomPosX = round(FocusZoomPosX + 0.05, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom right (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
+
+
+def set_focus_down():
+    global FocusZoomPosX, FocusZoomPosY
+    if FocusZoomPosY < (1-(FocusZoomFactorY - 0.05)):
+        FocusZoomPosY = round(FocusZoomPosY + 0.05, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom down (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
+
+def set_focus_plus():
+    global FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY
+    if FocusZoomFactorX >= 0.2:
+        FocusZoomFactorX = round(FocusZoomFactorX - 0.1, 1)
+        # Zoom factor is the same for X and Y, so we can safely add everything in the if statement for X
+        if FocusZoomFactorY >= 0.2:
+            FocusZoomFactorY = round(FocusZoomFactorY - 0.1, 1)
+        # Adjust origin so that zoom is centered
+        FocusZoomPosX = round(FocusZoomPosX + 0.05, 2)
+        FocusZoomPosY = round(FocusZoomPosY + 0.05, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom plus (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
+
+def set_focus_minus():
+    global FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY
+    if FocusZoomFactorX < 0.9:
+        FocusZoomFactorX = round(FocusZoomFactorX + 0.1, 1)
+        # Zoom factor is the same for X and Y, so we can safely add everything in the if statement for X
+        if FocusZoomFactorY < 0.9:
+            FocusZoomFactorY = round(FocusZoomFactorY + 0.1, 1)
+        # Adjust origin so that zoom is centered
+        FocusZoomPosX = round(FocusZoomPosX - 0.05, 2)
+        FocusZoomPosY = round(FocusZoomPosY - 0.05, 2)
+        # Adjust boundaries if needed
+        if FocusZoomPosX < 0:
+            FocusZoomPosX = 0
+        if FocusZoomPosY < 0:
+            FocusZoomPosY = 0
+        if FocusZoomPosX + FocusZoomFactorX > 1:
+            FocusZoomPosX = round(1 - FocusZoomFactorX, 2)
+        if FocusZoomPosY + FocusZoomFactorY > 1:
+            FocusZoomPosY = round(1 - FocusZoomFactorY, 2)
+        adjust_focus_zoom()
+        logging.debug("Zoom plus (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
 
 
 # A couple of helper funtcions to hide/display preview when needed (displaying popups with picamera legacy)
@@ -421,6 +509,9 @@ def decrease_exp():
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
 
+    if not ExpertMode:
+        return
+
     if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
             if IsPiCamera2:
@@ -457,6 +548,9 @@ def decrease_exp():
 def auto_exp():
     global CurrentExposure, CurrentExposureStr
 
+    if not ExpertMode:
+        return
+
     if (CurrentExposure != 0):
         CurrentExposure = 0
         CurrentExposureStr = "Auto"
@@ -490,6 +584,9 @@ def auto_exp():
 def increase_exp():
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
+
+    if not ExpertMode:
+        return
 
     if not SimulatedRun:
         if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
@@ -532,6 +629,10 @@ def auto_white_balance_change_pause_selection():
 def colour_gain_red_plus():
     global colour_gains_red_value_label
     global GainBlue, GainRed
+
+    if not ExpertMode:
+        return()
+
     GainRed += 0.1
     SessionData["GainRed"] = str(GainRed)
     colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
@@ -547,6 +648,10 @@ def colour_gain_red_plus():
 def colour_gain_red_minus():
     global colour_gains_red_value_label
     global GainBlue, GainRed
+
+    if not ExpertMode:
+        return ()
+
     GainRed -= 0.1
     SessionData["GainRed"] = str(GainRed)
     colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
@@ -562,6 +667,10 @@ def colour_gain_red_minus():
 def colour_gain_blue_plus():
     global colour_gains_blue_value_label
     global GainBlue, GainRed
+
+    if not ExpertMode:
+        return ()
+
     GainBlue += 0.1
     SessionData["GainBlue"] = str(GainBlue)
     colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
@@ -577,6 +686,10 @@ def colour_gain_blue_plus():
 def colour_gain_blue_minus():
     global colour_gains_blue_value_label
     global GainBlue, GainRed
+
+    if not ExpertMode:
+        return ()
+
     GainBlue -= 0.1
     SessionData["GainBlue"] = str(GainBlue)
     colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
@@ -610,6 +723,9 @@ def colour_gain_auto():
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global colour_gains_red_value_label, colour_gains_blue_value_label
+
+    if not ExpertMode:
+        return ()
 
     CurrentAwbAuto = not CurrentAwbAuto
     SessionData["CurrentAwbAuto"] = str(CurrentAwbAuto)
@@ -724,9 +840,7 @@ def button_status_change_except(except_button, active):
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Focus_btn and not IsPiCamera2:
         Focus_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != PiCam2_preview_btn:
-        PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Start_btn and not PiCam2PreviewEnabled:
+    if except_button != Start_btn and (not IsPiCamera2 or not PiCam2PreviewEnabled):
         Start_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Exit_btn:
         Exit_btn.config(state=DISABLED if active else NORMAL)
@@ -734,6 +848,11 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+
+    if IsPiCamera2:
+        if except_button != PiCam2_preview_btn:
+            PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
+
 
 
 def advance_movie():
@@ -762,6 +881,9 @@ def rewind_movie():
     global SimulatedRun
     global RewindErrorOutstanding, RewindEndOutstanding
     global save_bg, save_fg
+
+    if SimulatedRun and RewindMovieActive:  # no callback from Arduino in simulated mode
+        RewindEndOutstanding = True
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
@@ -809,6 +931,7 @@ def rewind_movie():
 
 
 
+
 def rewind_loop():
     global RewindMovieActive
     global SimulatedRun
@@ -827,6 +950,9 @@ def fast_forward_movie():
     global SimulatedRun
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
     global save_bg, save_fg
+
+    if SimulatedRun and FastForwardActive:  # no callback from Arduino in simulated mode
+        FastForwardEndOutstanding = True
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
@@ -897,6 +1023,11 @@ def capture_display_thread(queue, event, id):
         if message == END_TOKEN:
             break
         if (queue.qsize() < 8):
+            # Invert image if button selected
+            if NegativeCaptureActive:
+                image_array = numpy.asarray(message[0])
+                image_array = numpy.negative(image_array)
+                message[0] = PIL.Image.fromarray(image_array)
             draw_preview_image(message[0])
         else:
             logging.debug("Display queue almost full: Dropping frame")
@@ -915,6 +1046,11 @@ def capture_save_thread(queue, event, id):
         logging.info("Thread %i: Retrieved message from capture save queue", id)
         if message == END_TOKEN:
             break
+        # Invert image if button selected
+        if NegativeCaptureActive:
+            image_array = numpy.asarray(message[0])
+            image_array = numpy.negative(image_array)
+            message[0] = PIL.Image.fromarray(image_array)
         message[0].save('picture-%05d.jpg' % message[1])
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -937,7 +1073,7 @@ def draw_preview_image(preview_image):
     draw_capture_label.pack()
 
     # The Pack geometry manager packs widgets in rows or columns.
-    draw_capture_label.place(x=0, y=0)
+    # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
 
     total_wait_time_preview_display += (time.time() - curtime)
     logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
@@ -1174,6 +1310,7 @@ def register_frame():
 
 def capture(still):
     global CurrentDir, CurrentFrame, CurrentExposure
+    global exposure_frame_value_label
     global SessionData
     global PreviousCurrentExposure
     global SimulatedRun
@@ -1212,7 +1349,8 @@ def capture(still):
                     #print(f"AE match: ({aux_current_exposure},{aux_exposure_str})")
                     logging.info("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
-                exposure_frame_value_label.config(text=aux_exposure_str)
+                if ExpertMode:
+                    exposure_frame_value_label.config(text=aux_exposure_str)
                 PreviousCurrentExposure = aux_current_exposure
                 win.update()
                 time.sleep(0.2)
@@ -1247,8 +1385,9 @@ def capture(still):
                     #print(f"AWB Match: {aux_gains_str})")
                     logging.info("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
-                colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
-                colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
+                if ExpertMode:
+                    colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
+                    colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 win.update()
@@ -1272,9 +1411,12 @@ def capture(still):
                     # This one should not happen, will not allow PiCam2 scan in preview mode
                     camera.switch_mode_and_capture_file(capture_config, 'picture-%05d.jpg' % CurrentFrame)
             else:
-                # Allow time to stabilize image, too fast with PiCamera2 when no preview.
-                # Need to refine this (shorter time, Arduino specific slowdown?)
-                time.sleep(CaptureStabilizationDelay)  # 100 ms seems OK. Tried with 50 and some frames were blurry
+                # Allow time to stabilize image, it can get too fast with PiCamera2
+                # Maybe we could refine this (shorter time, Arduino specific slowdown?)
+                # In principle, 100 ms seems OK. Tried with 50 and some frames were blurry
+                # Time passed since frame arrival notification is deducted from the delay (it can be relevant,
+                # if adaptation delay for AE and AWB is enabled)
+                time.sleep(CaptureStabilizationDelay-(time.time()-FrameArrivalTime))
                 captured_snapshot = camera.capture_image("main")
                 if still:
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
@@ -1333,11 +1475,14 @@ def start_scan_simulated():
         session_frames = 0
 
         # Get list of previously captured frames for scan simulation
-        simulated_captured_frame_list = os.listdir(CurrentDir)
-        simulated_captured_frame_list.sort()
-        simulated_images_in_list = len(simulated_captured_frame_list)
-        # Invoke capture_loop  a first time shen scan starts
-        win.after(500, capture_loop_simulated)
+        if not os.path.isdir(CurrentDir):
+            tk.messagebox.showerror("Error!", "Folder " + CurrentDir + " does not  exist!")
+        else:
+            simulated_captured_frame_list = os.listdir(CurrentDir)
+            simulated_captured_frame_list.sort()
+            simulated_images_in_list = len(simulated_captured_frame_list)
+            # Invoke capture_loop  a first time shen scan starts
+            win.after(500, capture_loop_simulated)
 
 
 def stop_scan_simulated():
@@ -1390,6 +1535,10 @@ def capture_loop_simulated():
         filename, ext = os.path.splitext(simulated_captured_frame_list[frame_to_display])
         if ext == '.jpg':
             raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
+            if NegativeCaptureActive:
+                image_array = numpy.asarray(raw_simulated_capture_image)
+                image_array = numpy.negative(image_array)
+                raw_simulated_capture_image = Image.fromarray(image_array)
             draw_preview_image(raw_simulated_capture_image)
 
         CurrentFrame += 1
@@ -1512,6 +1661,7 @@ def capture_loop():
                          round((total_wait_time_autoexp*1000/session_frames),1))
     elif ScanOngoing:
         if NewFrameAvailable:
+            FrameArrivalTime = time.time()  # Time in microseconds (used to honor stability delay)
             curtime = time.ctime()
             CurrentFrame += 1
             session_frames += 1
@@ -1751,6 +1901,7 @@ def load_config_data():
     global PersistedDataLoaded
     global MatchWaitMargin, match_wait_margin_value
     global SharpnessValue
+    global CaptureStabilizationDelay
 
     for item in SessionData:
         logging.info("%s=%s", item, str(SessionData[item]))
@@ -1790,6 +1941,7 @@ def load_session_data():
     global colour_gains_red_value_label, colour_gains_blue_value_label
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
+    global exposure_frame_value_label
 
     if PersistedDataLoaded:
         hide_preview()
@@ -1800,6 +1952,9 @@ def load_session_data():
             logging.info("SessionData loaded from disk:")
             if 'CurrentDir' in SessionData:
                 CurrentDir = SessionData["CurrentDir"]
+                # If directory in configuration does not exist we set the current working dir
+                if not os.path.isdir(CurrentDir):
+                    CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
                 CurrentFrame = int(SessionData["CurrentFrame"])
@@ -2003,7 +2158,6 @@ def build_ui():
     global SingleStep_btn
     global Snapshot_btn
     global PosNeg_btn
-    global DisablePreview_btn
     global Rewind_btn
     global FastForward_btn
     global Free_btn
@@ -2041,6 +2195,7 @@ def build_ui():
     global sharpness_control_value
     global PiCam2_preview_btn
     global stabilization_delay
+    global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
 
     # Create horizontal button row at bottom
     # Advance movie (slow forward through filmgate)
@@ -2078,17 +2233,69 @@ def build_ui():
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     PosNeg_btn.place(x=450, y=710)
 
-    # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
-                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
-    Focus_btn.place(x=550, y=710)
-
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
         PiCam2_preview_btn = Button(win, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-        PiCam2_preview_btn.place(x=650, y=710)
+        PiCam2_preview_btn.place(x=550, y=710)
+
+    # Activate focus zoom, to facilitate focusing the camera
+    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
+                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
+    Focus_btn.place(x=650, y=710)
+
+    # Section to control focus zoom to be moved to expert area
+    """
+    Focus_frame = LabelFrame(win, text='Focus control', width=12, height=3)
+    Focus_frame.place(x=650, y=700)
+
+    Focus_btn = Button(Focus_frame, text="Focus Zoom ON", width=8, height=2, command=set_focus_zoom,
+                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
+    Focus_btn.pack(side=LEFT)
+    Focus_btn_grid_frame = Frame(Focus_frame,width=10, height=10)
+    Focus_btn_grid_frame.pack(side=LEFT)
+    # focus zoom displacement buttons, to further facilitate focusing the camera
+    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_plus_btn.grid(row=0, column=0)
+    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_minus_btn.grid(row=1, column=0)
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_lf_btn.grid(row=1, column=1)
+    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_up_btn.grid(row=0, column=2)
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_dn_btn.grid(row=1, column=2)
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_rt_btn.grid(row=1, column=3)
+
+    ###########################################################
+    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
+                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
+    Focus_btn.place(x=650, y=710)
+
+    # focus zoom displacement buttons, to further facilitate focusing the camera
+    focus_lf_btn = Button(win, text="←", width=1, height=2, command=set_focus_left,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_lf_btn.place(x=750, y=720)
+    focus_up_btn = Button(win, text="↑", width=1, height=1, command=set_focus_up,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_up_btn.place(x=785, y=712)
+    focus_dn_btn = Button(win, text="↓", width=1, height=1, command=set_focus_down,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_dn_btn.place(x=785, y=742)
+    focus_rt_btn = Button(win, text="→", width=1, height=2, command=set_focus_right,
+                       activebackground='green', activeforeground='white', state=DISABLED)
+    focus_rt_btn.place(x=820, y=720)
+    """
     # Application Exit button
     Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80)
@@ -2170,10 +2377,12 @@ def build_ui():
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
     # Create Experimental frame to play with ColourGains
+    if ExpertMode or ExperimentalMode:
+        extended_frame = Frame(win)
+        extended_frame.place(x=30, y=790)
     if ExpertMode:
-        expert_frame = LabelFrame(win, text='Expert Area', width=8, height=5, font=("Arial", 7))
-        expert_frame.pack(side=TOP)
-        expert_frame.place(x=30, y=790)
+        expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", 7))
+        expert_frame.pack(side=LEFT, ipadx=5)
 
         # Exposure
         exposure_frame = LabelFrame(expert_frame, text='Auto Exposure ' + ('ON' if CurrentExposure == 0 else 'OFF'),
@@ -2247,6 +2456,32 @@ def build_ui():
                                            state=NORMAL if CurrentAwbAuto else DISABLED)
         awb_wait_checkbox.pack(side=TOP, pady=2)
 
+        # Focus zoom control (in out, up, down, left, right)
+        Focus_frame = LabelFrame(expert_frame, text='Focus control', width=12, height=3, font=("Arial", 7))
+        Focus_frame.pack(side=LEFT, padx=2)
+
+        Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
+        Focus_btn_grid_frame.pack(side=LEFT)
+        # focus zoom displacement buttons, to further facilitate focusing the camera
+        focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
+                                activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_plus_btn.grid(row=0, column=2)
+        focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
+                                 activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_minus_btn.grid(row=0, column=0)
+        focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
+                              activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_lf_btn.grid(row=1, column=0)
+        focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
+                              activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_up_btn.grid(row=0, column=1)
+        focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
+                              activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_dn_btn.grid(row=1, column=1)
+        focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
+                              activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+        focus_rt_btn.grid(row=1, column=2)
+
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
         match_wait_margin_frame = LabelFrame(expert_frame, text="Match margin", width=8, height=2,
                                              font=("Arial", 7))
@@ -2282,24 +2517,6 @@ def build_ui():
         stabilization_delay_bottom_frame = Frame(stabilization_delay_frame)  # frame just to add space at the bottom
         stabilization_delay_bottom_frame.pack(side=BOTTOM, pady=18)
 
-        # Display entry to throttle Rwnd/FF speed
-        rwnd_speed_control_frame = LabelFrame(expert_frame, text="RW/FF speed", width=8, height=2,
-                                              font=("Arial", 7))
-        rwnd_speed_control_frame.pack(side=LEFT, padx=2)
-
-        rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
-                                         text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
-                                         width=8, height=1, font=("Arial", 7))
-        rwnd_speed_control_delay.pack(side=TOP)
-        rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
-                                         activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_down.pack(side=LEFT)
-        rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
-                                       activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_up.pack(side=RIGHT)
-        rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
-        rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
-
         # Display marker for film hole
         film_hole_frame = Frame(win, width=1, height=11, bg='black')
         film_hole_frame.pack(side=TOP, padx=1, pady=1)
@@ -2311,22 +2528,22 @@ def build_ui():
         film_hole_control_frame = LabelFrame(expert_frame, text="Hole mark pos.", width=8, height=2,
                                              font=("Arial", 7))
         film_hole_control_frame.pack(side=LEFT, padx=5)
-        film_hole_control_up = Button(film_hole_control_frame, text="⇑", width=5, height=1, command=film_hole_up,
+        film_hole_control_up = Button(film_hole_control_frame, text="↑", width=5, height=1, command=film_hole_up,
                                       activebackground='green', activeforeground='white', font=("Arial", 7))
         film_hole_control_up.pack(side=TOP)
-        film_hole_control_down = Button(film_hole_control_frame, text="⇓", width=5, height=1, command=film_hole_down,
+        film_hole_control_down = Button(film_hole_control_frame, text="↓", width=5, height=1, command=film_hole_down,
                                         activebackground='green', activeforeground='white', font=("Arial", 7))
         film_hole_control_down.pack(side=TOP)
         film_hole_bottom_frame = Frame(film_hole_control_frame)  # frame just to add space at the bottom
         film_hole_bottom_frame.pack(side=BOTTOM, pady=1)
 
     if ExperimentalMode:
-        experimental_frame = LabelFrame(win, text='Experimental Area', width=8, height=5, font=("Arial", 7))
-        experimental_frame.pack(side=TOP)
-        experimental_frame.place(x=700, y=790)
+        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
+        experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
+        #experimental_frame.place(x=900, y=790)
 
         # Colour Correction Matrix - Only for PiCamera2
-        if IsPiCamera2 or True:
+        if IsPiCamera2:
             ccm_11 = StringVar()
             ccm_12 = StringVar()
             ccm_13 = StringVar()
@@ -2392,6 +2609,24 @@ def build_ui():
         sharpness_control_value_up.pack(side=RIGHT)
         sharpness_control_bottom_frame = Frame(sharpness_control_frame, height=10)   # frame just to add space at the bottom
         sharpness_control_bottom_frame.pack(side=TOP, pady=13)
+
+        # Display entry to throttle Rwnd/FF speed
+        rwnd_speed_control_frame = LabelFrame(experimental_frame, text="RW/FF speed", width=8, height=2,
+                                              font=("Arial", 7))
+        rwnd_speed_control_frame.pack(side=LEFT, padx=2)
+
+        rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
+                                         text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
+                                         width=8, height=1, font=("Arial", 7))
+        rwnd_speed_control_delay.pack(side=TOP)
+        rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
+                                         activebackground='green', activeforeground='white', font=("Arial", 8))
+        rwnd_speed_control_down.pack(side=LEFT)
+        rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
+                                       activebackground='green', activeforeground='white', font=("Arial", 8))
+        rwnd_speed_control_up.pack(side=RIGHT)
+        rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
+        rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
 
         # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
         # Leave it in the expert area, disabled, just in case it is reused
