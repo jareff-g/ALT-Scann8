@@ -6,3 +6,13 @@ The original intention of this derivative was to add a specific feature to the e
 
 This application handles the hardware side of [T-Scann 8](http://tscann8.torulf.com/index.html), the Super8/Regular8 film scanner designed by Torulf Holmström.
 
+Some of the changes done over original version:
+Added features
+- Major code refactoring
+- Fast forward
+- Protection against FF/Rwnd when film is in film gate
+- Improved FF/Rwnd function (progressive stop)
+- Improved outgoing film collection algorithm
+- Optimization of frame detection algorithm, resulting in higher scan speeds
+- Normalized and improved logging
+- 'Expert mode' flag to hide advanced features during standard usage
