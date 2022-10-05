@@ -5,3 +5,12 @@ This application is a derivative of 'T-Scann8-UserInterface v2.1' by Torulf Holm
 The original intention of this derivative was to adapt the original code by Torulf Holmström to use the PiCamera2 library, but at the end it resulted in major changes, including code refactoring and an extended feature set. 
 
 The application us the user interface for [T-Scann 8](http://tscann8.torulf.com/index.html), the Super8/Regular8 film scanner designed by Torulf Holmström. 
+
+Some of the changes done over original version:
+- Major code refactoring
+- Reorganization of UI widgets
+- Support of PiCamera2 (backward compatible with PiCamera legacy)
+- Implement 'post-view' to replace standard preview mode in PiCamera2, too slow and inaccurate compared to PiCamera legacy, not really usable for this kind of project.
+- Added support for automatic exposure, with optional adjustable adaptation delay
+- Added support for automatic white balance, with optional adjustable adaptation delay
+- Added expert mode flag to hide advanced features during normal usage
