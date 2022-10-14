@@ -1,4 +1,4 @@
-# ALT-Scann-8-Controller
+# ALT-Scann8-Controller
 
 This application is a derivative of 'Arduino to card Controll T-Scann 8 v1.61' by Torulf Holmström, from his project [T-Scann 8](http://tscann8.torulf.com/index.html), licensed under a [Creative Commons Attribution-NonCommercial 4.0 International License](http://creativecommons.org/licenses/by-nc/4.0/). ALT-Scann8-UI is licensed under a MIT License by Juan Remirez de Esparza.
 
