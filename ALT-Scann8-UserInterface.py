@@ -245,7 +245,7 @@ session_frames=0
 max_wait_time = 5000
 last_click_time = 0
 
-
+ALT_Scann8_controller_detected = False
 
 PreviewWarnAgain = True
 
@@ -265,6 +265,17 @@ SessionData = {
 }
 
 
+def send_arduino_command(cmd):
+    global SimulatedRun, ALT_Scann8_controller_detected
+
+    if not SimulatedRun:
+        if ALT_Scann8_controller_detected or cmd == 1:
+            i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
+        else:
+            logging.error("Trying to send command %i to controller, "
+                          "but ALT version not detected", cmd)
+
+
 def exit_app():  # Exit Application
     global win
     global SimulatedRun
@@ -273,7 +284,7 @@ def exit_app():  # Exit Application
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
-        i2c.write_byte_data(16, 11, 0)  # Tell Arduino we stop (to turn off uv led
+        send_arduino_command(11)   # Tell Arduino we stop (to turn off uv led
         # Close preview if required
         if not IsPiCamera2 or PiCam2PreviewEnabled:
             camera.stop_preview()
@@ -299,7 +310,7 @@ def set_free_mode():
         Free_btn.config(text='Unlock Reels', bg=save_bg, fg=save_fg, relief=RAISED)
 
     if not SimulatedRun:
-        i2c.write_byte_data(16, 20, 0)
+        send_arduino_command(20)
 
     FreeWheelActive = not FreeWheelActive
 
@@ -795,7 +806,7 @@ def rwnd_speed_down():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        i2c.write_byte_data(16, 62, 0)
+        send_arduino_command(62)
     if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
         rwnd_speed_delay += rwnd_speed_delay*0.1
     else:
@@ -808,7 +819,7 @@ def rwnd_speed_up():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        i2c.write_byte_data(16, 63, 0)
+        send_arduino_command(63)
     if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
         rwnd_speed_delay -= rwnd_speed_delay*0.1
     else:
@@ -870,7 +881,7 @@ def advance_movie():
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if not SimulatedRun:
-        i2c.write_byte_data(16, 30, 0)
+        send_arduino_command(30)
 
     # Enable/Disable related buttons
     button_status_change_except(AdvanceMovie_btn, AdvanceMovieActive)
@@ -916,7 +927,7 @@ def rewind_movie():
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            i2c.write_byte_data(16, 60, 0)
+            send_arduino_command(60)
         if RewindMovieActive:
             Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
             # Enable/Disable related buttons
@@ -985,7 +996,7 @@ def fast_forward_movie():
     if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            i2c.write_byte_data(16, 61, 0)
+            send_arduino_command(61)
         if FastForwardActive:  # Fast-forward movie is about to start...
             FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
             # Enable/Disable related buttons
@@ -1089,7 +1100,7 @@ def single_step_movie():
     global camera
 
     if not SimulatedRun:
-        i2c.write_byte_data(16, 40, 0)
+        send_arduino_command(40)
 
         if IsPiCamera2:
             # If no camera preview, capture frame in memory and display it
@@ -1103,7 +1114,7 @@ def single_step_movie():
 def emergency_stop():
     global SimulatedRun
     if not SimulatedRun:
-        i2c.write_byte_data(16, 90, 0)
+        send_arduino_command(90)
 
 
 def update_rpi_temp():
@@ -1214,7 +1225,7 @@ def set_s8():
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
     if not SimulatedRun:
-        i2c.write_byte_data(16, 19, 0)
+        send_arduino_command(19)
 
 
 def set_r8():
@@ -1226,7 +1237,7 @@ def set_r8():
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
     if not SimulatedRun:
-        i2c.write_byte_data(16, 18, 0)
+        send_arduino_command(18)
 
 
 def film_hole_up():
@@ -1416,7 +1427,14 @@ def capture(still):
                 # In principle, 100 ms seems OK. Tried with 50 and some frames were blurry
                 # Time passed since frame arrival notification is deducted from the delay (it can be relevant,
                 # if adaptation delay for AE and AWB is enabled)
-                time.sleep(CaptureStabilizationDelay-(time.time()-FrameArrivalTime))
+                time.sleep(CaptureStabilizationDelay)
+                """
+                stabilization_time = CaptureStabilizationDelay-(time.time()-FrameArrivalTime)
+                if stabilization_time > 0:
+                    time.sleep(stabilization_time)
+                else:
+                    print(CaptureStabilizationDelay, time.time(), FrameArrivalTime)
+                """
                 captured_snapshot = camera.capture_image("main")
                 if still:
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
@@ -1607,7 +1625,7 @@ def start_scan():
 
         # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun:
-            i2c.write_byte_data(16, 10, 0)
+            send_arduino_command(10)
 
         # Invoke capture_loop a first time shen scan starts
         win.after(5, capture_loop)
@@ -1672,7 +1690,7 @@ def capture_loop():
                 try:
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
                     NewFrameAvailable = False
-                    i2c.write_byte_data(16, 12, 0)  # Tell Arduino to move to next frame
+                    send_arduino_command(12)  # Tell Arduino to move to next frame
                 except IOError:
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
@@ -1757,6 +1775,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     global SimulatedRun
     global ScanProcessError
     global ScanOngoing
+    global ALT_Scann8_controller_detected
 
     curtime = time.ctime()
     if not SimulatedRun:
@@ -1766,7 +1785,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
             # Log error to console
             logging.warning("Error while checking incoming event (%i) from Arduino. Will check again.", ArduinoTrigger)
 
-    if ArduinoTrigger == 11:  # New Frame available
+    if ArduinoTrigger == 2:  # ALT Controller identified
+        ALT_Scann8_controller_detected = True
+        logging.warning("Received ALT ID answer from Arduino")
+    elif ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
         logging.warning("Received scan error from Arduino")
@@ -1962,12 +1984,12 @@ def load_session_data():
             if 'FilmType' in SessionData:
                 if SessionData["FilmType"] == "R8":
                     if not SimulatedRun:
-                        i2c.write_byte_data(16, 18, 0)
+                        send_arduino_command(18)
                     film_type_R8_btn.config(relief=SUNKEN)
                     film_type_S8_btn.config(relief=RAISED)
                 elif SessionData["FilmType"] == "S8":
                     if not SimulatedRun:
-                        i2c.write_byte_data(16, 19, 0)
+                        send_arduino_command(19)
                     film_type_R8_btn.config(relief=RAISED)
                     film_type_S8_btn.config(relief=SUNKEN)
             if 'NegativeCaptureActive' in SessionData:
@@ -2638,7 +2660,6 @@ def build_ui():
         OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
 
 
-
 def main(argv):
     global SimulatedRun
     global ExpertMode, ExperimentalMode
@@ -2671,6 +2692,10 @@ def main(argv):
 
     tscann8_init()
 
+    arduino_listen_loop()
+
+    send_arduino_command(1)
+
     build_ui()
 
     load_persisted_data_from_disk()
@@ -2685,8 +2710,6 @@ def main(argv):
 
     if not SimulatedRun:
         temperature_loop()
-
-    arduino_listen_loop()
 
     # Main Loop
     win.mainloop()  # running the loop that works as a trigger
