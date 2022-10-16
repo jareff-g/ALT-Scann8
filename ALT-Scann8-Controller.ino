@@ -128,7 +128,7 @@ enum {
   FrameSteps,
   DebugInfo,
   None
-} DebugState = PT_Level;
+} DebugState = DebugInfo;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -181,12 +181,12 @@ int RewindSpeed = 4000;                       // speed Rewind movie (delay in re
 int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
 int PerforationThresholdLevel = 120;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
                                               // JRE: After increasing MinFramSteps, this one is not so critical any more
-int PerforationMaxLevel = 500;      // detector pulse high level, clear film and low contrast film perforation
-int PerforationMinLevel = 200;      // detector pulse low level, originally hardcoded
-int MinFrameStepsR8 = 255;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int PerforationMaxLevel = 250;      // detector pulse high level, clear film and low contrast film perforation
+int PerforationMinLevel = 50;      // detector pulse low level, originally hardcoded
+int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 245;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 250;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
 int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
@@ -215,6 +215,10 @@ unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save c
 int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60-Rewind end, 61-FF end, 64-Rewind error, 65-FF error
 
 int PT_SignalLevelRead;   // Level out signal phototransistor detection
+
+// Flag to detect ALT UI version
+// Need to prevent operation with main version since compatibility cannot be maintained
+boolean ALT_Scann8_UI_detected = false;
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
@@ -276,6 +280,8 @@ void loop() {
   while (1) {
     if (dataInQueue()) {
       Ic = pop();   // Get next command from queue if one exists
+      if (!ALT_Scann8_UI_detected && Ic != 1)
+        Ic = 0; // Drop dequeued commend until ALT UI version detected
     }
     else
       Ic = 0;
@@ -301,6 +307,12 @@ void loop() {
     switch (ScanState) {
       case Sts_Idle:
         switch (Ic) {
+          case 1:
+            ALT_Scann8_UI_detected = true;
+            DebugPrint("ALT UI Identified"); 
+            EventForRPi = 2;  // Tell ALT UI that ALT controller is present too
+            digitalWrite(13, HIGH);
+            break;
           case 10:
             DebugPrint(">Scan"); 
             ScanState = Sts_Scan;
@@ -328,10 +340,12 @@ void loop() {
           case 18:  // Select R8 film
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
             MinFrameSteps = MinFrameStepsR8;
+            OriginalMinFrameSteps = MinFrameSteps;
             break;
           case 19:  // Select S8 film
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
             MinFrameSteps = MinFrameStepsS8;
+            OriginalMinFrameSteps = MinFrameSteps;
             break;
           case 20:
             ScanState = Sts_UnlockReels;
@@ -694,7 +708,7 @@ ScanResult scan(int Ic) {
     retvalue = SCAN_TERMINATION_REQUESTED; 
     FrameDetected = false; 
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
-    TractionStopWaitingTime = 1000; 
+    TractionStopWaitingTime = 100000; 
     LastFrameSteps = 0;
     if (UVLedOn) {
         analogWrite(11, 0); // Turn off UV LED
