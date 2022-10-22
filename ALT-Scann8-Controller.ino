@@ -179,14 +179,15 @@ unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (origi
 unsigned long FetchFrameScanSpeed = 5000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;                       // speed Rewind movie (delay in rewind loop, progressibly reduced down to 200)
 int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
-int PerforationThresholdLevel = 120;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
-                                              // JRE: After increasing MinFramSteps, this one is not so critical any more
+int PerforationThresholdLevelR8 = 160;          // detector pulse level: Specific for R8
+int PerforationThresholdLevelS8 = 120;          // detector pulse level: Specific for S8
+int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
 int PerforationMaxLevel = 250;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 50;      // detector pulse low level, originally hardcoded
-int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsR8 = 252;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 250;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 242;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
 int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 
@@ -198,6 +199,7 @@ int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores val
 int FrameStepsDone = 0;                     // Count steps
 int OriginalScanSpeed = ScanSpeed;          // restoration original value
 int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
+
 int LastFrameSteps = 0;                     // stores number of steps
 
 
@@ -340,12 +342,16 @@ void loop() {
           case 18:  // Select R8 film
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
             MinFrameSteps = MinFrameStepsR8;
+            PerforationThresholdLevel = PerforationThresholdLevelR8;
             OriginalMinFrameSteps = MinFrameSteps;
+            OriginalPerforationThresholdLevel = PerforationThresholdLevel;
             break;
           case 19:  // Select S8 film
             DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
             MinFrameSteps = MinFrameStepsS8;
+            PerforationThresholdLevel = PerforationThresholdLevelS8;
             OriginalMinFrameSteps = MinFrameSteps;
+            OriginalPerforationThresholdLevel = PerforationThresholdLevel;
             break;
           case 20:
             ScanState = Sts_UnlockReels;
