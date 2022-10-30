@@ -1030,10 +1030,11 @@ def capture_display_thread(queue, event, id):
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
-        logging.debug("Retrieved message from capture display queue")
+        logging.debug("Retrieved message from capture display queue (len=%i)", queue.qsize())
         if message == END_TOKEN:
             break
-        if (queue.qsize() < 8):
+        # If too many items in queue the skip display
+        if (queue.qsize() <= 5):
             # Invert image if button selected
             if NegativeCaptureActive:
                 image_array = numpy.asarray(message[0])
@@ -1054,6 +1055,7 @@ def capture_save_thread(queue, event, id):
     logging.debug("Started capture_save_thread n.%i", id)
     while not event.is_set() or not queue.empty():
         message = queue.get()
+        curtime = time.time()
         logging.info("Thread %i: Retrieved message from capture save queue", id)
         if message == END_TOKEN:
             break
@@ -1063,6 +1065,7 @@ def capture_save_thread(queue, event, id):
             image_array = numpy.negative(image_array)
             message[0] = PIL.Image.fromarray(image_array)
         message[0].save('picture-%05d.jpg' % message[1])
+        logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 def draw_preview_image(preview_image):
@@ -1690,6 +1693,7 @@ def capture_loop():
                 try:
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
                     NewFrameAvailable = False
+                    logging.debug("Frame %i captured.", CurrentFrame)
                     send_arduino_command(12)  # Tell Arduino to move to next frame
                 except IOError:
                     CurrentFrame -= 1
@@ -1707,8 +1711,8 @@ def capture_loop():
                 SessionData["CurrentExposure"] = CurrentExposureStr
             else:
                 SessionData["CurrentExposure"] = str(CurrentExposure)
-            with open(PersistedDataFilename, 'w') as f:
-                json.dump(SessionData, f)
+            # with open(PersistedDataFilename, 'w') as f:
+            #     json.dump(SessionData, f)
 
             # Update number of captured frames
             Scanned_Images_number_label.config(text=str(CurrentFrame))
@@ -1966,7 +1970,7 @@ def load_session_data():
     global exposure_frame_value_label
 
     if PersistedDataLoaded:
-        hide_preview()
+        win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
                                          message='It seems T-Scann 8 was interrupted during the last session.\
                                          \r\nDo you want to continue from where it was stopped?')
@@ -2702,9 +2706,10 @@ def main(argv):
 
     load_config_data()
 
-    if PreviewWarnAgain:  # schedule hiding preview in 4 seconds to make warning visible
-        win.after(4000, hide_preview)
-    display_preview_warning()
+    if IsPiCamera2:     # Warning only for PiCamera2
+        if PreviewWarnAgain:  # schedule hiding preview in 2 seconds to make warning visible
+            win.after(2000, hide_preview)
+            display_preview_warning()
 
     load_session_data()
 
