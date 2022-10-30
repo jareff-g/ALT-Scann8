@@ -172,8 +172,7 @@ int FilteredSignalLevel = 0;
 // int waveCS = 0;  // Not used
 
 
-// ----- Important setting, may need to be adjusted ------
-
+// ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
 unsigned long FetchFrameScanSpeed = 5000;    // Play Slow before trig (Original 15000)
@@ -184,15 +183,13 @@ int PerforationThresholdLevelS8 = 120;          // detector pulse level: Specifi
 int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
 int PerforationMaxLevel = 250;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 50;      // detector pulse low level, originally hardcoded
-int MinFrameStepsR8 = 252;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
+int MinFrameStepsR8 = 248;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsS8 = 290;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 242;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
-int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 238;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsS8 = 280;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
-
-
-// -------------------------------------------------------
+// ------------------------------------------------------------------------------------------
 
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 // int Paus = LOW;                          // JRE: Unused
