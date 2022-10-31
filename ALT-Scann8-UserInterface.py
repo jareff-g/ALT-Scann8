@@ -1791,7 +1791,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
 
     if ArduinoTrigger == 2:  # ALT Controller identified
         ALT_Scann8_controller_detected = True
-        logging.warning("Received ALT ID answer from Arduino")
+        logging.info("Received ALT ID answer from Arduino")
     elif ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
@@ -1799,10 +1799,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
         ScanProcessError = True
     elif ArduinoTrigger == 60:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
-        logging.warning("Received rewind end event from Arduino")
+        logging.info("Received rewind end event from Arduino")
     elif ArduinoTrigger == 61:  # FastForward ended, we can re-enable buttons
         FastForwardEndOutstanding = True
-        logging.warning("Received fast forward end event from Arduino")
+        logging.info("Received fast forward end event from Arduino")
     elif ArduinoTrigger == 64:  # Error during Rewind
         RewindErrorOutstanding = True
         logging.warning("Received rewind error from Arduino")
