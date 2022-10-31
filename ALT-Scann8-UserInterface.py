@@ -2077,6 +2077,18 @@ def tscann8_init():
     else:
         logging.info("Running on Raspberry Pi")
 
+    # Try to determine Video folder of user logged in
+    homefolder = os.environ['HOME']
+    if os.path.isdir(os.path.join(homefolder, 'Videos')):
+        BaseDir = os.path.join(homefolder, 'Videos')
+    elif os.path.isdir(os.path.join(homefolder, 'Vídeos')):
+        BaseDir = os.path.join(homefolder, 'Vídeos')
+    elif os.path.isdir(os.path.join(homefolder, 'Video')):
+        BaseDir = os.path.join(homefolder, 'Video')
+    else:
+        BaseDir = homefolder
+    CurrentDir = BaseDir
+
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
 
