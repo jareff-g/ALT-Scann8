@@ -2405,7 +2405,7 @@ def build_ui():
     rpi_temp_frame.pack(side=TOP)
     rpi_temp_frame.place(x=925, y=440)
     temp_str = str(RPiTemp)+'º'
-    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=5, height=1)
+    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=8, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=34)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
