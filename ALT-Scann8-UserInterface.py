@@ -179,7 +179,7 @@ ScanProcessError = False  # To be set to true upon reception of Arduino event
 ScanProcessError_LastTime = 0
 ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
-PersistedDataFilename = os.path.join(ScriptDir, "T-Scann8.json")
+PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
 # Token to be sent on program closure, to allow threads to shut down cleanly
@@ -1881,7 +1881,7 @@ def display_preview_warning():
     preview_warning.geometry('+250+250')  # setting the position of the window
     preview_label = Label(preview_warning, text='\rThe preview mode provided by PiCamera2 for use in '
                                                 'X-Window environment is not really usable for '
-                                                'T-Scann 8 during the film scanning process.\r\n'
+                                                'ALT-Scann 8 during the film scanning process.\r\n'
                                                 'Compared to the preview provided by PiCamera legacy it is:\r'
                                                 '- Much slower (due to context switch between preview/capture)\r'
                                                 '- Very imprecise (preview does not match captured image)\r\n'
@@ -1972,7 +1972,7 @@ def load_session_data():
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
-                                         message='It seems T-Scann 8 was interrupted during the last session.\
+                                         message='ALT-Scann 8 was interrupted during the last session.\
                                          \r\nDo you want to continue from where it was stopped?')
         if confirm:
             logging.info("SessionData loaded from disk:")
@@ -2060,7 +2060,7 @@ def tscann8_init():
     log_path = os.path.dirname(__file__)
     if log_path == "":
         log_path = os.getcwd()
-    log_file_fullpath = log_path + "/T-Scann8.debug.log"
+    log_file_fullpath = log_path + "/ALT-Scann8.debug.log"
     logging.basicConfig(
         level=LogLevel,
         format="%(asctime)s [%(levelname)s] %(message)s",
@@ -2093,7 +2093,7 @@ def tscann8_init():
         i2c = smbus.SMBus(1)
 
     win = Tk()  # creating the main window and storing the window object in 'win'
-    win.title('T-Scann 8')  # setting title of the window
+    win.title('ALT-Scann 8')  # setting title of the window
     win.geometry('1100x810')  # setting the size of the window
     win.geometry('+50+50')  # setting the position of the window
     # Prevent window resize
@@ -2105,7 +2105,7 @@ def tscann8_init():
         win.maxsize(1100, 930)
 
     if SimulatedRun:
-        win.wm_title(string='*** T-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
+        win.wm_title(string='*** ALT-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
 
     win.update_idletasks()
 
@@ -2186,7 +2186,7 @@ def tscann8_init():
     if not SimulatedRun and not IsPiCamera2:
         win.bind('<Configure>', on_form_event)
 
-    logging.debug("T-Scann 8 initialized")
+    logging.debug("ALT-Scann 8 initialized")
 
 
 def build_ui():
@@ -2695,7 +2695,7 @@ def main(argv):
         elif opt == '-l':
             LoggingMode = arg
         elif opt == '-h':
-            print("T-Scann 8 Command line parameters")
+            print("ALT-Scann 8 Command line parameters")
             print("  -s             Start Simulated session (for developers only)")
             print("  -e             Activate expert mode")
             print("  -x             Activate experimental mode (for developers only)")
