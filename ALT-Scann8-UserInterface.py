@@ -219,6 +219,7 @@ SharpnessValue = 1
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
 ExperimentalMode = False
+ccm_enabled = False
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
                         # That ,means we wait until the difference between a frame and the previous one is less
@@ -1128,6 +1129,8 @@ def update_rpi_temp():
         temp_str = file.readline()
         file.close()
         RPiTemp = int(int(temp_str) / 100) / 10
+    else:
+        RPiTemp = 64.5
 
 
 def negative_capture():
@@ -2406,7 +2409,7 @@ def build_ui():
     rpi_temp_frame.place(x=925, y=440)
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=8, height=1)
-    RPi_temp_value_label.pack(side=TOP, padx=34)
+    RPi_temp_value_label.pack(side=TOP, padx=12)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit', height=1,
@@ -2581,7 +2584,7 @@ def build_ui():
         #experimental_frame.place(x=900, y=790)
 
         # Colour Correction Matrix - Only for PiCamera2
-        if IsPiCamera2:
+        if IsPiCamera2 and ccm_enabled:
             ccm_11 = StringVar()
             ccm_12 = StringVar()
             ccm_13 = StringVar()
@@ -2618,18 +2621,17 @@ def build_ui():
                             activeforeground='white', font=("Arial", 7), state=NORMAL)
             ccm_go.pack(side=TOP, padx=2, pady=2)
 
-            if not SimulatedRun:
-                metadata = camera.capture_metadata()
-                camera_ccm = metadata["ColourCorrectionMatrix"]
-                ccm_11.set(round(camera_ccm[0], 2))
-                ccm_12.set(round(camera_ccm[1], 2))
-                ccm_13.set(round(camera_ccm[2], 2))
-                ccm_21.set(round(camera_ccm[3], 2))
-                ccm_22.set(round(camera_ccm[4], 2))
-                ccm_23.set(round(camera_ccm[5], 2))
-                ccm_31.set(round(camera_ccm[6], 2))
-                ccm_32.set(round(camera_ccm[7], 2))
-                ccm_33.set(round(camera_ccm[8], 2))
+            metadata = camera.capture_metadata()
+            camera_ccm = metadata["ColourCorrectionMatrix"]
+            ccm_11.set(round(camera_ccm[0], 2))
+            ccm_12.set(round(camera_ccm[1], 2))
+            ccm_13.set(round(camera_ccm[2], 2))
+            ccm_21.set(round(camera_ccm[3], 2))
+            ccm_22.set(round(camera_ccm[4], 2))
+            ccm_23.set(round(camera_ccm[5], 2))
+            ccm_31.set(round(camera_ccm[6], 2))
+            ccm_32.set(round(camera_ccm[7], 2))
+            ccm_33.set(round(camera_ccm[8], 2))
 
         # Sharpness, control to allow playign with the values and see the results
         sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
@@ -2725,8 +2727,7 @@ def main(argv):
 
     load_session_data()
 
-    if not SimulatedRun:
-        temperature_loop()
+    temperature_loop()
 
     # Main Loop
     win.mainloop()  # running the loop that works as a trigger
