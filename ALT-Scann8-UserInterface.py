@@ -2045,7 +2045,8 @@ def tscann8_init():
     global CurrentExposureStr
     global TopWinX
     global TopWinY
-    global preview_border_frame
+    # global preview_border_frame
+    # global draw_capture_label
     global i2c
     global WinInitDone
     global CurrentDir
@@ -2053,7 +2054,7 @@ def tscann8_init():
     global ZoomSize
     global capture_config
     global preview_config
-    global draw_capture_label
+    # global draw_capture_label
     global PreviewWinX, PreviewWinY
     global LogLevel
     global capture_display_queue, capture_display_event
@@ -2118,12 +2119,14 @@ def tscann8_init():
 
     WinInitDone = True
 
+    """
     # Create a frame to add a border to the preview
     preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
     preview_border_frame.pack()
     preview_border_frame.place(x=38, y=38)
     # Also a label to draw images when preview is not used
     draw_capture_label = tk.Label(preview_border_frame)
+    """
 
     if not SimulatedRun:
         if IsPiCamera2:
@@ -2237,125 +2240,88 @@ def build_ui():
     global PiCam2_preview_btn
     global stabilization_delay
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
+    global preview_border_frame
+    global draw_capture_label
 
-    # Create horizontal button row at bottom
-    # Advance movie (slow forward through filmgate)
-    AdvanceMovie_btn = Button(win, text="Movie Forward", width=8, height=3, command=advance_movie,
+    # Create a frame to contain the top area (preview + Right buttons) ***************
+    top_area_frame = Frame(win, width=850, height=650)
+    top_area_frame.pack(side=TOP, anchor=NW)
+    # Create a frame to add a border to the preview
+    preview_border_frame = Frame(top_area_frame, width=844, height=634, bg='dark grey')
+    preview_border_frame.pack(side=LEFT, anchor=N, padx=(38, 0), pady=(38, 0))
+    # Also a label to draw images when preview is not used
+    draw_capture_label = tk.Label(preview_border_frame)
+    # Create a frame to contain the top area (preview + Right buttons) ***************
+    top_right_area_frame = Frame(top_area_frame, width=850, height=650)
+    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(20, 0), pady=(30, 0), fill=Y)
+
+    # Frame for standard widgets at the bottom ***************************************
+    bottom_area_frame = Frame(win, width=950, height=50)
+    bottom_area_frame.pack(side=TOP, padx=5, pady=5, anchor=NW, fill=X)
+
+    # Advance movie button (slow forward through filmgate)
+    AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=8, height=3, command=advance_movie,
                               activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    AdvanceMovie_btn.place(x=30, y=710)
+    AdvanceMovie_btn.pack(side=LEFT, padx=(30, 0), pady=5)
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
     save_fg = AdvanceMovie_btn['fg']
 
+    # Frame for single step/snapshot
+    sstep_area_frame = Frame(bottom_area_frame, width=50, height=50)
+    sstep_area_frame.pack(side=LEFT, padx=(5, 0), pady=5)
     # Advance one single frame
-    SingleStep_btn = Button(win, text="Single Step", width=8, height=1, command=single_step_movie,
+    SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=8, height=1, command=single_step_movie,
                             activebackground='green', activeforeground='white', wraplength=80)
-    SingleStep_btn.place(x=130, y=710)
-    Snapshot_btn = Button(win, text="Snapshot", width=8, height=1, command=capture_single_step,
+    SingleStep_btn.pack(side=TOP)
+    Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=8, height=1, command=capture_single_step,
                             activebackground='green', activeforeground='white', wraplength=80)
-    Snapshot_btn.place(x=130, y=745)
+    Snapshot_btn.pack(side=TOP)
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(win, text="<<", font=("Arial", 16), width=2, height=2, command=rewind_movie,
+    Rewind_btn = Button(bottom_area_frame, text="<<", font=("Arial", 16), width=2, height=2, command=rewind_movie,
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    Rewind_btn.place(x=230, y=710)
+    Rewind_btn.pack(side=LEFT, padx=(5, 0), pady=5)
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(win, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
+    FastForward_btn = Button(bottom_area_frame, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
                              activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    FastForward_btn.place(x=290, y=710)
+    FastForward_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Unlock reels button (to load film, rewind, etc)
-    Free_btn = Button(win, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green',
+    Free_btn = Button(bottom_area_frame, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green',
                       activeforeground='white', wraplength=80, relief=RAISED)
-    Free_btn.place(x=350, y=710)
+    Free_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(win, text="Negative image", width=8, height=3, command=negative_capture,
+    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=negative_capture,
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    PosNeg_btn.place(x=450, y=710)
+    PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
-        PiCam2_preview_btn = Button(win, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
+        PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-        PiCam2_preview_btn.place(x=550, y=710)
+        PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
+    Focus_btn = Button(bottom_area_frame, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
-    Focus_btn.place(x=650, y=710)
+    Focus_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
-    # Section to control focus zoom to be moved to expert area
-    """
-    Focus_frame = LabelFrame(win, text='Focus control', width=12, height=3)
-    Focus_frame.place(x=650, y=700)
-
-    Focus_btn = Button(Focus_frame, text="Focus Zoom ON", width=8, height=2, command=set_focus_zoom,
-                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
-    Focus_btn.pack(side=LEFT)
-    Focus_btn_grid_frame = Frame(Focus_frame,width=10, height=10)
-    Focus_btn_grid_frame.pack(side=LEFT)
-    # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_plus_btn.grid(row=0, column=0)
-    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_minus_btn.grid(row=1, column=0)
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_lf_btn.grid(row=1, column=1)
-    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_up_btn.grid(row=0, column=2)
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_dn_btn.grid(row=1, column=2)
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_rt_btn.grid(row=1, column=3)
-
-    ###########################################################
-    Focus_btn = Button(win, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
-                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
-    Focus_btn.place(x=650, y=710)
-
-    # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_lf_btn = Button(win, text="←", width=1, height=2, command=set_focus_left,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_lf_btn.place(x=750, y=720)
-    focus_up_btn = Button(win, text="↑", width=1, height=1, command=set_focus_up,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_up_btn.place(x=785, y=712)
-    focus_dn_btn = Button(win, text="↓", width=1, height=1, command=set_focus_down,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_dn_btn.place(x=785, y=742)
-    focus_rt_btn = Button(win, text="→", width=1, height=2, command=set_focus_right,
-                       activebackground='green', activeforeground='white', state=DISABLED)
-    focus_rt_btn.place(x=820, y=720)
-    """
-    # Application Exit button
-    Exit_btn = Button(win, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
-                      activeforeground='white', wraplength=80)
-    Exit_btn.place(x=925, y=675)
-
-    # Create vertical button column at right
+    # Create vertical button column at right *************************************
     # Start scan button
     if SimulatedRun:
-        Start_btn = Button(win, text="START Scan", width=14, height=5, command=start_scan_simulated,
+        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
                            activebackground='green', activeforeground='white', wraplength=80)
     else:
-        Start_btn = Button(win, text="START Scan", width=14, height=5, command=start_scan, activebackground='green',
+        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan, activebackground='green',
                            activeforeground='white', wraplength=80)
-    Start_btn.place(x=925, y=40)
+    Start_btn.pack(side=TOP, padx=(5, 0), pady=(5, 0))
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(win, text='Target Folder', width=16, height=8)
-    folder_frame.pack()
-    folder_frame.place(x=925, y=150)
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=16, height=8)
+    folder_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=22, height=3, font=("Arial", 8),
                                     wraplength=120)
@@ -2371,9 +2337,8 @@ def build_ui():
     existing_folder_btn.pack(side=LEFT)
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = LabelFrame(win, text='Scanned frames', width=16, height=4)
-    scanned_images_frame.pack(side=TOP, padx=1, pady=1)
-    scanned_images_frame.place(x=925, y=260)
+    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4)
+    scanned_images_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
 
     Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", 24), width=5,
                                         height=1)
@@ -2389,9 +2354,8 @@ def build_ui():
     Scanned_Images_fpm.pack(side=LEFT)
 
     # Create frame to select S8/R8 film
-    film_type_frame = LabelFrame(win, text='Film type', width=16, height=1)
-    film_type_frame.pack(side=TOP)
-    film_type_frame.place(x=925, y=350)
+    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1)
+    film_type_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=5)
@@ -2404,9 +2368,8 @@ def build_ui():
     film_type_R8_btn.pack(side=LEFT)
 
     # Create frame to display RPi temperature
-    rpi_temp_frame = LabelFrame(win, text='RPi Temp.', width=8, height=1)
-    rpi_temp_frame.pack(side=TOP)
-    rpi_temp_frame.place(x=925, y=440)
+    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1)
+    rpi_temp_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", 18), width=8, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=12)
@@ -2417,10 +2380,17 @@ def build_ui():
                                                  command=temp_in_fahrenheit_selection)
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
+    # Application Exit button
+    Exit_btn = Button(top_right_area_frame, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
+                      activeforeground='white', wraplength=80)
+    Exit_btn.pack(side=BOTTOM, padx=(5, 0), pady=(5, 0))
+
+
     # Create Experimental frame to play with ColourGains
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
-        extended_frame.place(x=30, y=790)
+        #extended_frame.place(x=30, y=790)
+        extended_frame.pack(side=TOP, anchor=W, padx=(30, 0))
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", 7))
         expert_frame.pack(side=LEFT, ipadx=5)
