@@ -125,6 +125,8 @@ import sys
 import getopt
 import numpy
 
+import cv2
+
 try:
     import smbus
     try:
@@ -136,6 +138,7 @@ try:
         # If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
         IsPiCamera2 = False
         import picamera
+        from io import BytesIO
 
     # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
     SimulatedRun = False
@@ -163,6 +166,7 @@ CurrentStill = 1  # used to take several stills of same frame, for settings anal
 CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
 NegativeCaptureActive = False
+HdrCaptureActive = False
 AdvanceMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
 RewindErrorOutstanding = False
@@ -254,6 +258,15 @@ FPM_LastMinuteFrameTimes = list()
 FPM_StartTime = time.ctime()
 FPM_CalculatedValue = -1
 
+# *** HDR variables
+image_list = []
+dry_run_iterations = 2
+min_exp = 0.9
+max_exp = 56
+num_steps = 6
+step_value = 1
+exp_list = []
+
 # Persisted data
 # Persisted data
 SessionData = {
@@ -262,7 +275,8 @@ SessionData = {
     "CurrentFrame": str(CurrentFrame),
     "CurrentExposure": str(CurrentExposure),
     "FilmHoleY": str(FilmHoleY),
-    "NegativeCaptureActive": str(NegativeCaptureActive)
+    "NegativeCaptureActive": str(NegativeCaptureActive),
+    "HdrCaptureActive": str(HdrCaptureActive),
 }
 
 
@@ -834,7 +848,7 @@ def button_status_change_except(except_button, active):
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
-    global PiCam2_preview_btn
+    global PiCam2_preview_btn, hdr_btn
 
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -850,6 +864,8 @@ def button_status_change_except(except_button, active):
         FastForward_btn.config(state=DISABLED if active else NORMAL)
     if except_button != PosNeg_btn:
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != hdr_btn:
+        hdr_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Focus_btn and not IsPiCamera2:
         Focus_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Start_btn and (not IsPiCamera2 or not PiCam2PreviewEnabled):
@@ -1031,6 +1047,7 @@ def capture_display_thread(queue, event, id):
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
+        curtime = time.time()
         logging.debug("Retrieved message from capture display queue (len=%i)", queue.qsize())
         if message == END_TOKEN:
             break
@@ -1042,6 +1059,7 @@ def capture_display_thread(queue, event, id):
                 image_array = numpy.negative(image_array)
                 message[0] = PIL.Image.fromarray(image_array)
             draw_preview_image(message[0])
+            logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
             logging.debug("Display queue almost full: Dropping frame")
     logging.debug("Exiting capture_display_thread")
@@ -1133,7 +1151,21 @@ def update_rpi_temp():
         RPiTemp = 64.5
 
 
-def negative_capture():
+# Not operational in RPi (only 4 frames per minute)
+def switch_hdr_capture():
+    global HdrCaptureActive
+    global hdr_btn
+
+    HdrCaptureActive = not HdrCaptureActive
+    SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
+    hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On',
+                   relief=SUNKEN if HdrCaptureActive else RAISED,
+                   bg='red' if HdrCaptureActive else save_bg,
+                   fg='white' if HdrCaptureActive else save_fg)
+
+
+
+def switch_negative_capture():
     global NegativeCaptureActive
     global SimulatedRun
     global PosNeg_btn
@@ -1147,15 +1179,8 @@ def negative_capture():
 
     if not SimulatedRun:
         if IsPiCamera2:
-            # Terrible colors with these values, need to tune
-            if NegativeCaptureActive:
-                # camera.image_effect = 'negative'
-                camera.set_controls({"ColourGains": (1.0, 1.0),
-                                     "ColourCorrectionMatrix": (-1, 0, 0, 0, -1, 0, 0, 0, -1)})
-            else:
-                # camera.image_effect = 'none'
-                camera.set_controls({"ColourGains": (1.0, 1.0),
-                                     "ColourCorrectionMatrix": (1, 0, 0, 0, 1, 0, 0, 0, 1)})
+            # Do nothing for PiCamera2, image turns negative at save time
+            logging.debug("Negative mode " + "On" if NegativeCaptureActive else "Off")
         else:
             if NegativeCaptureActive:
                 camera.image_effect = 'negative'
@@ -1325,6 +1350,45 @@ def register_frame():
         FPM_CalculatedValue = int((len(FPM_LastMinuteFrameTimes) * 60) / (frame_time - FPM_StartTime))
 
 
+def capture_hdr():
+    global CurrentFrame
+    global capture_display_queue, capture_save_queue
+    global camera, exp_list
+
+    if not IsPiCamera2:
+        # Create the in-memory stream
+        stream = BytesIO()
+    image_list.clear()
+    for exp in exp_list:
+        logging.debug("capture_hdr: exp %.2f", exp)
+        if IsPiCamera2:
+            camera.set_controls({"ExposureTime": int(exp*1000)})
+            # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
+            for i in range(1,dry_run_iterations):
+                camera.capture_array("main")
+            captured_snapshot = camera.capture_array("main")
+            image_list.append(captured_snapshot)
+        else:
+            camera.shutter_speed = exp*1000
+            for i in range(1,dry_run_iterations):
+                camera.capture(None, format='jpeg')     # Not sure None will work here
+            camera.capture(stream, format='jpeg')
+            # "Rewind" the stream to the beginning so we can read its content
+            stream.seek(0)
+            image_list.append(Image.open(stream))
+    # Exposure fusion using Mertens
+    merge_mertens = cv2.createMergeMertens()
+    res_mertens = merge_mertens.process(image_list)
+    image_mertens_8bit = numpy.clip(res_mertens * 255, 0, 255).astype('uint8')
+    if IsPiCamera2:
+        # For PiCamera2, preview and save to file are handled in asynchronous threads
+        queue_item = tuple((Image.fromarray(numpy.uint8(image_mertens_8bit)).convert('RGB'), CurrentFrame))
+        capture_display_queue.put(queue_item)
+        capture_save_queue.put(queue_item)
+    else:
+        camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+
+
 def capture(still):
     global CurrentDir, CurrentFrame, CurrentExposure
     global exposure_frame_value_label
@@ -1340,6 +1404,7 @@ def capture(still):
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
     global capture_display_queue, capture_save_queue
+    global HdrCaptureActive
 
     if SimulatedRun:
         return()
@@ -1446,16 +1511,22 @@ def capture(still):
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
-                    # For PiCamera2, preview and save to file are handled in asynchronous threads
-                    queue_item = tuple((captured_snapshot, CurrentFrame))
-                    capture_display_queue.put(queue_item)
-                    capture_save_queue.put(queue_item)
+                    if HdrCaptureActive:
+                        capture_hdr()
+                    else:
+                        # For PiCamera2, preview and save to file are handled in asynchronous threads
+                        queue_item = tuple((captured_snapshot, CurrentFrame))
+                        capture_display_queue.put(queue_item)
+                        capture_save_queue.put(queue_item)
         else:
             if still:
                 camera.capture('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill), quality=100)
                 CurrentStill += 1
             else:
-                camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+                if HdrCaptureActive:
+                    capture_hdr()
+                else:
+                    camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -1965,6 +2036,7 @@ def load_session_data():
     global CurrentFrame
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
+    global HdrCaptureActive, hdr_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
@@ -2002,6 +2074,9 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
+            if 'HdrCaptureActive' in SessionData:
+                HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
+                hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On')
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
@@ -2059,6 +2134,7 @@ def tscann8_init():
     global LogLevel
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
+    global step_value, exp_list, min_exp, max_exp, num_steps
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2080,6 +2156,10 @@ def tscann8_init():
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
     else:
         logging.info("Running on Raspberry Pi")
+
+    # Init HDR variables
+    step_value = (max_exp - min_exp) / num_steps
+    exp_list = numpy.arange(min_exp, max_exp, step_value).tolist()
 
     # Try to determine Video folder of user logged in
     homefolder = os.environ['HOME']
@@ -2135,6 +2215,7 @@ def tscann8_init():
             PreviewWinY = 150
             camera = Picamera2()
             capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
+                                                               #raw = {"size": (4056, 3040)},
                                                                transform=Transform(hflip=True))
             preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
             # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
@@ -2242,6 +2323,7 @@ def build_ui():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global preview_border_frame
     global draw_capture_label
+    global hdr_btn
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2293,9 +2375,14 @@ def build_ui():
     Free_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=negative_capture,
+    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=switch_negative_capture,
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+
+    # Switch HDR mode on/off
+    hdr_btn = Button(bottom_area_frame, text="HDR On", width=8, height=3, command=switch_hdr_capture,
+                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+    hdr_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
