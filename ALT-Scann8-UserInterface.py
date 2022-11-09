@@ -167,6 +167,7 @@ CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
 NegativeCaptureActive = False
 HdrCaptureActive = False
+HqCaptureActive = False
 AdvanceMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
 RewindErrorOutstanding = False
@@ -277,6 +278,7 @@ SessionData = {
     "FilmHoleY": str(FilmHoleY),
     "NegativeCaptureActive": str(NegativeCaptureActive),
     "HdrCaptureActive": str(HdrCaptureActive),
+    "HqCaptureActive": str(HqCaptureActive)
 }
 
 
@@ -848,7 +850,7 @@ def button_status_change_except(except_button, active):
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
-    global PiCam2_preview_btn, hdr_btn
+    global PiCam2_preview_btn, hdr_btn, hq_btn
 
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -864,7 +866,7 @@ def button_status_change_except(except_button, active):
         FastForward_btn.config(state=DISABLED if active else NORMAL)
     if except_button != PosNeg_btn:
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != hdr_btn:
+    if ExpertMode and except_button != hdr_btn:
         hdr_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Focus_btn and not IsPiCamera2:
         Focus_btn.config(state=DISABLED if active else NORMAL)
@@ -876,9 +878,11 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+    if ExpertMode and except_button != hq_btn:
+        hq_btn.config(state=DISABLED if active else NORMAL)
 
     if IsPiCamera2:
-        if except_button != PiCam2_preview_btn:
+        if except_button != PiCam2_preview_btn and except_button != Free_btn:
             PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
 
 
@@ -1164,6 +1168,21 @@ def switch_hdr_capture():
                    fg='white' if HdrCaptureActive else save_fg)
 
 
+# Capture with sensor at 4056x3040
+#Frames delivered still at 2028x1520, but better quality
+def switch_hq_capture():
+    global HqCaptureActive
+    global hq_btn
+
+    HqCaptureActive = not HqCaptureActive
+    if IsPiCamera2:
+        PiCam2_configure()
+    SessionData["HqCaptureActive"] = str(HqCaptureActive)
+    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
+                   relief=SUNKEN if HqCaptureActive else RAISED,
+                   bg='red' if HqCaptureActive else save_bg,
+                   fg='white' if HqCaptureActive else save_fg)
+
 
 def switch_negative_capture():
     global NegativeCaptureActive
@@ -1404,7 +1423,7 @@ def capture(still):
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
     global capture_display_queue, capture_save_queue
-    global HdrCaptureActive
+    global HdrCaptureActive, HqCaptureActive
 
     if SimulatedRun:
         return()
@@ -2037,6 +2056,7 @@ def load_session_data():
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
     global HdrCaptureActive, hdr_btn
+    global HqCaptureActive, hq_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
@@ -2076,7 +2096,12 @@ def load_session_data():
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
             if 'HdrCaptureActive' in SessionData:
                 HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
-                hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On')
+                if ExpertMode:
+                    hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On')
+            if 'HqCaptureActive' in SessionData:
+                HqCaptureActive = eval(SessionData["HqCaptureActive"])
+                if ExpertMode:
+                    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On')
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
@@ -2113,11 +2138,41 @@ def load_session_data():
         display_preview()
 
 
+def PiCam2_configure():
+    global camera, capture_config, preview_config
+    global CurrentExposure, CurrentAwbAuto, SharpnessValue
+    global HqCaptureActive
+
+    if HqCaptureActive:
+        capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
+                                                           raw={"size": (4056, 3040)},
+                                                           transform=Transform(hflip=True))
+    else:
+        capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
+                                                           raw={"size": (2028, 1520)},
+                                                           transform=Transform(hflip=True))
+    preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
+    # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
+    camera.configure(capture_config)
+    camera.set_controls({"ExposureTime": CurrentExposure})
+    camera.set_controls({"AnalogueGain": 1.0})
+    camera.set_controls({"AwbEnable": 1 if CurrentAwbAuto else 0})
+    camera.set_controls({"ColourGains": (2.2, 2.2)})  # Red 2.2, Blue 2.2 seem to be OK
+    # In PiCamera2, '1' is the standard sharpness
+    # It can be a floating point number from 0.0 to 16.0
+    camera.set_controls({"Sharpness": SharpnessValue})
+    # draft.NoiseReductionModeEnum.HighQuality not defined, yet
+    # However, looking at the PiCamera2 Source Code, it seems the default value for still configuration
+    # is already HighQuality, so not much to worry about
+    # camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})
+    # No preview by default
+    camera.start(show_preview=False)
+
+
 def tscann8_init():
     global win
     global camera
     global CurrentExposure
-    global CurrentExposureStr
     global TopWinX
     global TopWinY
     # global preview_border_frame
@@ -2214,25 +2269,7 @@ def tscann8_init():
             PreviewWinX = 250
             PreviewWinY = 150
             camera = Picamera2()
-            capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
-                                                               #raw = {"size": (4056, 3040)},
-                                                               transform=Transform(hflip=True))
-            preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
-            # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
-            camera.configure(capture_config)
-            camera.set_controls({"ExposureTime": CurrentExposure})
-            camera.set_controls({"AnalogueGain": 1.0})
-            camera.set_controls({"AwbEnable": 1 if CurrentAwbAuto else 0})
-            camera.set_controls({"ColourGains": (2.2, 2.2)}) # Red 2.2, Blue 2.2 seem to be OK
-            # In PiCamera2, '1' is the standard sharpness
-            # It can be a floating point number from 0.0 to 16.0
-            camera.set_controls({"Sharpness": SharpnessValue})
-            # draft.NoiseReductionModeEnum.HighQuality not defined, yet
-            # However, looking at the PiCamera2 Source Code, it seems the default value for still configuration
-            # is already HighQuality, so not much to worry about
-            # camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})
-            # No preview by default
-            camera.start(show_preview=False)
+            PiCam2_configure()
             ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
             # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
             # displayed in the preview area by a dedicated thread, so that time consumed in this task
@@ -2323,7 +2360,8 @@ def build_ui():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global preview_border_frame
     global draw_capture_label
-    global hdr_btn
+    global hdr_btn, hq_btn
+
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2379,10 +2417,16 @@ def build_ui():
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
-    # Switch HDR mode on/off
-    hdr_btn = Button(bottom_area_frame, text="HDR On", width=8, height=3, command=switch_hdr_capture,
-                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
-    hdr_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    if ExpertMode:
+        # Switch HDR mode on/off
+        hdr_btn = Button(bottom_area_frame, text="HDR On", width=8, height=3, command=switch_hdr_capture,
+                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+        hdr_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+
+        # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
+        hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
+                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+        hq_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
