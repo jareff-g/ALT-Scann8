@@ -1087,7 +1087,10 @@ def capture_save_thread(queue, event, id):
             image_array = numpy.asarray(message[0])
             image_array = numpy.negative(image_array)
             message[0] = PIL.Image.fromarray(image_array)
-        message[0].save('picture-%05d.jpg' % message[1])
+        if message[2] != 0:
+            message[0].save('hdrpic-%05d.%i.jpg' % (message[1],message[2]))
+        else:
+            message[0].save('picture-%05d.jpg' % message[1])
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1378,34 +1381,26 @@ def capture_hdr():
         # Create the in-memory stream
         stream = BytesIO()
     image_list.clear()
+    idx=1
     for exp in exp_list:
         logging.debug("capture_hdr: exp %.2f", exp)
         if IsPiCamera2:
             camera.set_controls({"ExposureTime": int(exp*1000)})
             # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
             for i in range(1,dry_run_iterations):
-                camera.capture_array("main")
-            captured_snapshot = camera.capture_array("main")
-            image_list.append(captured_snapshot)
+                camera.capture_image("main")
+            captured_snapshot = camera.capture_image("main")
+            # For PiCamera2, preview and save to file are handled in asynchronous threads
+            queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+            if (idx == 3):   # Take only third image for preview
+                capture_display_queue.put(queue_item)
+            capture_save_queue.put(queue_item)
         else:
             camera.shutter_speed = exp*1000
             for i in range(1,dry_run_iterations):
                 camera.capture(None, format='jpeg')     # Not sure None will work here
-            camera.capture(stream, format='jpeg')
-            # "Rewind" the stream to the beginning so we can read its content
-            stream.seek(0)
-            image_list.append(Image.open(stream))
-    # Exposure fusion using Mertens
-    merge_mertens = cv2.createMergeMertens()
-    res_mertens = merge_mertens.process(image_list)
-    image_mertens_8bit = numpy.clip(res_mertens * 255, 0, 255).astype('uint8')
-    if IsPiCamera2:
-        # For PiCamera2, preview and save to file are handled in asynchronous threads
-        queue_item = tuple((Image.fromarray(numpy.uint8(image_mertens_8bit)).convert('RGB'), CurrentFrame))
-        capture_display_queue.put(queue_item)
-        capture_save_queue.put(queue_item)
-    else:
-        camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+            camera.capture('hdrpic-%05d.%i.jpg' % (CurrentFrame, idx), quality=100)
+        idx += 1
 
 
 def capture(still):
@@ -1525,16 +1520,17 @@ def capture(still):
                 else:
                     print(CaptureStabilizationDelay, time.time(), FrameArrivalTime)
                 """
-                captured_snapshot = camera.capture_image("main")
                 if still:
+                    captured_snapshot = camera.capture_image("main")
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
                     if HdrCaptureActive:
                         capture_hdr()
                     else:
+                        captured_snapshot = camera.capture_image("main")
                         # For PiCamera2, preview and save to file are handled in asynchronous threads
-                        queue_item = tuple((captured_snapshot, CurrentFrame))
+                        queue_item = tuple((captured_snapshot, CurrentFrame, 0))
                         capture_display_queue.put(queue_item)
                         capture_save_queue.put(queue_item)
         else:
@@ -2143,6 +2139,7 @@ def PiCam2_configure():
     global CurrentExposure, CurrentAwbAuto, SharpnessValue
     global HqCaptureActive
 
+    camera.stop()
     if HqCaptureActive:
         capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
                                                            raw={"size": (4056, 3040)},
@@ -2282,10 +2279,20 @@ def tscann8_init():
             save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
             save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
             save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
+            save_thread_4 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,4))
+            save_thread_5 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,5))
+            save_thread_6 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,6))
+            save_thread_7 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,7))
+            save_thread_8 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,8))
             display_thread.start()
             save_thread_1.start()
             save_thread_2.start()
             save_thread_3.start()
+            save_thread_4.start()
+            save_thread_5.start()
+            save_thread_6.start()
+            save_thread_7.start()
+            save_thread_8.start()
             logging.debug("Threads initialized")
         else:
             camera = picamera.PiCamera()
@@ -2837,6 +2844,11 @@ def main(argv):
         capture_display_event.set()
         capture_save_event.set()
         capture_display_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
