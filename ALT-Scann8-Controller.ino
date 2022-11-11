@@ -175,19 +175,19 @@ int FilteredSignalLevel = 0;
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
-unsigned long FetchFrameScanSpeed = 5000;    // Play Slow before trig (Original 15000)
+unsigned long FetchFrameScanSpeed = 15000;    // Play Slow before trig (Original 15000)
 int RewindSpeed = 4000;                       // speed Rewind movie (delay in rewind loop, progressibly reduced down to 200)
 int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
-int PerforationThresholdLevelR8 = 160;          // detector pulse level: Specific for R8
-int PerforationThresholdLevelS8 = 120;          // detector pulse level: Specific for S8
-int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
 int PerforationMaxLevel = 250;      // detector pulse high level, clear film and low contrast film perforation
 int PerforationMinLevel = 50;      // detector pulse low level, originally hardcoded
-int MinFrameStepsR8 = 248;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int MinFrameStepsS8 = 290;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
+int PerforationThresholdLevelR8 = 140;          // detector pulse level: Specific for R8
+int PerforationThresholdLevelS8 = 120;          // detector pulse level: Specific for S8
+int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
+int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 238;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
-int DecreaseSpeedFrameStepsS8 = 280;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 250;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsS8 = 270;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 // ------------------------------------------------------------------------------------------
 
@@ -203,7 +203,7 @@ int LastFrameSteps = 0;                     // stores number of steps
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
 
-unsigned long TractionStopWaitingTime = 100000;  // winding wheel C Start value, changed by program. 2000 in Original code (JRE: 20000, after the change in the collecting film code in scan function. Later changed to 100000 (100 ms) to simplify)
+unsigned long TractionStopWaitingTime = 50000;  // winding wheel C Start value, changed by program. 2000 in Original code (JRE: 20000, after the change in the collecting film code in scan function. Later changed to 100000 (100 ms) to simplify)
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 unsigned long TractionStopLastWaitEventTime = 0;
@@ -279,8 +279,12 @@ void loop() {
   while (1) {
     if (dataInQueue()) {
       Ic = pop();   // Get next command from queue if one exists
-      if (!ALT_Scann8_UI_detected && Ic != 1)
+      if (!ALT_Scann8_UI_detected && Ic != 1) {
         Ic = 0; // Drop dequeued commend until ALT UI version detected
+        DebugPrint("UI req no id"); 
+        EventForRPi = 3;  // Tell ALT UI to identify itself
+        digitalWrite(13, HIGH);
+      }
     }
     else
       Ic = 0;
@@ -363,6 +367,26 @@ void loop() {
             ScanState = Sts_SingleStep;
             MinFrameSteps = 100; // Used to be 100
             delay(50);
+            break;
+          case 50:
+            if (PerforationThresholdLevel < 250)
+              PerforationThresholdLevel++;
+              OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+            break;
+          case 51:
+            if (PerforationThresholdLevel > 50)
+              PerforationThresholdLevel--;
+              OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+            break;
+          case 52:
+            if (MinFrameSteps < 300)
+              MinFrameSteps++;
+              OriginalMinFrameSteps = MinFrameSteps;
+            break;
+          case 53:
+            if (MinFrameSteps > 100)
+              MinFrameSteps--;
+              OriginalMinFrameSteps = MinFrameSteps;
             break;
           case 60: // Rewind
             if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
@@ -698,7 +722,7 @@ ScanResult scan(int Ic) {
 
   TractionStopActive = digitalRead(TractionStopPin);
 
-  if (FrameStepsDone >= DecreaseSpeedFrameSteps) {
+  if (FrameStepsDone >= DecreaseSpeedFrameSteps && ScanSpeed != FetchFrameScanSpeed) {
     ScanSpeed = FetchFrameScanSpeed;
     DebugPrintAux("SSpeed",ScanSpeed);
   }
