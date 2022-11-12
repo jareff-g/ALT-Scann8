@@ -202,6 +202,7 @@ FolderProcess = 0
 LoggingMode = "WARNING"
 LogLevel = 0
 draw_capture_label = 0
+button_lock_counter = 0
 
 PiCam2PreviewEnabled=False
 CaptureStabilizationDelay = 0.1
@@ -258,6 +259,7 @@ PreviewWarnAgain = True
 FPM_LastMinuteFrameTimes = list()
 FPM_StartTime = time.ctime()
 FPM_CalculatedValue = -1
+VideoCaptureActive = False
 
 # *** HDR variables
 image_list = []
@@ -850,8 +852,15 @@ def button_status_change_except(except_button, active):
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
-    global PiCam2_preview_btn, hdr_btn, hq_btn
+    global PiCam2_preview_btn, hdr_btn, hq_btn, turbo_btn
+    global button_lock_counter
 
+    if active:
+        button_lock_counter += 1
+    else:
+        button_lock_counter -= 1
+    if button_lock_counter > 0:
+        return
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
     if except_button != SingleStep_btn:
@@ -866,8 +875,6 @@ def button_status_change_except(except_button, active):
         FastForward_btn.config(state=DISABLED if active else NORMAL)
     if except_button != PosNeg_btn:
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
-    if ExpertMode and except_button != hdr_btn:
-        hdr_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Focus_btn and not IsPiCamera2:
         Focus_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Start_btn and (not IsPiCamera2 or not PiCam2PreviewEnabled):
@@ -878,8 +885,12 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+    if ExpertMode and except_button != hdr_btn:
+        hdr_btn.config(state=DISABLED if active else NORMAL)
     if ExpertMode and except_button != hq_btn:
         hq_btn.config(state=DISABLED if active else NORMAL)
+    if ExpertMode and except_button != turbo_btn:
+        turbo_btn.config(state=DISABLED if active else NORMAL)
 
     if IsPiCamera2:
         if except_button != PiCam2_preview_btn and except_button != Free_btn:
@@ -1172,7 +1183,7 @@ def switch_hdr_capture():
 
 
 # Capture with sensor at 4056x3040
-#Frames delivered still at 2028x1520, but better quality
+# Frames delivered still at 2028x1520, but better quality
 def switch_hq_capture():
     global HqCaptureActive
     global hq_btn
@@ -1185,6 +1196,22 @@ def switch_hq_capture():
                    relief=SUNKEN if HqCaptureActive else RAISED,
                    bg='red' if HqCaptureActive else save_bg,
                    fg='white' if HqCaptureActive else save_fg)
+
+
+# Capture using Video configuration
+# Faster than still
+def switch_turbo_capture():
+    global VideoCaptureActive
+    global turbo_btn
+
+    VideoCaptureActive = not VideoCaptureActive
+    if IsPiCamera2:
+        PiCam2_configure()
+    SessionData["VideoCaptureActive"] = str(VideoCaptureActive)
+    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
+                   relief=SUNKEN if VideoCaptureActive else RAISED,
+                   bg='red' if VideoCaptureActive else save_bg,
+                   fg='white' if VideoCaptureActive else save_fg)
 
 
 def switch_negative_capture():
@@ -1293,6 +1320,26 @@ def set_r8():
         send_arduino_command(18)
 
 
+def perf_up():
+    if not SimulatedRun:
+        send_arduino_command(50)
+
+
+def perf_dn():
+    if not SimulatedRun:
+        send_arduino_command(51)
+
+
+def steps_up():
+    if not SimulatedRun:
+        send_arduino_command(52)
+
+
+def steps_dn():
+    if not SimulatedRun:
+        send_arduino_command(53)
+
+
 def film_hole_up():
     global film_hole_frame, FilmHoleY
     if FilmHoleY > 38:
@@ -1375,7 +1422,7 @@ def register_frame():
 def capture_hdr():
     global CurrentFrame
     global capture_display_queue, capture_save_queue
-    global camera, exp_list
+    global camera, exp_list, VideoCaptureActive
 
     if not IsPiCamera2:
         # Create the in-memory stream
@@ -1387,9 +1434,18 @@ def capture_hdr():
         if IsPiCamera2:
             camera.set_controls({"ExposureTime": int(exp*1000)})
             # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
-            for i in range(1,dry_run_iterations):
-                camera.capture_image("main")
-            captured_snapshot = camera.capture_image("main")
+            if VideoCaptureActive:
+                for i in range(1, dry_run_iterations):
+                    camera.capture_request()
+                request = camera.capture_request()
+                img = request.make_image("main")
+                img = img.convert('RGB')
+                captured_snapshot = img.copy()
+                request.release()
+            else:
+                for i in range(1,dry_run_iterations):
+                    camera.capture_image("main")
+                captured_snapshot = camera.capture_image("main")
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((captured_snapshot, CurrentFrame, idx))
             if (idx == 3):   # Take only third image for preview
@@ -1419,6 +1475,7 @@ def capture(still):
     global CurrentStill
     global capture_display_queue, capture_save_queue
     global HdrCaptureActive, HqCaptureActive
+    global VideoCaptureActive
 
     if SimulatedRun:
         return()
@@ -1528,7 +1585,14 @@ def capture(still):
                     if HdrCaptureActive:
                         capture_hdr()
                     else:
-                        captured_snapshot = camera.capture_image("main")
+                        if VideoCaptureActive:
+                            request = camera.capture_request()
+                            img = request.make_image("main")
+                            img = img.convert('RGB')
+                            captured_snapshot = img.copy()
+                            request.release()
+                        else:
+                            captured_snapshot = camera.capture_image("main")
                         # For PiCamera2, preview and save to file are handled in asynchronous threads
                         queue_item = tuple((captured_snapshot, CurrentFrame, 0))
                         capture_display_queue.put(queue_item)
@@ -1755,7 +1819,7 @@ def capture_loop():
         stop_scan()
         ScanStopRequested = False
         curtime = time.time()
-        if ExpertMode:
+        if ExpertMode and session_frames > 0:
             logging.info("Total session time: %s seg for %i frames (%i ms per frame)",
                          str(round((curtime-session_start_time),1)),
                          session_frames,
@@ -1881,6 +1945,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     if ArduinoTrigger == 2:  # ALT Controller identified
         ALT_Scann8_controller_detected = True
         logging.info("Received ALT ID answer from Arduino")
+    if ArduinoTrigger == 3:  # ALT Controller was reloaded, need to identify again
+        send_arduino_command(1)
+        logging.info("Received ALT ID request from Arduino, resending ID")
     elif ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
@@ -2051,8 +2118,8 @@ def load_session_data():
     global CurrentFrame
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
-    global HdrCaptureActive, hdr_btn
-    global HqCaptureActive, hq_btn
+    global HdrCaptureActive, HqCaptureActive
+    global hq_btn, hdr_btn, turbo_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
@@ -2092,12 +2159,16 @@ def load_session_data():
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
             if 'HdrCaptureActive' in SessionData:
                 HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
-                if ExpertMode:
+                if ExpertMode and IsPiCamera2:
                     hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On')
             if 'HqCaptureActive' in SessionData:
                 HqCaptureActive = eval(SessionData["HqCaptureActive"])
-                if ExpertMode:
+                if ExpertMode and IsPiCamera2:
                     hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On')
+            if 'VideoCaptureActive' in SessionData:
+                VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
+                if ExpertMode and IsPiCamera2:
+                    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On')
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
@@ -2138,16 +2209,31 @@ def PiCam2_configure():
     global camera, capture_config, preview_config
     global CurrentExposure, CurrentAwbAuto, SharpnessValue
     global HqCaptureActive
+    global VideoCaptureActive
 
     camera.stop()
     if HqCaptureActive:
-        capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
-                                                           raw={"size": (4056, 3040)},
-                                                           transform=Transform(hflip=True))
+        if VideoCaptureActive:
+            capture_config = camera.create_video_configuration(main={"size": (2028, 1520)},
+                                           raw={"size": (4056, 3040)},
+                                           transform=Transform(hflip=True),
+                                           controls={"FrameRate": 120.0})
+        else:
+            capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
+                                           raw={"size": (4056, 3040)},
+                                           transform=Transform(hflip=True))
+
     else:
-        capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
-                                                           raw={"size": (2028, 1520)},
-                                                           transform=Transform(hflip=True))
+        if VideoCaptureActive:
+            capture_config = camera.create_video_configuration(main={"size": (2028, 1520)},
+                                           raw={"size": (2028, 1520)},
+                                           transform=Transform(hflip=True),
+                                           controls={"FrameRate": 120.0})
+        else:
+            capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
+                                           raw={"size": (2028, 1520)},
+                                           transform=Transform(hflip=True))
+
     preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
@@ -2367,7 +2453,7 @@ def build_ui():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global preview_border_frame
     global draw_capture_label
-    global hdr_btn, hq_btn
+    global hdr_btn, hq_btn, turbo_btn
 
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
@@ -2424,7 +2510,7 @@ def build_ui():
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
-    if ExpertMode:
+    if ExpertMode and IsPiCamera2:
         # Switch HDR mode on/off
         hdr_btn = Button(bottom_area_frame, text="HDR On", width=8, height=3, command=switch_hdr_capture,
                             activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
@@ -2434,6 +2520,11 @@ def build_ui():
         hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
                             activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
         hq_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+
+        # Switch VideoCaptureActive mode on/off (Capture video Configuration)
+        turbo_btn = Button(bottom_area_frame, text="Turbo On", width=8, height=3, command=switch_turbo_capture,
+                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+        turbo_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
@@ -2673,6 +2764,7 @@ def build_ui():
         film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11,
                                 bg='white', fg='white')
         film_hole_label.pack(side=TOP)
+
         # Up/Down buttons to move marker for film hole
         film_hole_control_frame = LabelFrame(expert_frame, text="Hole mark pos.", width=8, height=2,
                                              font=("Arial", 7))
@@ -2690,6 +2782,23 @@ def build_ui():
         experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
         experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
         #experimental_frame.place(x=900, y=790)
+
+        # Up/Down buttons to move up/down perforation threshold/frame steps in Arduino
+        frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align (perf/steps)", width=8, height=2,
+                                             font=("Arial", 7))
+        frame_alignment_frame.pack(side=LEFT, padx=5)
+        perf_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=perf_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
+        perf_up_btn.grid(column=0, row=0)
+        perf_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=perf_dn,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
+        perf_dn_btn.grid(column=0, row=1)
+        steps_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=steps_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
+        steps_up_btn.grid(column=1, row=0)
+        steps_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=steps_dn,
+                                      activebackground='green', activeforeground='white', font=("Arial", 7))
+        steps_dn_btn.grid(column=1, row=1)
 
         # Colour Correction Matrix - Only for PiCamera2
         if IsPiCamera2 and ccm_enabled:
@@ -2859,3 +2968,4 @@ def main(argv):
 
 if __name__ == '__main__':
     main(sys.argv[1:])
+
