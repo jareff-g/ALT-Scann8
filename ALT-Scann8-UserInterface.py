@@ -2262,6 +2262,7 @@ def PiCam2_configure():
     # is already HighQuality, so not much to worry about
     # camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})
     # No preview by default
+    camera.options['quality'] = 95  # jpeg quality: values from 0 to 100. Repyl from David Plowman in PiCam2 list
     camera.start(show_preview=False)
 
 
