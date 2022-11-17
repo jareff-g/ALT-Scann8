@@ -225,7 +225,6 @@ SharpnessValue = 1
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
 ExperimentalMode = False
-ccm_enabled = False
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
                         # That ,means we wait until the difference between a frame and the previous one is less
@@ -263,10 +262,10 @@ VideoCaptureActive = False
 
 # *** HDR variables
 image_list = []
-dry_run_iterations = 2
-min_exp = 0.9
-max_exp = 56
-num_steps = 6
+dry_run_iterations = 3
+min_exp = 10  # Originally 0.9
+max_exp = 150 # Origially 56
+num_steps = 4
 step_value = 1
 exp_list = []
 
@@ -290,8 +289,9 @@ def send_arduino_command(cmd):
     if not SimulatedRun:
         if ALT_Scann8_controller_detected or cmd == 1:
             i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
+            logging.error("Sending command %i to Arduino", cmd)
         else:
-            logging.error("Trying to send command %i to controller, "
+            logging.error("Trying to send command %i to Arduino, "
                           "but ALT version not detected", cmd)
 
 
@@ -732,20 +732,6 @@ def colour_gain_blue_minus():
             camera.awb_gains = (GainRed, GainBlue)
 
 
-def ccm_update():
-    global ccm_11, ccm_12, ccm_13, ccm_21, ccm_22, ccm_23, ccm_31, ccm_32, ccm_33
-    if IsPiCamera2:
-        camera.set_controls({"ColourCorrectionMatrix": (float(ccm_11.get()),
-                                                        float(ccm_12.get()),
-                                                        float(ccm_13.get()),
-                                                        float(ccm_21.get()),
-                                                        float(ccm_22.get()),
-                                                        float(ccm_23.get()),
-                                                        float(ccm_31.get()),
-                                                        float(ccm_32.get()),
-                                                        float(ccm_33.get()))})
-
-
 def colour_gain_auto():
     global CurrentAwbAuto
     global GainBlue, GainRed
@@ -759,6 +745,8 @@ def colour_gain_auto():
 
     CurrentAwbAuto = not CurrentAwbAuto
     SessionData["CurrentAwbAuto"] = str(CurrentAwbAuto)
+    SessionData["GainRed"] = str(GainRed)
+    SessionData["GainBlue"] = str(GainBlue)
 
     if CurrentAwbAuto:
         awb_frame.config(text='Automatic White Balance ON')
@@ -859,7 +847,7 @@ def button_status_change_except(except_button, active):
         button_lock_counter += 1
     else:
         button_lock_counter -= 1
-    if button_lock_counter > 0:
+    if not active and button_lock_counter > 0:
         return
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -885,12 +873,13 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
-    if ExpertMode and except_button != hdr_btn:
-        hdr_btn.config(state=DISABLED if active else NORMAL)
-    if ExpertMode and except_button != hq_btn:
-        hq_btn.config(state=DISABLED if active else NORMAL)
-    if ExpertMode and except_button != turbo_btn:
-        turbo_btn.config(state=DISABLED if active else NORMAL)
+    if ExperimentalMode and IsPiCamera2:
+        if except_button != hdr_btn:
+            hdr_btn.config(state=DISABLED if active else NORMAL)
+        if except_button != hq_btn:
+            hq_btn.config(state=DISABLED if active else NORMAL)
+        if except_button != turbo_btn:
+            turbo_btn.config(state=DISABLED if active else NORMAL)
 
     if IsPiCamera2:
         if except_button != PiCam2_preview_btn and except_button != Free_btn:
@@ -1933,19 +1922,34 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     global ScanProcessError
     global ScanOngoing
     global ALT_Scann8_controller_detected
+    global last_cmd_time
 
-    curtime = time.ctime()
     if not SimulatedRun:
         try:
             ArduinoTrigger = i2c.read_byte_data(16, 0)
         except IOError:
+            ArduinoTrigger = 0
             # Log error to console
             logging.warning("Error while checking incoming event (%i) from Arduino. Will check again.", ArduinoTrigger)
 
-    if ArduinoTrigger == 2:  # ALT Controller identified
+    if ArduinoTrigger != 0:
+        last_cmd_time = time.time()
+    elif (ScanOngoing and (time.time() - last_cmd_time) > 3):
+        # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
+        # command from/to Arduino (frame received/go to next frame) has been lost.
+        # In such case, we force a 'fake' new frame command to allow process to continue
+        # This means a duplicate frame might be generated.
+        last_cmd_time = time.time()
+        NewFrameAvailable = True
+        logging.warning("More than 3 sec. since last command: Forcing new "
+                        "frame event (frame %i).",CurrentFrame)
+
+    if ArduinoTrigger == 0:  # Do nothing
+        pass
+    elif ArduinoTrigger == 2:  # ALT Controller identified
         ALT_Scann8_controller_detected = True
         logging.info("Received ALT ID answer from Arduino")
-    if ArduinoTrigger == 3:  # ALT Controller was reloaded, need to identify again
+    elif ArduinoTrigger == 3:  # ALT Controller was reloaded, need to identify again
         send_arduino_command(1)
         logging.info("Received ALT ID request from Arduino, resending ID")
     elif ArduinoTrigger == 11:  # New Frame available
@@ -1965,10 +1969,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     elif ArduinoTrigger == 65:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
+    else:
+        logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
     ArduinoTrigger = 0
 
-    win.after(50, arduino_listen_loop)
+    win.after(5, arduino_listen_loop)
 
 
 def on_form_event(dummy):
@@ -2157,18 +2163,25 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
-            if 'HdrCaptureActive' in SessionData:
-                HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
-                if ExpertMode and IsPiCamera2:
-                    hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On')
-            if 'HqCaptureActive' in SessionData:
-                HqCaptureActive = eval(SessionData["HqCaptureActive"])
-                if ExpertMode and IsPiCamera2:
-                    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On')
-            if 'VideoCaptureActive' in SessionData:
-                VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
-                if ExpertMode and IsPiCamera2:
-                    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On')
+            if ExperimentalMode and IsPiCamera2:
+                if 'HdrCaptureActive' in SessionData:
+                    HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
+                    hdr_btn.config(text='HDR Off' if HdrCaptureActive else 'HDR On',
+                                   relief=SUNKEN if HdrCaptureActive else RAISED,
+                                   bg='red' if HdrCaptureActive else save_bg,
+                                   fg='white' if HdrCaptureActive else save_fg)
+                if 'HqCaptureActive' in SessionData:
+                    HqCaptureActive = eval(SessionData["HqCaptureActive"])
+                    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
+                                  relief=SUNKEN if HqCaptureActive else RAISED,
+                                  bg='red' if HqCaptureActive else save_bg,
+                                  fg='white' if HqCaptureActive else save_fg)
+                if 'VideoCaptureActive' in SessionData:
+                    VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
+                    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
+                                     relief=SUNKEN if VideoCaptureActive else RAISED,
+                                     bg='red' if VideoCaptureActive else save_bg,
+                                     fg='white' if VideoCaptureActive else save_fg)
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
@@ -2441,7 +2454,6 @@ def build_ui():
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
     global awb_wait_checkbox
-    global ccm_11, ccm_12, ccm_13, ccm_21, ccm_22, ccm_23, ccm_31, ccm_32, ccm_33
     global OpenFolder_btn
     global film_hole_frame, FilmHoleY
     global temp_in_fahrenheit_checkbox
@@ -2510,7 +2522,7 @@ def build_ui():
                         activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
-    if ExpertMode and IsPiCamera2:
+    if ExperimentalMode and IsPiCamera2:
         # Switch HDR mode on/off
         hdr_btn = Button(bottom_area_frame, text="HDR On", width=8, height=3, command=switch_hdr_capture,
                             activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
@@ -2696,12 +2708,30 @@ def build_ui():
                                            state=NORMAL if CurrentAwbAuto else DISABLED)
         awb_wait_checkbox.pack(side=TOP, pady=2)
 
+        # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
+        match_wait_margin_frame = LabelFrame(expert_frame, text="Match margin", width=8, height=2,
+                                             font=("Arial", 7))
+        match_wait_margin_frame.pack(side=LEFT, padx=2)
+
+        match_wait_margin_value = Label(match_wait_margin_frame, text=str(MatchWaitMargin)+'%',
+                                         width=4, height=1, font=("Arial", 7))
+        match_wait_margin_value.pack(side=TOP)
+        match_wait_margin_down = Button(match_wait_margin_frame, text="-", width=1, height=1, command=match_wait_down,
+                                        activebackground='green', activeforeground='white', font=("Arial", 8))
+        match_wait_margin_down.pack(side=LEFT)
+        match_wait_margin_up = Button(match_wait_margin_frame, text="+", width=1, height=1, command=match_wait_up,
+                                      activebackground='green', activeforeground='white', font=("Arial", 8))
+        match_wait_margin_up.pack(side=RIGHT)
+        match_wait_margin_bottom_frame = Frame(match_wait_margin_frame, height=10)   # frame just to add space at the bottom
+        match_wait_margin_bottom_frame.pack(side=TOP, pady=14)
+
         # Focus zoom control (in out, up, down, left, right)
         Focus_frame = LabelFrame(expert_frame, text='Focus control', width=12, height=3, font=("Arial", 7))
         Focus_frame.pack(side=LEFT, padx=2)
 
         Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
         Focus_btn_grid_frame.pack(side=LEFT)
+
         # focus zoom displacement buttons, to further facilitate focusing the camera
         focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
                                 activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
@@ -2721,23 +2751,6 @@ def build_ui():
         focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
                               activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
         focus_rt_btn.grid(row=1, column=2)
-
-        # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
-        match_wait_margin_frame = LabelFrame(expert_frame, text="Match margin", width=8, height=2,
-                                             font=("Arial", 7))
-        match_wait_margin_frame.pack(side=LEFT, padx=2)
-
-        match_wait_margin_value = Label(match_wait_margin_frame, text=str(MatchWaitMargin)+'%',
-                                         width=4, height=1, font=("Arial", 7))
-        match_wait_margin_value.pack(side=TOP)
-        match_wait_margin_down = Button(match_wait_margin_frame, text="-", width=1, height=1, command=match_wait_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_down.pack(side=LEFT)
-        match_wait_margin_up = Button(match_wait_margin_frame, text="+", width=1, height=1, command=match_wait_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_up.pack(side=RIGHT)
-        match_wait_margin_bottom_frame = Frame(match_wait_margin_frame, height=10)   # frame just to add space at the bottom
-        match_wait_margin_bottom_frame.pack(side=TOP, pady=14)
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_frame = LabelFrame(expert_frame, text="Stabilization", width=8, height=1,
@@ -2778,121 +2791,71 @@ def build_ui():
         film_hole_bottom_frame = Frame(film_hole_control_frame)  # frame just to add space at the bottom
         film_hole_bottom_frame.pack(side=BOTTOM, pady=1)
 
-    if ExperimentalMode:
-        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
-        experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
-        #experimental_frame.place(x=900, y=790)
+        if ExperimentalMode:
+            experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
+            experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
+            #experimental_frame.place(x=900, y=790)
 
-        # Up/Down buttons to move up/down perforation threshold/frame steps in Arduino
-        frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align (perf/steps)", width=8, height=2,
-                                             font=("Arial", 7))
-        frame_alignment_frame.pack(side=LEFT, padx=5)
-        perf_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=perf_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        perf_up_btn.grid(column=0, row=0)
-        perf_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=perf_dn,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        perf_dn_btn.grid(column=0, row=1)
-        steps_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=steps_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        steps_up_btn.grid(column=1, row=0)
-        steps_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=steps_dn,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        steps_dn_btn.grid(column=1, row=1)
+            # Up/Down buttons to move up/down perforation threshold/frame steps in Arduino
+            frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align (perf/steps)", width=8, height=2,
+                                                 font=("Arial", 7))
+            frame_alignment_frame.pack(side=LEFT, padx=5)
+            perf_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=perf_up,
+                                          activebackground='green', activeforeground='white', font=("Arial", 7))
+            perf_up_btn.grid(column=0, row=0)
+            perf_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=perf_dn,
+                                          activebackground='green', activeforeground='white', font=("Arial", 7))
+            perf_dn_btn.grid(column=0, row=1)
+            steps_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=steps_up,
+                                          activebackground='green', activeforeground='white', font=("Arial", 7))
+            steps_up_btn.grid(column=1, row=0)
+            steps_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=steps_dn,
+                                          activebackground='green', activeforeground='white', font=("Arial", 7))
+            steps_dn_btn.grid(column=1, row=1)
 
-        # Colour Correction Matrix - Only for PiCamera2
-        if IsPiCamera2 and ccm_enabled:
-            ccm_11 = StringVar()
-            ccm_12 = StringVar()
-            ccm_13 = StringVar()
-            ccm_21 = StringVar()
-            ccm_22 = StringVar()
-            ccm_23 = StringVar()
-            ccm_31 = StringVar()
-            ccm_32 = StringVar()
-            ccm_33 = StringVar()
-            ccm_frame = LabelFrame(experimental_frame, text='CCM', width=1, height=4, font=("Arial", 7))
-            ccm_frame.pack(side=LEFT, padx=5, pady=5)
-            matrix_frame = Frame(ccm_frame, width=1, height=1)
-            matrix_frame.pack(side=TOP, padx=5)
+            # Sharpness, control to allow playign with the values and see the results
+            sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
+                                                 font=("Arial", 7))
+            sharpness_control_frame.pack(side=LEFT, padx=2)
 
-            ccm_entry_11 = Entry(matrix_frame, textvariable=ccm_11, font=("Arial", 7), width=5)
-            ccm_entry_11.grid(row=0, column=0)
-            ccm_entry_12 = Entry(matrix_frame, textvariable=ccm_12, font=("Arial", 7), width=5)
-            ccm_entry_12.grid(row=0, column=1)
-            ccm_entry_13 = Entry(matrix_frame, textvariable=ccm_13, font=("Arial", 7), width=5)
-            ccm_entry_13.grid(row=0, column=2)
-            ccm_entry_21 = Entry(matrix_frame, textvariable=ccm_21, font=("Arial", 7), width=5)
-            ccm_entry_21.grid(row=1, column=0)
-            ccm_entry_22 = Entry(matrix_frame, textvariable=ccm_22, font=("Arial", 7), width=5)
-            ccm_entry_22.grid(row=1, column=1)
-            ccm_entry_23 = Entry(matrix_frame, textvariable=ccm_23, font=("Arial", 7), width=5)
-            ccm_entry_23.grid(row=1, column=2)
-            ccm_entry_31 = Entry(matrix_frame, textvariable=ccm_31, font=("Arial", 7), width=5)
-            ccm_entry_31.grid(row=2, column=0)
-            ccm_entry_32 = Entry(matrix_frame, textvariable=ccm_32, font=("Arial", 7), width=5)
-            ccm_entry_32.grid(row=2, column=1)
-            ccm_entry_33 = Entry(matrix_frame, textvariable=ccm_33, font=("Arial", 7), width=5)
-            ccm_entry_33.grid(row=2, column=2)
-            ccm_go = Button(ccm_frame, text="Update CCM (KO)", command=ccm_update, activebackground='green',
-                            activeforeground='white', font=("Arial", 7), state=NORMAL)
-            ccm_go.pack(side=TOP, padx=2, pady=2)
+            sharpness_control_value = Label(sharpness_control_frame, text=str(SharpnessValue),
+                                             width=4, height=1, font=("Arial", 7))
+            sharpness_control_value.pack(side=TOP)
+            sharpness_control_value_down = Button(sharpness_control_frame, text="-", width=1, height=1, command=sharpness_down,
+                                            activebackground='green', activeforeground='white', font=("Arial", 8))
+            sharpness_control_value_down.pack(side=LEFT)
+            sharpness_control_value_up = Button(sharpness_control_frame, text="+", width=1, height=1, command=sharpness_up,
+                                          activebackground='green', activeforeground='white', font=("Arial", 8))
+            sharpness_control_value_up.pack(side=RIGHT)
+            sharpness_control_bottom_frame = Frame(sharpness_control_frame, height=10)   # frame just to add space at the bottom
+            sharpness_control_bottom_frame.pack(side=TOP, pady=13)
 
-            metadata = camera.capture_metadata()
-            camera_ccm = metadata["ColourCorrectionMatrix"]
-            ccm_11.set(round(camera_ccm[0], 2))
-            ccm_12.set(round(camera_ccm[1], 2))
-            ccm_13.set(round(camera_ccm[2], 2))
-            ccm_21.set(round(camera_ccm[3], 2))
-            ccm_22.set(round(camera_ccm[4], 2))
-            ccm_23.set(round(camera_ccm[5], 2))
-            ccm_31.set(round(camera_ccm[6], 2))
-            ccm_32.set(round(camera_ccm[7], 2))
-            ccm_33.set(round(camera_ccm[8], 2))
+            # Display entry to throttle Rwnd/FF speed
+            rwnd_speed_control_frame = LabelFrame(experimental_frame, text="RW/FF speed", width=8, height=2,
+                                                  font=("Arial", 7))
+            rwnd_speed_control_frame.pack(side=LEFT, padx=2)
 
-        # Sharpness, control to allow playign with the values and see the results
-        sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
-                                             font=("Arial", 7))
-        sharpness_control_frame.pack(side=LEFT, padx=2)
+            rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
+                                             text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
+                                             width=8, height=1, font=("Arial", 7))
+            rwnd_speed_control_delay.pack(side=TOP)
+            rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
+                                             activebackground='green', activeforeground='white', font=("Arial", 8))
+            rwnd_speed_control_down.pack(side=LEFT)
+            rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
+                                           activebackground='green', activeforeground='white', font=("Arial", 8))
+            rwnd_speed_control_up.pack(side=RIGHT)
+            rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
+            rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
 
-        sharpness_control_value = Label(sharpness_control_frame, text=str(SharpnessValue),
-                                         width=4, height=1, font=("Arial", 7))
-        sharpness_control_value.pack(side=TOP)
-        sharpness_control_value_down = Button(sharpness_control_frame, text="-", width=1, height=1, command=sharpness_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 8))
-        sharpness_control_value_down.pack(side=LEFT)
-        sharpness_control_value_up = Button(sharpness_control_frame, text="+", width=1, height=1, command=sharpness_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 8))
-        sharpness_control_value_up.pack(side=RIGHT)
-        sharpness_control_bottom_frame = Frame(sharpness_control_frame, height=10)   # frame just to add space at the bottom
-        sharpness_control_bottom_frame.pack(side=TOP, pady=13)
-
-        # Display entry to throttle Rwnd/FF speed
-        rwnd_speed_control_frame = LabelFrame(experimental_frame, text="RW/FF speed", width=8, height=2,
-                                              font=("Arial", 7))
-        rwnd_speed_control_frame.pack(side=LEFT, padx=2)
-
-        rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
-                                         text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
-                                         width=8, height=1, font=("Arial", 7))
-        rwnd_speed_control_delay.pack(side=TOP)
-        rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
-                                         activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_down.pack(side=LEFT)
-        rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
-                                       activebackground='green', activeforeground='white', font=("Arial", 8))
-        rwnd_speed_control_up.pack(side=RIGHT)
-        rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
-        rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
-
-        # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
-        # Leave it in the expert area, disabled, just in case it is reused
-        openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
-        openfolder_frame.pack(side=LEFT, padx=5)
-        OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
-                                activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
-                                font=("Arial", 7))
-        OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
+            # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
+            # Leave it in the expert area, disabled, just in case it is reused
+            openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
+            openfolder_frame.pack(side=LEFT, padx=5)
+            OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
+                                    activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
+                                    font=("Arial", 7))
+            OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
 
 
 def main(argv):
@@ -2927,9 +2890,9 @@ def main(argv):
 
     tscann8_init()
 
-    arduino_listen_loop()
-
-    send_arduino_command(1)
+    if not SimulatedRun:
+        arduino_listen_loop()
+        send_arduino_command(1)
 
     build_ui()
 
