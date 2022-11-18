@@ -121,6 +121,8 @@
 #include <stdio.h>
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
+int MaxPT = 0;
+int MinPT = 5000;
 
 
 enum {
@@ -128,7 +130,7 @@ enum {
   FrameSteps,
   DebugInfo,
   None
-} DebugState = DebugInfo;
+} DebugState = PT_Level;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -175,19 +177,20 @@ int FilteredSignalLevel = 0;
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 250;                    // Brightness UV led, may need to be changed depending on LED (Torulf: 250)
 unsigned long ScanSpeed = 500 ;               // speed stepper scann Play (original 500)
-unsigned long FetchFrameScanSpeed = 15000;    // Play Slow before trig (Original 15000)
+unsigned long FetchFrameScanSpeed = 5000;    // Play Slow before trig (Original 15000)
+unsigned long DecreaseScanSpeedStep = 3000;    // Attempt to have a progressively decreasing scan speed before stopping for a frame
 int RewindSpeed = 4000;                       // speed Rewind movie (delay in rewind loop, progressibly reduced down to 200)
 int TargetRewindSpeedLoop = 200;               // Originalyl hardcoded, not in a variable to allow modification from UI
-int PerforationMaxLevel = 250;      // detector pulse high level, clear film and low contrast film perforation
+int PerforationMaxLevel = 550;      // detector pulse high level, clear film and low contrast film perforation (Torulf: 250)
 int PerforationMinLevel = 50;      // detector pulse low level, originally hardcoded
-int PerforationThresholdLevelR8 = 140;          // detector pulse level: Specific for R8
-int PerforationThresholdLevelS8 = 120;          // detector pulse level: Specific for S8
+int PerforationThresholdLevelR8 = 210;          // detector pulse level: Specific for R8
+int PerforationThresholdLevelS8 = 210;          // detector pulse level: Specific for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
 int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int DecreaseSpeedFrameStepsR8 = 250;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
-int DecreaseSpeedFrameStepsS8 = 270;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
+int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 // ------------------------------------------------------------------------------------------
 
@@ -510,6 +513,8 @@ void loop() {
         else {
           CollectOutgoingFilm();
           delay(1); 
+
+          GetLevelPT(); // Just to collect stats (MaxPT, MinPT)
           digitalWrite(MotorB_Stepper, HIGH);
         }
         break;
@@ -632,6 +637,19 @@ void CollectOutgoingFilm(void) {
   } 
 }
 
+// ------------- Centralized phototransistor level read ---------------
+int GetLevelPT() {
+  static int count = 0;
+  int SignalLevel = analogRead(PHOTODETECT);
+  MaxPT = max(SignalLevel, MaxPT);
+  MinPT = min(SignalLevel, MinPT);
+  if (DebugState == PT_Level)
+    count = (count+1) % 20;  // Report only one in twenty
+    if (count == 0)
+      SerialPrintInt(SignalLevel);
+
+  return(SignalLevel);
+}
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
   int SignalLevel;
@@ -648,18 +666,16 @@ boolean FilmInFilmgate() {
   for (int x = 0; x <= 300; x++) {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
-    SignalLevel = analogRead(PHOTODETECT);
+    SignalLevel = GetLevelPT();
     if (SignalLevel > max) max = SignalLevel;
     if (SignalLevel < min) min = SignalLevel;
-    if (DebugState == PT_Level)
-      SerialPrintInt(SignalLevel);
   }
   digitalWrite(MotorB_Stepper, LOW); 
   analogWrite(11, 0); // Turn off UV LED
   UVLedOn = false;
 
 
-  if (abs(max-min) > 200)
+  if (abs(max-min) > 0.7*(MaxPT-MinPT))
     retvalue = true;
 
   return(retvalue);
@@ -671,7 +687,7 @@ boolean FilmInFilmgate() {
 boolean IsHoleDetected() {
   boolean hole_detected = false;
   
-  PT_SignalLevelRead = analogRead(PHOTODETECT);
+  PT_SignalLevelRead = GetLevelPT();
   if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
     FilteredSignalLevel = PT_SignalLevelRead;
   }
@@ -712,19 +728,16 @@ ScanResult scan(int Ic) {
   analogWrite(11, UVLedBrightness);
   UVLedOn = true;
 
-  PT_SignalLevelRead = analogRead(PHOTODETECT);
-  // Push Phototransistor level unconditionally, we neccesarily are in Scan or SingleStep modes
-  // JRE 4/8/22: SerialPrint used to inhibit regular writes to Serial while in debug mode
-  if (DebugState == PT_Level)
-    SerialPrintInt(PT_SignalLevelRead);
+  PT_SignalLevelRead = GetLevelPT();
   
   unsigned long CurrentTime = micros();
 
   TractionStopActive = digitalRead(TractionStopPin);
 
-  if (FrameStepsDone >= DecreaseSpeedFrameSteps && ScanSpeed != FetchFrameScanSpeed) {
-    ScanSpeed = FetchFrameScanSpeed;
-    DebugPrintAux("SSpeed",ScanSpeed);
+  if (FrameStepsDone >= DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
+    //ScanSpeed = FetchFrameScanSpeed;
+    ScanSpeed = 5000 + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+    //DebugPrintAux("SSpeed",ScanSpeed);
   }
 
   // ------------ Stretching film pickup wheel (C) ------ 
@@ -754,6 +767,13 @@ ScanResult scan(int Ic) {
           digitalWrite(MotorB_Stepper, HIGH); 
           FrameDetected = IsHoleDetected();
           if (FrameDetected || FrameStepsDone > 3*DecreaseSpeedFrameSteps) break;
+          else delayMicroseconds(100);  
+          // Explanation of delay in previous line:
+          // Info sent on serial port, specially at low speeds (9600) introduces a delay 
+          // that affects ATL-Scann 8 behaviour. So, when debug is disabled, scanning 
+          // process go a bit out of control. 
+          // That needs to be investigated, in the meantime this delay (0.1 ms) seems to keep 
+          // things under control
         }
         digitalWrite(MotorB_Stepper, LOW);
       }
