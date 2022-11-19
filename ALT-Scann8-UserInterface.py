@@ -929,6 +929,11 @@ def rewind_movie():
             return()
         """
         RewindMovieActive = True
+        Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+        # Enable/Disable related buttons
+        button_status_change_except(Rewind_btn, RewindMovieActive)
+        # Invoke rewind_loop to continue processing until error or end event
+        win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
         hide_preview()
         tk.messagebox.showerror(title='Error during rewind',
@@ -949,12 +954,6 @@ def rewind_movie():
         time.sleep(0.2)
         if not SimulatedRun:
             send_arduino_command(60)
-        if RewindMovieActive:
-            Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
-            # Enable/Disable related buttons
-            button_status_change_except(Rewind_btn, RewindMovieActive)
-        # Invoke rewind_loop to continue processign until error or end event
-        win.after(5, rewind_loop)
 
     if RewindErrorOutstanding:
         RewindErrorOutstanding = False
@@ -998,6 +997,11 @@ def fast_forward_movie():
             return ()
         """
         FastForwardActive = True
+        FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
+        # Enable/Disable related buttons
+        button_status_change_except(FastForward_btn, FastForwardActive)
+        # Invoke fast_forward_loop a first time shen fast-forward starts
+        win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
         hide_preview()
         tk.messagebox.showerror(title='Error during fast forward',
@@ -1018,12 +1022,6 @@ def fast_forward_movie():
         time.sleep(0.2)
         if not SimulatedRun:
             send_arduino_command(61)
-        if FastForwardActive:  # Fast-forward movie is about to start...
-            FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
-            # Enable/Disable related buttons
-            button_status_change_except(FastForward_btn, FastForwardActive)
-        # Invoke fast_forward_loop a first time shen fast-forward starts
-        win.after(5, fast_forward_loop)
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
@@ -2379,20 +2377,10 @@ def tscann8_init():
             save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
             save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
             save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
-            save_thread_4 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,4))
-            save_thread_5 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,5))
-            save_thread_6 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,6))
-            save_thread_7 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,7))
-            save_thread_8 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,8))
             display_thread.start()
             save_thread_1.start()
             save_thread_2.start()
             save_thread_3.start()
-            save_thread_4.start()
-            save_thread_5.start()
-            save_thread_6.start()
-            save_thread_7.start()
-            save_thread_8.start()
             logging.debug("Threads initialized")
         else:
             camera = picamera.PiCamera()
@@ -2917,11 +2905,6 @@ def main(argv):
         capture_display_event.set()
         capture_save_event.set()
         capture_display_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)

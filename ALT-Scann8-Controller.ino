@@ -186,10 +186,10 @@ int PerforationMinLevel = 50;      // detector pulse low level, originally hardc
 int PerforationThresholdLevelR8 = 210;          // detector pulse level: Specific for R8
 int PerforationThresholdLevelS8 = 210;          // detector pulse level: Specific for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
-int MinFrameStepsR8 = 260;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsR8 = 265;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 250;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 255;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
 int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 // ------------------------------------------------------------------------------------------
