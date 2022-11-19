@@ -205,7 +205,7 @@ draw_capture_label = 0
 button_lock_counter = 0
 
 PiCam2PreviewEnabled=False
-CaptureStabilizationDelay = 0.1
+CaptureStabilizationDelay = 0.25
 PostviewCounter = 0
 FramesPerMinute = 0
 RPiTemp = 0
@@ -235,8 +235,8 @@ CurrentExposure = 0     # Zero means automatic exposure
 ExposureAdaptPause = True   # by default (non-expert) we wait for camera to stabilize when AE changes
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 CurrentExposureStr = "Auto"
-CurrentAwbAuto = True   # AWB enabled by default
-AwbPause = True   # by default (non-expert) we wait for camera to stabilize when AWB changes
+CurrentAwbAuto = False   # AWB disabled by default
+AwbPause = False   # by default (non-expert) we wait for camera to stabilize when AWB changes
 GainRed = 2.2  # 2.4
 GainBlue = 2.2  # 2.8
 PreviousGainRed = 1
@@ -847,7 +847,7 @@ def button_status_change_except(except_button, active):
         button_lock_counter += 1
     else:
         button_lock_counter -= 1
-    if not active and button_lock_counter > 0:
+    if button_lock_counter > 1 or (not active and button_lock_counter > 0):
         return
     if except_button != Free_btn:
         Free_btn.config(state=DISABLED if active else NORMAL)
@@ -2262,7 +2262,7 @@ def PiCam2_configure():
     # is already HighQuality, so not much to worry about
     # camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})
     # No preview by default
-    camera.options['quality'] = 95  # jpeg quality: values from 0 to 100. Repyl from David Plowman in PiCam2 list
+    camera.options['quality'] = 100  # jpeg quality: values from 0 to 100. Repyl from David Plowman in PiCam2 list
     camera.start(show_preview=False)
 
 
