@@ -1,106 +1,28 @@
+#!/usr/bin/env python
 """
-06/08/2022: 2.1.7: JRE: Add Button for EmergencyStop
-10/08/2022: JRE: Comment out emergency stop button
-10/08/2022: JRE: After capturing image, if exposure has changed since previous capture wait one sec
-                 (to allow camera to adapt in automatic mode)
-12/08/2022: JRE: Improve automatic exposure adaptation
-13/08/2022: JRE Implemented detection of fild loaded via FilmGate, to prevent FF/Rewind
-13/08/2022: JRE Move to 2.1.9
-14/08/2022: JRE Implemented function to dynamically modify the perforation level threshold
-27/08/2022: JRE, first attempt at migrating to picamera2
-        - Highlights: Most functionality works fine, but slower (factors to check: SD card, preview
-          mode, save to PNG?)
-        - Advance Film: OK (not camera related)
-        - Rewind: OK (not camera related)
-        - Free wheels: OK (not camera related)
-        - Negative film: KO, maybe can be done with overlays?
-        - Focus zoom: OK
-        - Automatic exposure: OK
-        - Scan: OK, but slower
-29/08/2022: JRE, continue with PiCamera2
-        - Preview (QTGL) too slow. DRM/KMS should be faster, but does not work for now
-        - Disabling preview makes scan process faster than current version (on 64-bit OS at
-          least)
-        - Implemented post-view (display captured image) when preview is disabled (also has
-          a speed cost, result is closer to current version)
-30/08/2022: JRE, fixed segment fault
-        - It was clearly related to the askyesno popup asking if the user wanted to retrieve
-          previous session (commenting out the popup was avoiding thg segment fault)
-          Moving the session recovery code to a dedicated function solved the issue (do not ask me why)
-31/08/2022: JRE, UI changes
-        - Use LabelFrame instead of Frame
-        - Reorganize position of controls
-01/09/2022: JRE Removed function to dynamically modify the perforation level threshold
-        - Already used for it's purpose (find optimal value), remove it as it is confusing
-        - Also with the new approach prioritizing the minimal number of steps, perforation
-          detection is more a confirmation we are in next frame
-04/09/2022: JRE - Port awb_gains to PiCamera2 (via libcamera controls AwbEnable, ColourGains)
-                  Negative image can probably be achieved via ColourCorrectionMatrix
-                  For now, if awb_gains values found in PiCamera legacy version are ported as they are
-                  to th ePiCamera2 version, terrible colors result. For now code is left commented out
-                - Optimization of 'postview' capture: Instead of retrieving the captured image from disk,
-                  we reuse the one captured in  memory (slight speed improvement, 55 to 64 FPM)
-                - Bug fix: We were writing session info to disk each capture loop, instead of each frame
-                  Significant speed improvement (including also previous optimization):
-                   - Without preview: 99 to 115 FPM
-                   - Postview 1/1: 55 to 74 FPM
-                   - Postview 1/10: 81 to 109
-                   - QTGL Preview: 30 to 36 (still quite unusable)
-                - Implement support for new Arduino message (12), indicating an error during the scan
-                  process. This allows for clean termination and reset of the UI to default status.
-                  This is useful mainly when the single step or scan buttons are clicked with no film
-08/09/2022: JRE
-                - Factorize code to hide/redisplay preview when using PiCamera legacy
-                - Add new hidden UI section for experimental features. Can be enabled with command line parameter '-x'
-                - Add UI controls to allow handling AWT (automatic white balance) in a similar way automatic exposure
-                  is handled
-                - Add option to allow waiting for AWB adaptation during capture (similar to what was done for automatic
-                  exposure). Needs to be automatic as it slows down the process, and it is not that critical (IMHO)
-09/09/2022: JRE
-                - Preview modes consolidated in a single variable: 'PreviewMode'
-                - Persisted PreviewMode in session data
-                - Create enum of preview modes (to consolidate in a single var)
-                - Move hole marker to experimental area. Add button to adjust position of marker
-                - Fix display issues for CCM and AWB in experimental area (although changing CCM seems unsupported)
-                - Move 'Open folder' button to experimental area
-16/09/2022: JRE
-                - Minor adjustments in the distribution of controls in main window
-                - Fix bug in non-experimental mode
-                - Fix bug in RPI temperature display
-                - Add UI to allow reducing rewind/FF speed
-                - Change default value for AWB to false
-20/09/2020: JRE
-                - Set sharpening for PiCamera2 (1 is the normal value) and add it in the experimental UI area. After
-                  some tests I cannot find much difference (for this project at least)
-                - Initialize preview mode with 6 buffers instead of the default 4, to see if that helps make it a bit
-                  more dynamic
-                - Parametrize the time allowed for camera to adapt in automatic mode (exposure adn white balance). It
-                  is a percentage of a static value (8000 for exposure, 1 for color balance). In any case there is
-                  an absolute time limit of 5 seconds
-                - Add statistic info on where time is spent (display preview, wait for automatic exp., wait for AWB)
-                - Do not start preview on startup, to be done later if required
-                - Allow unique scan error to happen without interrupting process. Scanning to stop only if two errors
-                  in less than 5 seconds
-                - Set button for ongoing action as SUNKEN
-                - Add button to take a snapshot of current image, with differentiated filename, and dedicated sequential
-                  number (from Torulf's 3.0)
-21/09/2020: JRE
-                - Experimental area: Change rwnd/ff speed to RPM
-                - Handle asynchronous notification of rwnd/ff end from Arduino
-                - Remove question about film routing before rwnd/ff. Now the algorythm of 'FilmInFilmgate' is reliable
-                - Split 'experimental' mode in two: 'ExpertMode' and 'ExperimentalMode'
-                - Move auto-exposure to expert area
-                - Reorganize how AE and AWB work so that they are homogeneous
-                - Implement asynchronous mode for PiCamera2 'postview'
-                    - Image is drawn by a separate thread, so does not introduce additional delay in the processing
-                    - Because of this, preview modes CAPTURE_PARTIAL and NO_PREVIEW are useless, will be removed
-                    - Since images need to be displayed sequentially, it does not make sense to have more than one
-                      thread of this type. The important thing is to have this out of the main scan loop. Only as a
-                      precaution, frames might be skipper when queue is getting full
-                - Asynchronous thread also implemented to save image to file
-                    - Contrary to preview display, here we do not have problem with the processign order,
-                      so 3 threads are started
+ALT-Scann8 UI - Alternative software for T-Scann 8
+
+This tool is a fork of the original user interface application of T-Scann 8
+
+Some additional features of this version include:
+- PiCamera 2 integration
+- Use of Tkinter instead of Pygame
+- Automatic exposure support
+- Fast forward support
+
+Licensed under a MIT LICENSE.
+
+More info in README.md file
 """
+
+__author__ = 'Juan Remirez de Esparza'
+__copyright__ = "Copyright 2022, Juan Remirez de Esparza"
+__credits__ = ["Juan Remirez de Esparza"]
+__license__ = "MIT"
+__version__ = "0.9beta"
+__maintainer__ = "Juan Remirez de Esparza"
+__email__ = "jremirez@hotmail.com"
+__status__ = "Development"
 
 # ######### Imports section ##########
 import tkinter as tk
@@ -1059,7 +981,7 @@ def capture_display_thread(queue, event, id):
             if NegativeCaptureActive:
                 image_array = numpy.asarray(message[0])
                 image_array = numpy.negative(image_array)
-                message[0] = PIL.Image.fromarray(image_array)
+                message[0] = Image.fromarray(image_array)
             draw_preview_image(message[0])
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
@@ -1084,7 +1006,7 @@ def capture_save_thread(queue, event, id):
         if NegativeCaptureActive:
             image_array = numpy.asarray(message[0])
             image_array = numpy.negative(image_array)
-            message[0] = PIL.Image.fromarray(image_array)
+            message[0] = Image.fromarray(image_array)
         if message[2] != 0:
             message[0].save('hdrpic-%05d.%i.jpg' % (message[1],message[2]))
         else:

@@ -1,121 +1,27 @@
-/*    T-Scann8 Super8/Regular8 Scanner ver 1.61
-      -UV led version-
-      © Torulf Holmström Sweden 2022
-      project page
-      tscann8.torulf.com
+/*
+ALT-Scann8 UI - Alternative software for T-Scann 8
 
-      01 Aug 2022 - JRE - Added fast forward function
-      04 Aug 2022 - JRE - Renamed commands, initialized to 'false' instead of 'LOW' (easier understanding)
-      04 Aug 2022 - JRE - Read and understoow the basic way Arduino code is supposed to work: Interrupts and main loop
-      04 Aug 2022 - JRE - Restructuring main loop: Addig a queue for incoming commands, use a switch for command processing
-                          Beware: 
-                          - Not everything happening in the main loop is linked to a received command
-                          - Main loop migth call functions that have their own loops
-                          Possible new approach:
-                          - Only one loop (main one)
-                          - One main switch with current status (scan, rewind, etc)
-                          - Secondary switch per state to handle command
-      04 Aug 2022 - JRE - Moving to 1.61.4 before bug changes
-      04 Aug 2022 - JRE - Reorganized overall structure
-                          - Converted main loop with variables to 2 switches, one for the state, other for incoming command
-                          - Some stuff works erratically, others do not work at all
-      05 Aug 2022 - JRE - Moving to 1.61.5 before doign more changes
-                          - Renaming of variables for easier understanding of the flow
-      06 Aug 2022 - JRE - Moving to 1.61.6 before doing more changes
-                          - Version mostly working, includign slow forward and Scan
-                          - Main issue pending: Frame not detected corretly (too high)
-                          - Moving to new version in case we need to roll back
-      06 Aug 2022 - JRE - Moving to 1.61.7 before doing more changes
-                          - Implemented differentiated commands fro start and end of each action, where needed
-      08 Aug 2022 - JRE - Moving to 1.61.8 before doing more changes
-                          - Chanhe the way Scan state terminates between frames
-      10 Aug 2022 - JRE - 1.61.8 Working fine, move to version 1.61.9 to keep 1.61.8 as reference
-      13 Aug 2022 - JRE - 1.61.9 Implemented detection of film loaded via filmgate, to prevent FF/RWND
-                        - Move to 1.61.10
-      23 Aug 2022 - JRE - (version in GIT) Improvement on outgoing film management durign scan. Collect all 
-                          until traction switch triggers
-      31 Aug 2022 - JRE - Nice and easy improvement in frame detection
-                        - Increase MinFrameSteps (WstepV) from 176 to 270-275
-                        - Logic behind: 
-                          1/ There is no reason why, for a given build, the capstan will move LESS than n steps to get 
-                             the next frame
-                            1.1/ MORE than n steps might happen (if film slides over capstan), and should handled
-                          2/ Number of steps n depends on stepper motor model and configuration, plus capstan radius
-                          3/ Usign the standard components advised by Torulf, this number is around 270-275
-                          4/ The minumum number of step considered in the Arduino program (as of 1.61) is 176 (WstepV)
-                          5/ Because of this, it sometimes happen (due to factors like sub-optimal FT isolation) that 
-                             the frame is detected before reaching 270 steps (this is typically when the lower part of 
-                             the frame is off limits in the captured image)
-      01 Sep 2022 - JRE - Remove interface to allow RPi to tell us to modify the perforation level threshold
-                          This was mostly to analyze best value, can be removed now.
-                          Also, with yesterday's change (increase of MinFrameSteps), hole detection is more of a confirmation
-      04 Sep 2022 - JRE - Improve error handling in scan function (weird things happen when it is called with no film loaded)
-                          Changes:
-                          - Implement a 10 step limit in CollectOutgoingFilm:
-                            That function is only called from scan, once on each pass. Since scan only advances the capstan 
-                            4 steps per pass, 10 steps on wheel C to collect outgoing film should be more than enough (if film
-                            is loaded, it will be stopped before by the traction switch)
-                          - Implement  higher limit of steps per frame
-                            Even if advancing to next frame could take more steps that average (foir example, if film slides 
-                            over capstan), it should never be more than reasonable. To be safe, we set a limit of 3 times 
-                            DecreaseSpeedFrameSteps (no relation, just take as a reference for number of steps per frame)
-                          - Because of those two previous changes, we need to implement additional return codes for scan 
-                            function, so it cannot be a boolean anymore (we create an enum)
-                            - Before
-                              - False: Frame detected
-                              - True: No frame detected, continue
-                            - Now
-                              - SCAN_NO_FRAME_DETECTED: No frame detected, keep trying
-                              - SCAN_FRAME_DETECTED: Frame detected
-                              - SCAN_FRAME_DETECTION_ERROR: Error, too many steps advance without finding a frame
-                              - SCAN_TERMINATION_REQUESTED: User asked to stop scan process
-      04 Sep 2022 - JRE - Reduce MinFrameStepsS8 from 280 to 275
-                          - A couple of times scanning process went out of control. Even if we go too far in next frame
-                            (which might happen with the new algorithm) normally the hole detection should get us in sync
-                            for the next frame. To be reviewed.
-      1 Sep 2022 - JRE 
-                        - Sometimes the scanner goes out of sync, and does not recover by itself. Stragely enough, if we 
-                          restart the UI it seems to recover, when tgh sync is (should be) mostyl an Arduino thing.
-                          Actions taken:
-                          - Trying to find better values for PerforationThresholdLevel, MinFrameStepsS8, 
-                            DecreaseSpeedFrameStepsS8
-                          - Created an enum to control debug mode. We have 3 modes now:
-                            - PT_Level: Send to serial plotter photo transistor detected level
-                            - FrameSteps: Send to serial plotter number of steps per frame detected
-                            - DebugInfo: Send to Monitor seria debug info
-                            - None: No debug info sent
-      13 Sep 2022 - JRE 
-                        - Finally the problem refered above (out of sync until UI restart) was not a problem in Arduino code (as
-                          the use case shown) but on the UI. The flag indicating a new frame was avalable was not reset at the right time,
-                          so when launching the scan process a second time it was trying to get frames totalyl out of sync with Arduino.
-                          Corrected in the UI
-                        - Changed the debug flag to be able to set 3 different debug modes: Debug info, PT levels, and number of steps per frame
-                          - Also set serial speed to 115200, the restriction raised beforre is not valid (actually, we were logging PT too often)
-                        - Find best values so far (at least for me)
-                          - FetchFrameScanSpeed = 1000
-                          - PerforationThresholdLevel = 140
-                          - MinFrameStepsS8 = 275
-                          - DecreaseSpeedFrameStepsS8 = 270
-                        - UV led left on during all scanning session (until Stop Scan button is pressed)
-                          - Before it was turned off between frames, my mistake
-                        - Enabled once more the 'LastTime' update in 'scan' function. Actually it helps to stop at the righ place (but no miracles)
-                        - Prevent inserting in even tqueue events with value 0 (for some reason they arrive, even if Raspberry does not send them)
-      16 Sep 2022 - JRE 
-                        - Ran out of dynamic memory, too many debug strings: Supress those non-essential, shorten the others
-                        - Implement new API to allow reducing rwnd/ff speed from UI (to perform film cleaning)
-                        - Bug fixed: After rewind/FF, neutral was not reset for motors B and C 
-                        - Renamed 'check' to 'IsHoleDetected', an dalso moved some of the logic outside of it, to make it more atomic.
-                        - Removed some redundant code from 'scan' (already done by check/IsHoleDetected)
-      19 Sep 2022 - JRE 
-                        - Improve algorithm of 'FilmInFilmGate' to avoid false positives
-                          - Because of this improvement, warning before proceeding with RW/FF is removed
-                        - Improve (and simplify) algorithm of movie forward
-      20 Sep 2022 - JRE 
-                        - Implement Progressive deceleration when stopping rwnd/FF
-                          - Implement equivalent algorythm for acceleration
-                        - Implement notification of rwnd/ff termination to RPi
-                        - Reorganize command numbers: BEWARE NOT TO MIX WITH OLDER VERSIONS OF JRE UI (numbers for command in Torulf version do not change)
+This tool is a fork of the original user interface application of T-Scann 8
+
+Some additional features of this version include:
+- PiCamera 2 integration
+- Use of Tkinter instead of Pygame
+- Automatic exposure support
+- Fast forward support
+
+Licensed under a MIT LICENSE.
+
+More info in README.md file
 */
+
+#define __author__      "Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2022, Juan Remirez de Esparza"
+#define __credits__     "Juan Remirez de Esparza"
+#define __license__     "MIT"
+#define __version__     "0.9beta"
+#define __maintainer__  "Juan Remirez de Esparza"
+#define __email__       "jremirez@hotmail.com"
+#define __status__      "Development"
 
 #include <Wire.h>
 #include <stdio.h>
@@ -186,10 +92,10 @@ int PerforationMinLevel = 50;      // detector pulse low level, originally hardc
 int PerforationThresholdLevelR8 = 210;          // detector pulse level: Specific for R8
 int PerforationThresholdLevelS8 = 210;          // detector pulse level: Specific for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;          // detector pulse level (Torulf: 250, JRE:160, going down, detect earlier)
-int MinFrameStepsR8 = 265;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
+int MinFrameStepsR8 = 263;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
 int MinFrameStepsS8 = 275;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200, JRE: 280 (285 definitively too much)
 int MinFrameSteps = MinFrameStepsS8;            // Minimum number of steps to allow frame detection (less than this cannot happen) - Torulf:200
-int DecreaseSpeedFrameStepsR8 = 255;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
+int DecreaseSpeedFrameStepsR8 = 253;          // JRE: Specific value for Regular 8 (Torulf: 270, JRE: 280)
 int DecreaseSpeedFrameStepsS8 = 265;          // JRE: Specific value for Super 8 (Torulf: 290, JRE: 280)
 int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;            // JRE: Number of steps at which we decrease motor speed, to allow precise frame detection (defaults to S8)
 // ------------------------------------------------------------------------------------------
