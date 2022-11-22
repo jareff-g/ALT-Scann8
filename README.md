@@ -12,6 +12,7 @@ Some of the changes done over original version:
 - Support for automatic exposure, with optional adjustable adaptation delay (enabled by default)
 - Support for automatic white balance, with optional adjustable adaptation delay (disabled by default)
 - Fast-forward added, plus protection blocking FF/Rwnd if film present in filmgate
+- Settings saved when exiting, so that it is easier to continue from the same point if applications need to be restarted
 
 # ALT-Scann8-Controller
 
