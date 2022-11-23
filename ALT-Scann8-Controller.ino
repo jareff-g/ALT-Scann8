@@ -36,7 +36,7 @@ enum {
   FrameSteps,
   DebugInfo,
   None
-} DebugState = PT_Level;
+} DebugState = None;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000

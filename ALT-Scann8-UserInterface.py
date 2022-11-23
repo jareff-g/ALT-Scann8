@@ -47,8 +47,6 @@ import sys
 import getopt
 import numpy
 
-import cv2
-
 try:
     import smbus
     try:
