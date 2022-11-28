@@ -9,7 +9,7 @@ Some additional features of this version include:
 - Automatic exposure support
 - Fast forward support
 
-Licensed under a MIT LICENSE.
+  Licensed under a MIT LICENSE.
 
 More info in README.md file
 */
@@ -27,8 +27,8 @@ More info in README.md file
 #include <stdio.h>
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
-int MaxPT = 0;
-int MinPT = 5000;
+int MaxPT = 200;
+int MinPT = 0;
 
 
 enum {
@@ -89,15 +89,14 @@ int RewindSpeed = 4000;                      // Initial delay in microseconds us
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
 int PerforationMinLevel = 50;      // Phototransistor reported value, min level (originalyl hardcoded)
-int PerforationThresholdLevelR8 = 210;                          // Default value for R8
-int PerforationThresholdLevelS8 = 210;                          // Default value for S8
+int PerforationThresholdLevelR8 = 200;                          // Default value for R8
+int PerforationThresholdLevelS8 = 80;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int MinFrameStepsR8 = 263;            // Default value for R8
-int MinFrameStepsS8 = 275;            // Default value for S8
+int MinFrameStepsR8 = 257;            // Default value for R8
+int MinFrameStepsS8 = 285;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsR8 = MinFrameStepsR8-10;         // Default value for R8
-int DecreaseSpeedFrameStepsS8 = MinFrameStepsS8-10;         // Default value for S8
-int DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;    // Steps at which the scanning speed starts to slow down to improve detection
+int DecreaseSpeedFrameStepsBefore = 10;
+int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
@@ -108,6 +107,7 @@ int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
 
 int LastFrameSteps = 0;                     // stores number of steps
 
+boolean IsS8 = true;
 
 boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
@@ -250,15 +250,17 @@ void loop() {
             DebugPrint(">Next fr.");
             break;
           case 18:  // Select R8 film
-            DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsR8;
+            IsS8 = false;
             MinFrameSteps = MinFrameStepsR8;
+            DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
             PerforationThresholdLevel = PerforationThresholdLevelR8;
             OriginalMinFrameSteps = MinFrameSteps;
             OriginalPerforationThresholdLevel = PerforationThresholdLevel;
             break;
           case 19:  // Select S8 film
-            DecreaseSpeedFrameSteps = DecreaseSpeedFrameStepsS8;
+            IsS8 = true;
             MinFrameSteps = MinFrameStepsS8;
+            DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
             PerforationThresholdLevel = PerforationThresholdLevelS8;
             OriginalMinFrameSteps = MinFrameSteps;
             OriginalPerforationThresholdLevel = PerforationThresholdLevel;
@@ -291,14 +293,25 @@ void loop() {
             if (MinFrameSteps < 300)
               MinFrameSteps++;
               OriginalMinFrameSteps = MinFrameSteps;
+              if (IsS8)
+                MinFrameStepsS8 = MinFrameSteps;
+              else
+                MinFrameStepsR8 = MinFrameSteps;
+              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
             break;
           case 53:
             if (MinFrameSteps > 100)
               MinFrameSteps--;
               OriginalMinFrameSteps = MinFrameSteps;
+              if (IsS8)
+                MinFrameStepsS8 = MinFrameSteps;
+              else
+                MinFrameStepsR8 = MinFrameSteps;
+              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
             break;
           case 60: // Rewind
-            if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+          case 64: // Rewind unconditional
+            if (FilmInFilmgate() and Ic == 60) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
               DebugPrint("Rwnd err"); 
               EventForRPi = 64;
               digitalWrite(13, HIGH);
@@ -323,7 +336,8 @@ void loop() {
             delay(50);
             break;
           case 61:  // Fast Forward
-            if (FilmInFilmgate()) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+          case 65:  // Fast Forward unconditional
+            if (FilmInFilmgate() and Ic == 61) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
               DebugPrint("FF err"); 
               EventForRPi = 65; 
               digitalWrite(13, HIGH);
@@ -523,11 +537,9 @@ void CollectOutgoingFilm(void) {
       TractionStopActive = digitalRead(TractionStopPin);
   
       if (!TractionStopActive) {
+        //delayMicroseconds(1000);
         digitalWrite(MotorC_Stepper, LOW); 
-        delayMicroseconds(1000);
         digitalWrite(MotorC_Stepper, HIGH); 
-        delayMicroseconds(1000);
-        digitalWrite(MotorC_Stepper, LOW); 
         StepCount++;
       }
       else {
@@ -539,7 +551,9 @@ void CollectOutgoingFilm(void) {
         break;
         */
       }
-    } while (!TractionStopActive && StepCount < 10); // 10 should be enough. This function is called only from scan, and each pass it performs a max of 4 steps
+    } while (!TractionStopActive && StepCount < 1); // 10 should be enough. This function is called only from scan, and each pass it performs a max of 4 steps
+    delayMicroseconds(1000);
+    digitalWrite(MotorC_Stepper, LOW); 
   } 
 }
 
@@ -550,7 +564,7 @@ int GetLevelPT() {
   MaxPT = max(SignalLevel, MaxPT);
   MinPT = min(SignalLevel, MinPT);
   if (DebugState == PT_Level)
-    count = (count+1) % 20;  // Report only one in twenty
+    count = (count+1) % 10;  // Report only one in twenty
     if (count == 0)
       SerialPrintInt(SignalLevel);
 
@@ -560,11 +574,11 @@ int GetLevelPT() {
 boolean FilmInFilmgate() {
   int SignalLevel;
   boolean retvalue = false;
-  int min=300, max=0;
+  int mini=300, maxi=0;
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
   UVLedOn = true;
-  delay(200);  // Give time to FT to stabilize
+  delay(500);  // Give time to FT to stabilize
 
 
   // MinFrameSteps used here as a reference, just to skip two frames in worst case
@@ -573,15 +587,14 @@ boolean FilmInFilmgate() {
     digitalWrite(MotorB_Stepper, LOW); 
     digitalWrite(MotorB_Stepper, HIGH); 
     SignalLevel = GetLevelPT();
-    if (SignalLevel > max) max = SignalLevel;
-    if (SignalLevel < min) min = SignalLevel;
+    if (SignalLevel > maxi) maxi = SignalLevel;
+    if (SignalLevel < mini) mini = SignalLevel;
   }
   digitalWrite(MotorB_Stepper, LOW); 
   analogWrite(11, 0); // Turn off UV LED
   UVLedOn = false;
 
-
-  if (abs(max-min) > 0.7*(MaxPT-MinPT))
+  if (abs(maxi-mini) > 0.5*(MaxPT-MinPT))
     retvalue = true;
 
   return(retvalue);

@@ -849,6 +849,7 @@ def rewind_movie():
             return()
         """
         RewindMovieActive = True
+        # Update button text
         Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         button_status_change_except(Rewind_btn, RewindMovieActive)
@@ -856,11 +857,18 @@ def rewind_movie():
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
         hide_preview()
-        tk.messagebox.showerror(title='Error during rewind',
-                                message='It seems there is film loaded via filmgate. \
-                                     Please route it via upper path.')
+        confirm = tk.messagebox.askyesno(title='Error during rewind',
+                                         message='It seems there is film loaded via filmgate. \
+                                         \r\nAre you sure you want to proceed?')
         display_preview()
-        RewindMovieActive = False
+        if confirm:
+            time.sleep(0.2)
+            if not SimulatedRun:
+                send_arduino_command(64)    # Forced rewind, no filmgate check
+                # Invoke fast_forward_loop a first time when fast-forward starts
+                win.after(5, rewind_loop)
+        else:
+            RewindMovieActive = False
     elif RewindEndOutstanding:
         RewindMovieActive = False
 
@@ -869,7 +877,6 @@ def rewind_movie():
         # Enable/Disable related buttons
         button_status_change_except(Rewind_btn, RewindMovieActive)
 
-    # Update button text
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
@@ -917,18 +924,26 @@ def fast_forward_movie():
             return ()
         """
         FastForwardActive = True
+        # Update button text
         FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
         # Enable/Disable related buttons
         button_status_change_except(FastForward_btn, FastForwardActive)
-        # Invoke fast_forward_loop a first time shen fast-forward starts
+        # Invoke fast_forward_loop a first time when fast-forward starts
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
         hide_preview()
-        tk.messagebox.showerror(title='Error during fast forward',
-                                message='It seems there is film loaded via filmgate. \
-                                     Please route it via upper path.')
+        confirm = tk.messagebox.askyesno(title='Error during fast forward',
+                                         message='It seems there is film loaded via filmgate. \
+                                         \r\nAre you sure you want to proceed?')
         display_preview()
-        FastForwardActive = False
+        if confirm:
+            time.sleep(0.2)
+            if not SimulatedRun:
+                send_arduino_command(65)    # Forced FF, no filmgate check
+                # Invoke fast_forward_loop a first time when fast-forward starts
+                win.after(5, fast_forward_loop)
+        else:
+            FastForwardActive = False
     elif FastForwardEndOutstanding:
         FastForwardActive = False
 
@@ -937,7 +952,6 @@ def fast_forward_movie():
         # Enable/Disable related buttons
         button_status_change_except(FastForward_btn, FastForwardActive)
 
-    # Update button text
     if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
