@@ -18,7 +18,7 @@ More info in README.md file
 #define __copyright__   "Copyright 2022, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "0.9beta"
+#define __version__     "0.9.1beta"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -90,10 +90,10 @@ int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
 int PerforationMinLevel = 50;      // Phototransistor reported value, min level (originalyl hardcoded)
 int PerforationThresholdLevelR8 = 200;                          // Default value for R8
-int PerforationThresholdLevelS8 = 80;                          // Default value for S8
+int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int MinFrameStepsR8 = 257;            // Default value for R8
-int MinFrameStepsS8 = 285;            // Default value for S8
+int MinFrameStepsS8 = 283;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
 int DecreaseSpeedFrameStepsBefore = 10;
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
@@ -132,6 +132,7 @@ boolean ALT_Scann8_UI_detected = false;
 #define QUEUE_SIZE 20
 volatile struct {
   int Data[QUEUE_SIZE];
+  int Param[QUEUE_SIZE];
   int in;
   int out;
 } CommandQueue;
@@ -185,9 +186,10 @@ void setup() {
   CommandQueue.out = 0;
 }
 void loop() {
+  int param;
   while (1) {
     if (dataInQueue()) {
-      Ic = pop();   // Get next command from queue if one exists
+      Ic = pop(&param);   // Get next command from queue if one exists
       if (!ALT_Scann8_UI_detected && Ic != 1) {
         Ic = 0; // Drop dequeued commend until ALT UI version detected
         DebugPrint("UI req no id"); 
@@ -220,10 +222,16 @@ void loop() {
       case Sts_Idle:
         switch (Ic) {
           case 1:
-            ALT_Scann8_UI_detected = true;
-            DebugPrint("ALT UI Identified"); 
-            EventForRPi = 2;  // Tell ALT UI that ALT controller is present too
-            digitalWrite(13, HIGH);
+            if (param == 1) {
+              ALT_Scann8_UI_detected = true;
+              DebugPrint("ALT UI OK"); 
+              EventForRPi = 1;  // Tell ALT UI that ALT controller is present too
+              digitalWrite(13, HIGH);
+            }
+            else {
+              // UI version does not support I2C multi-byte exchange, can't work
+              DebugPrint("Pre 0.9.1 ALT UI - KO"); 
+            }
             break;
           case 10:
             DebugPrint(">Scan"); 
@@ -280,34 +288,21 @@ void loop() {
             delay(50);
             break;
           case 50:
-            if (PerforationThresholdLevel < 250)
-              PerforationThresholdLevel++;
-              OriginalPerforationThresholdLevel = PerforationThresholdLevel;
-            break;
-          case 51:
-            if (PerforationThresholdLevel > 50)
-              PerforationThresholdLevel--;
-              OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+            if (param >= 0 && param <= 900)
+              PerforationThresholdLevel = param;
+              OriginalPerforationThresholdLevel = param;
+              DebugPrintAux(">PTLevel",param);
             break;
           case 52:
-            if (MinFrameSteps < 300)
-              MinFrameSteps++;
-              OriginalMinFrameSteps = MinFrameSteps;
+            if (param >= 100 && param <= 300)
+              MinFrameSteps = param;
+              OriginalMinFrameSteps = param;
               if (IsS8)
-                MinFrameStepsS8 = MinFrameSteps;
+                MinFrameStepsS8 = param;
               else
-                MinFrameStepsR8 = MinFrameSteps;
+                MinFrameStepsR8 = param;
               DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-            break;
-          case 53:
-            if (MinFrameSteps > 100)
-              MinFrameSteps--;
-              OriginalMinFrameSteps = MinFrameSteps;
-              if (IsS8)
-                MinFrameStepsS8 = MinFrameSteps;
-              else
-                MinFrameStepsR8 = MinFrameSteps;
-              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+              DebugPrintAux(">MinSteps",param);
             break;
           case 60: // Rewind
           case 64: // Rewind unconditional
@@ -735,12 +730,15 @@ ScanResult scan(int Ic) {
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
 // JRE 13/09/22: Theoretically this might happen any time, thu Ic might change in the middle of the loop. Adding a queue...
 void receiveEvent(int byteCount) {
-  int IncomingIc;
+  int IncomingIc, param = 0;
 
-  IncomingIc = Wire.read();
+  if (Wire.available())
+    IncomingIc = Wire.read();
+    param =  Wire.read();
+    param +=  256*Wire.read();
 
   if (IncomingIc > 0) {
-    push(IncomingIc); // No error treatment for now
+    push(IncomingIc, param); // No error treatment for now
   }
 }
 
@@ -751,10 +749,12 @@ void sendEvent() {
   EventForRPi = 0;
 }
 
-boolean push(int IncomingIc) {
+boolean push(int IncomingIc, int param) {
     boolean retvalue = false;
     if ((CommandQueue.in+1) % QUEUE_SIZE != CommandQueue.out) {
-      CommandQueue.Data[CommandQueue.in++] = IncomingIc;
+      CommandQueue.Data[CommandQueue.in] = IncomingIc;
+      CommandQueue.Param[CommandQueue.in] = param;
+      CommandQueue.in++;
       CommandQueue.in %= QUEUE_SIZE;
       retvalue = true;
     }
@@ -762,10 +762,13 @@ boolean push(int IncomingIc) {
     return(retvalue);
 }
 
-int pop(void) {
+int pop(int * param) {
     int retvalue = -1;  // default return value: -1 (error)
     if (CommandQueue.out != CommandQueue.in) {
-      retvalue = CommandQueue.Data[CommandQueue.out++];
+      retvalue = CommandQueue.Data[CommandQueue.out];
+      if (param != NULL)
+        *param =  CommandQueue.Param[CommandQueue.out];
+      CommandQueue.out++;
       CommandQueue.out %= QUEUE_SIZE;
     }
     // else: Queue empty: Nothing to do

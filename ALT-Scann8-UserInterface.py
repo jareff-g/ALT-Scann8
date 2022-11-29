@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "0.9beta"
+__version__ = "0.9.1beta"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -107,6 +107,12 @@ ScriptDir = os.path.dirname(
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
+MinFrameStepsS8 = 290
+MinFrameStepsR8 = 260
+MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
+PTLevelS8 = 80
+PTLevelR8 = 200
+PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
 FrameArrivalTime = 0
@@ -199,17 +205,25 @@ SessionData = {
     "FilmHoleY": str(FilmHoleY),
     "NegativeCaptureActive": str(NegativeCaptureActive),
     "HdrCaptureActive": str(HdrCaptureActive),
-    "HqCaptureActive": str(HqCaptureActive)
+    "HqCaptureActive": str(HqCaptureActive),
+    "FilmType": 'S8',
+    "MinFrameStepsS8": 290,
+    "MinFrameStepsR8":  260,
+    "MinFrameSteps":  290,
+    "PTLevelS8":  80,
+    "PTLevelR8":  200,
+    "PTLevel":  80
 }
 
 
-def send_arduino_command(cmd):
+def send_arduino_command(cmd, param=12345):
     global SimulatedRun, ALT_Scann8_controller_detected
 
     if not SimulatedRun:
         if ALT_Scann8_controller_detected or cmd == 1:
-            i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
-            logging.error("Sending command %i to Arduino", cmd)
+            #i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
+            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param/256)])  # Send command to Arduino
+            logging.debug("Sending command %i to Arduino", cmd)
         else:
             logging.error("Trying to send command %i to Arduino, "
                           "but ALT version not detected", cmd)
@@ -709,6 +723,43 @@ def colour_gain_auto():
         else:  # Add fake values for simulated run
             colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
             colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
+
+
+def min_frame_steps_selection(updown):
+    global min_frame_steps_spinbox, min_frame_steps_str
+    global MinFrameSteps
+    MinFrameSteps = int(min_frame_steps_spinbox.get())
+    SessionData["MinFrameSteps"] = MinFrameSteps
+    SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
+    send_arduino_command(52, MinFrameSteps)
+
+
+def min_frame_steps_spinbox_focus_out(event):
+    global min_frame_steps_spinbox, min_frame_steps_str
+    global MinFrameSteps
+    MinFrameSteps = int(min_frame_steps_spinbox.get())
+    SessionData["MinFrameSteps"] = MinFrameSteps
+    SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
+    send_arduino_command(52, MinFrameSteps)
+
+
+def pt_level_selection(updown):
+    global pt_level_spinbox, pt_level_str
+    global PTLevel
+    PTLevel = int(pt_level_spinbox.get())
+    SessionData["PTLevel"] = PTLevel
+    SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
+    send_arduino_command(50, PTLevel)
+
+
+def pt_level_spinbox_focus_out(event):
+    global pt_level_spinbox, pt_level_str
+    global PTLevel
+    PTLevel = int(pt_level_spinbox.get())
+    SessionData["PTLevel"] = PTLevel
+    SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
+    send_arduino_command(50, PTLevel)
+
 
 def stabilization_delay_down():
     global stabilization_delay, CaptureStabilizationDelay
@@ -1220,25 +1271,50 @@ def PiCamera2_preview():
 def set_s8():
     global SimulatedRun
     global film_type_R8_btn, film_type_S8_btn
+    global PTLevel, PTLevelS8
+    global MinFrameSteps, MinFrameStepsS8
+    global pt_level_str, min_frame_steps_str
 
     film_type_S8_btn.config(relief=SUNKEN)
     film_type_R8_btn.config(relief=RAISED)
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
+
+    PTLevel = PTLevelS8
+    SessionData["PTLevel"] = PTLevel
+    pt_level_str.set(str(PTLevel))
+    MinFrameSteps = MinFrameStepsS8
+    SessionData["MinFrameSteps"] = MinFrameSteps
+    min_frame_steps_str.set(str(MinFrameSteps))
     if not SimulatedRun:
         send_arduino_command(19)
+        send_arduino_command(50, PTLevel)
+        send_arduino_command(52, MinFrameSteps)
+
 
 
 def set_r8():
     global SimulatedRun
     global film_type_R8_btn, film_type_S8_btn
+    global PTLevel, PTLevelR8
+    global MinFrameSteps, MinFrameStepsR8
+    global pt_level_str, min_frame_steps_str
 
     film_type_R8_btn.config(relief=SUNKEN)
     film_type_S8_btn.config(relief=RAISED)
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
+
+    PTLevel = PTLevelR8
+    SessionData["PTLevel"] = PTLevel
+    pt_level_str.set(str(PTLevel))
+    MinFrameSteps = MinFrameStepsR8
+    SessionData["MinFrameSteps"] = MinFrameSteps
+    min_frame_steps_str.set(str(MinFrameSteps))
     if not SimulatedRun:
         send_arduino_command(18)
+        send_arduino_command(50, PTLevel)
+        send_arduino_command(52, MinFrameSteps)
 
 
 def perf_up():
@@ -1878,11 +1954,13 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
-    elif ArduinoTrigger == 2:  # ALT Controller identified
+    elif ArduinoTrigger == 1:  # ALT Controller 0.9.1 or higher identified
         ALT_Scann8_controller_detected = True
-        logging.info("Received ALT ID answer from Arduino")
+        logging.info("Received ALT ID answer from Arduino - OK")
+    elif ArduinoTrigger == 2:  # ALT Controller identified
+        logging.info("Received pre-0.9.1 ALT ID answer from Arduino - KO")
     elif ArduinoTrigger == 3:  # ALT Controller was reloaded, need to identify again
-        send_arduino_command(1)
+        send_arduino_command(1, 1)
         logging.info("Received ALT ID request from Arduino, resending ID")
     elif ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
@@ -2064,6 +2142,9 @@ def load_session_data():
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global exposure_frame_value_label
+    global min_frame_steps_str, pt_level_str
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8
+    global PTLevel, PTLevelS8, PTLevelR8
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2095,6 +2176,25 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
+            if ExperimentalMode:
+                if 'MinFrameSteps' in SessionData:
+                    MinFrameSteps = SessionData["MinFrameSteps"]
+                    min_frame_steps_str.set(str(MinFrameSteps))
+                    if not SimulatedRun:
+                        send_arduino_command(52, MinFrameSteps)
+                if 'MinFrameStepsS8' in SessionData:
+                    MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
+                if 'MinFrameStepsR8' in SessionData:
+                    MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
+                if 'PTLevel' in SessionData:
+                    PTLevel = SessionData["PTLevel"]
+                    pt_level_str.set(str(PTLevel))
+                    if not SimulatedRun:
+                        send_arduino_command(50, PTLevel)
+                if 'PTLevelS8' in SessionData:
+                    PTLevelS8 = SessionData["PTLevelS8"]
+                if 'PTLevelR8' in SessionData:
+                    PTLevelR8 = SessionData["PTLevelR8"]
             if ExperimentalMode and IsPiCamera2:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -2389,7 +2489,11 @@ def build_ui():
     global preview_border_frame
     global draw_capture_label
     global hdr_btn, hq_btn, turbo_btn
-
+    global min_frame_steps_spinbox, min_frame_steps_str
+    global MinFrameSteps
+    global pt_level_spinbox, pt_level_str
+    global PTLevel
+    global min_frame_steps_spinbox, pt_level_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2720,21 +2824,39 @@ def build_ui():
             #experimental_frame.place(x=900, y=790)
 
             # Up/Down buttons to move up/down perforation threshold/frame steps in Arduino
-            frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align (perf/steps)", width=8, height=2,
+            frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align", width=16, height=2,
                                                  font=("Arial", 7))
             frame_alignment_frame.pack(side=LEFT, padx=5)
-            perf_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=perf_up,
-                                          activebackground='green', activeforeground='white', font=("Arial", 7))
-            perf_up_btn.grid(column=0, row=0)
-            perf_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=perf_dn,
-                                          activebackground='green', activeforeground='white', font=("Arial", 7))
-            perf_dn_btn.grid(column=0, row=1)
-            steps_up_btn = Button(frame_alignment_frame, text="↑", width=5, height=1, command=steps_up,
-                                          activebackground='green', activeforeground='white', font=("Arial", 7))
-            steps_up_btn.grid(column=1, row=0)
-            steps_dn_btn = Button(frame_alignment_frame, text="↓", width=5, height=1, command=steps_dn,
-                                          activebackground='green', activeforeground='white', font=("Arial", 7))
-            steps_dn_btn.grid(column=1, row=1)
+            # Spinbox to select MinFrameSteps on Arduino
+            min_frame_steps_label = tk.Label(frame_alignment_frame,
+                                                     text='Steps/frame:',
+                                                     width=10, font=("Arial", 7))
+            min_frame_steps_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+            min_frame_steps_str = tk.StringVar(value=str(MinFrameSteps))
+            min_frame_steps_selection_aux = frame_alignment_frame.register(
+                min_frame_steps_selection)
+            min_frame_steps_spinbox = tk.Spinbox(
+                frame_alignment_frame,
+                command=(min_frame_steps_selection_aux, '%d'), width=8,
+                textvariable=min_frame_steps_str, from_=100, to=300, font=("Arial", 7))
+            min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+            min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
+            min_frame_steps_selection('down')
+            # Spinbox to select PTLevel on Arduino
+            pt_level_label = tk.Label(frame_alignment_frame,
+                                                     text='PT Level:',
+                                                     width=10, font=("Arial", 7))
+            pt_level_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+            pt_level_str = tk.StringVar(value=str(PTLevel))
+            pt_level_selection_aux = frame_alignment_frame.register(
+                pt_level_selection)
+            pt_level_spinbox = tk.Spinbox(
+                frame_alignment_frame,
+                command=(pt_level_selection_aux, '%d'), width=8,
+                textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
+            pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+            pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
+            pt_level_selection('down')
 
             # Sharpness, control to allow playign with the values and see the results
             sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
@@ -2815,7 +2937,7 @@ def main(argv):
 
     if not SimulatedRun:
         arduino_listen_loop()
-        send_arduino_command(1)
+        send_arduino_command(1, 1)
 
     build_ui()
 
