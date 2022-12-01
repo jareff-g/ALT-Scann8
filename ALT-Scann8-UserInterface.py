@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "0.9.1beta"
+__version__ = "1.0"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -108,10 +108,10 @@ PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
 MinFrameStepsS8 = 290
-MinFrameStepsR8 = 260
+MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
 PTLevelS8 = 80
-PTLevelR8 = 200
+PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
@@ -2176,25 +2176,6 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
-            if ExperimentalMode:
-                if 'MinFrameSteps' in SessionData:
-                    MinFrameSteps = SessionData["MinFrameSteps"]
-                    min_frame_steps_str.set(str(MinFrameSteps))
-                    if not SimulatedRun:
-                        send_arduino_command(52, MinFrameSteps)
-                if 'MinFrameStepsS8' in SessionData:
-                    MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
-                if 'MinFrameStepsR8' in SessionData:
-                    MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
-                if 'PTLevel' in SessionData:
-                    PTLevel = SessionData["PTLevel"]
-                    pt_level_str.set(str(PTLevel))
-                    if not SimulatedRun:
-                        send_arduino_command(50, PTLevel)
-                if 'PTLevelS8' in SessionData:
-                    PTLevelS8 = SessionData["PTLevelS8"]
-                if 'PTLevelR8' in SessionData:
-                    PTLevelR8 = SessionData["PTLevelR8"]
             if ExperimentalMode and IsPiCamera2:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -2246,6 +2227,25 @@ def load_session_data():
                 if 'GainBlue' in SessionData:
                     GainBlue = float(SessionData["GainBlue"])
                     colour_gains_blue_value_label.config(text="Auto" if CurrentAwbAuto else str(round(GainBlue, 1)))
+                # Recover frame alignment values
+                if 'MinFrameSteps' in SessionData:
+                    MinFrameSteps = SessionData["MinFrameSteps"]
+                    min_frame_steps_str.set(str(MinFrameSteps))
+                    if not SimulatedRun:
+                        send_arduino_command(52, MinFrameSteps)
+                if 'MinFrameStepsS8' in SessionData:
+                    MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
+                if 'MinFrameStepsR8' in SessionData:
+                    MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
+                if 'PTLevel' in SessionData:
+                    PTLevel = SessionData["PTLevel"]
+                    pt_level_str.set(str(PTLevel))
+                    if not SimulatedRun:
+                        send_arduino_command(50, PTLevel)
+                if 'PTLevelS8' in SessionData:
+                    PTLevelS8 = SessionData["PTLevelS8"]
+                if 'PTLevelR8' in SessionData:
+                    PTLevelR8 = SessionData["PTLevelR8"]
 
         display_preview()
 
@@ -2654,7 +2654,7 @@ def build_ui():
     Exit_btn.pack(side=BOTTOM, padx=(5, 0), pady=(5, 0))
 
 
-    # Create Experimental frame to play with ColourGains
+    # Create extended frame for expert adn experimental areas
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
         #extended_frame.place(x=30, y=790)
@@ -2818,45 +2818,45 @@ def build_ui():
         film_hole_bottom_frame = Frame(film_hole_control_frame)  # frame just to add space at the bottom
         film_hole_bottom_frame.pack(side=BOTTOM, pady=1)
 
+        # Frame to add frame align controls
+        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
+                                           font=("Arial", 7))
+        frame_alignment_frame.pack(side=LEFT, padx=5)
+        # Spinbox to select MinFrameSteps on Arduino
+        min_frame_steps_label = tk.Label(frame_alignment_frame,
+                                         text='Steps/frame:',
+                                         width=10, font=("Arial", 7))
+        min_frame_steps_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+        min_frame_steps_str = tk.StringVar(value=str(MinFrameSteps))
+        min_frame_steps_selection_aux = frame_alignment_frame.register(
+            min_frame_steps_selection)
+        min_frame_steps_spinbox = tk.Spinbox(
+            frame_alignment_frame,
+            command=(min_frame_steps_selection_aux, '%d'), width=8,
+            textvariable=min_frame_steps_str, from_=100, to=300, font=("Arial", 7))
+        min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+        min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
+        min_frame_steps_selection('down')
+        # Spinbox to select PTLevel on Arduino
+        pt_level_label = tk.Label(frame_alignment_frame,
+                                  text='PT Level:',
+                                  width=10, font=("Arial", 7))
+        pt_level_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        pt_level_str = tk.StringVar(value=str(PTLevel))
+        pt_level_selection_aux = frame_alignment_frame.register(
+            pt_level_selection)
+        pt_level_spinbox = tk.Spinbox(
+            frame_alignment_frame,
+            command=(pt_level_selection_aux, '%d'), width=8,
+            textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
+        pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
+        pt_level_selection('down')
+
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
             experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
             #experimental_frame.place(x=900, y=790)
-
-            # Up/Down buttons to move up/down perforation threshold/frame steps in Arduino
-            frame_alignment_frame = LabelFrame(experimental_frame, text="Frame align", width=16, height=2,
-                                                 font=("Arial", 7))
-            frame_alignment_frame.pack(side=LEFT, padx=5)
-            # Spinbox to select MinFrameSteps on Arduino
-            min_frame_steps_label = tk.Label(frame_alignment_frame,
-                                                     text='Steps/frame:',
-                                                     width=10, font=("Arial", 7))
-            min_frame_steps_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
-            min_frame_steps_str = tk.StringVar(value=str(MinFrameSteps))
-            min_frame_steps_selection_aux = frame_alignment_frame.register(
-                min_frame_steps_selection)
-            min_frame_steps_spinbox = tk.Spinbox(
-                frame_alignment_frame,
-                command=(min_frame_steps_selection_aux, '%d'), width=8,
-                textvariable=min_frame_steps_str, from_=100, to=300, font=("Arial", 7))
-            min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
-            min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
-            min_frame_steps_selection('down')
-            # Spinbox to select PTLevel on Arduino
-            pt_level_label = tk.Label(frame_alignment_frame,
-                                                     text='PT Level:',
-                                                     width=10, font=("Arial", 7))
-            pt_level_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
-            pt_level_str = tk.StringVar(value=str(PTLevel))
-            pt_level_selection_aux = frame_alignment_frame.register(
-                pt_level_selection)
-            pt_level_spinbox = tk.Spinbox(
-                frame_alignment_frame,
-                command=(pt_level_selection_aux, '%d'), width=8,
-                textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
-            pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
-            pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
-            pt_level_selection('down')
 
             # Sharpness, control to allow playign with the values and see the results
             sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,

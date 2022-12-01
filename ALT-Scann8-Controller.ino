@@ -18,7 +18,7 @@ More info in README.md file
 #define __copyright__   "Copyright 2022, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "0.9.1beta"
+#define __version__     "1.0"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
