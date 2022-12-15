@@ -84,12 +84,12 @@ int FilteredSignalLevel = 0;
 int UVLedBrightness = 250;                   // Brightness UV led, may need to be changed depending on LED type
 unsigned long ScanSpeed = 500 ;              // Delay in microseconds used to adjust speed of stepper motor during scan process
 unsigned long FetchFrameScanSpeed = 5000;    // Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 3000;  // Increment in microseconds of delay to slow down scanning speed, to improve detection
+unsigned long DecreaseScanSpeedStep = 3000;  // Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
 int PerforationMinLevel = 50;      // Phototransistor reported value, min level (originalyl hardcoded)
-int PerforationThresholdLevelR8 = 200;                          // Default value for R8
+int PerforationThresholdLevelR8 = 180;                          // Default value for R8
 int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int MinFrameStepsR8 = 257;            // Default value for R8
@@ -140,7 +140,7 @@ volatile struct {
 void setup() {
 
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
-  Serial.begin(115200);  // As fast as possible for debug, otherwise it slows down execution
+  Serial.begin(500000);  // As fast as possible for debug, otherwise it slows down execution
   
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
@@ -218,6 +218,27 @@ void loop() {
       }
     }
 
+    if (Ic == 50 || Ic == 52) {
+        switch (Ic) {
+          case 50:
+            if (param >= 0 && param <= 900)
+              PerforationThresholdLevel = param;
+              OriginalPerforationThresholdLevel = param;
+              DebugPrintAux(">PTLevel",param);
+            break;
+          case 52:
+            if (param >= 100 && param <= 300)
+              MinFrameSteps = param;
+              OriginalMinFrameSteps = param;
+              if (IsS8)
+                MinFrameStepsS8 = param;
+              else
+                MinFrameStepsR8 = param;
+              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+              DebugPrintAux(">MinSteps",param);
+            break;
+        }      
+    }
     switch (ScanState) {
       case Sts_Idle:
         switch (Ic) {
@@ -286,23 +307,6 @@ void loop() {
             ScanState = Sts_SingleStep;
             MinFrameSteps = 100; // Used to be 100
             delay(50);
-            break;
-          case 50:
-            if (param >= 0 && param <= 900)
-              PerforationThresholdLevel = param;
-              OriginalPerforationThresholdLevel = param;
-              DebugPrintAux(">PTLevel",param);
-            break;
-          case 52:
-            if (param >= 100 && param <= 300)
-              MinFrameSteps = param;
-              OriginalMinFrameSteps = param;
-              if (IsS8)
-                MinFrameStepsS8 = param;
-              else
-                MinFrameStepsR8 = param;
-              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-              DebugPrintAux(">MinSteps",param);
             break;
           case 60: // Rewind
           case 64: // Rewind unconditional
@@ -559,9 +563,11 @@ int GetLevelPT() {
   MaxPT = max(SignalLevel, MaxPT);
   MinPT = min(SignalLevel, MinPT);
   if (DebugState == PT_Level)
-    count = (count+1) % 10;  // Report only one in twenty
-    if (count == 0)
+    count = (count+1) % 20;  // Report only one in twenty
+    if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
       SerialPrintInt(SignalLevel);
+      count = 0;
+    }
 
   return(SignalLevel);
 }
@@ -642,15 +648,13 @@ ScanResult scan(int Ic) {
   analogWrite(11, UVLedBrightness);
   UVLedOn = true;
 
-  PT_SignalLevelRead = GetLevelPT();
-  
   unsigned long CurrentTime = micros();
 
   TractionStopActive = digitalRead(TractionStopPin);
 
   if (FrameStepsDone >= DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
     //ScanSpeed = FetchFrameScanSpeed;
-    ScanSpeed = 5000 + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+    ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
     //DebugPrintAux("SSpeed",ScanSpeed);
   }
 

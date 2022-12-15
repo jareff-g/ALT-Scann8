@@ -1073,7 +1073,7 @@ def capture_save_thread(queue, event, id):
         if message[2] != 0:
             message[0].save('hdrpic-%05d.%i.jpg' % (message[1],message[2]))
         else:
-            message[0].save('picture-%05d.jpg' % message[1])
+            message[0].save('picture-%05d.jpg' % message[1], quality=95)
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1315,26 +1315,6 @@ def set_r8():
         send_arduino_command(18)
         send_arduino_command(50, PTLevel)
         send_arduino_command(52, MinFrameSteps)
-
-
-def perf_up():
-    if not SimulatedRun:
-        send_arduino_command(50)
-
-
-def perf_dn():
-    if not SimulatedRun:
-        send_arduino_command(51)
-
-
-def steps_up():
-    if not SimulatedRun:
-        send_arduino_command(52)
-
-
-def steps_dn():
-    if not SimulatedRun:
-        send_arduino_command(53)
 
 
 def film_hole_up():
@@ -2324,7 +2304,7 @@ def tscann8_init():
     log_path = os.path.dirname(__file__)
     if log_path == "":
         log_path = os.getcwd()
-    log_file_fullpath = log_path + "/ALT-Scann8.debug.log"
+    log_file_fullpath = log_path + "/ALT-Scann8." + time.strftime("%Y%m%d") + ".log"
     logging.basicConfig(
         level=LogLevel,
         format="%(asctime)s [%(levelname)s] %(message)s",
