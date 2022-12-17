@@ -1918,7 +1918,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
         except IOError:
             ArduinoTrigger = 0
             # Log error to console
-            logging.warning("Error while checking incoming event (%i) from Arduino. Will check again.", ArduinoTrigger)
+            logging.debug("Non-critical IOError while checking incoming event from Arduino. Will check again.")
 
     if ArduinoTrigger != 0:
         last_cmd_time = time.time()
