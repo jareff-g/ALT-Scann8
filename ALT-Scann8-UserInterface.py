@@ -79,7 +79,7 @@ FocusZoomPosY = 0.35
 FocusZoomFactorX = 0.2
 FocusZoomFactorY = 0.2
 FreeWheelActive = False
-BaseDir = '/home/juan/Vídeos/'  # dirplats in original code from Torulf
+BaseDir = '/home/juan/Vídeos'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
 CurrentFrame = 0  # bild in original code from Torulf
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
@@ -283,10 +283,11 @@ def set_focus_zoom():
         Focus_btn.config(text='Focus Zoom OFF', bg='red', fg='white', relief=SUNKEN)
         if not SimulatedRun:
             if IsPiCamera2:
-                camera.set_controls({"ScalerCrop": (int(0.35 * ZoomSize[0]), int(0.35 * ZoomSize[1])) +
-                                                   (int(0.2 * ZoomSize[0]), int(0.2 * ZoomSize[1]))})
+                camera.set_controls(
+                    {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
+                                   (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
             else:
-                camera.crop = (0.35, 0.35, 0.2, 0.2)  # Activate camera zoom
+                camera.crop = (FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)  # Activate camera zoom
     else:
         Focus_btn.config(text='Focus Zoom ON', bg=save_bg, fg=save_fg, relief=RAISED)
         if not SimulatedRun:
@@ -2336,6 +2337,7 @@ def tscann8_init():
     else:
         BaseDir = homefolder
     CurrentDir = BaseDir
+    logging.info("BaseDir=%s",BaseDir)
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
