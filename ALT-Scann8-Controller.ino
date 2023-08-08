@@ -529,29 +529,24 @@ boolean FastForwardFilm(int Ic) {
 void CollectOutgoingFilm(void) {
   // --- New code by JRE (to put the new switch to good use)
   unsigned long CurrentTime = micros();
-  int StepCount=0;
 
   if ((CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
-    do {
-      TractionStopActive = digitalRead(TractionStopPin);
-  
-      if (!TractionStopActive) {
-        //delayMicroseconds(1000);
-        digitalWrite(MotorC_Stepper, LOW); 
-        digitalWrite(MotorC_Stepper, HIGH); 
-        StepCount++;
-      }
-      else {
-        TractionStopLastWaitEventTime = CurrentTime;
-        /* This algorythm ois a bit complicated, and not sure it is that useful. Better to have a fixed time to avoid checking too often for traction  stop
-        TractionStopWaitingTime = TractionStopWaitingTime + 2000;
-        if (TractionStopWaitingTime >= 120000)
-          TractionStopWaitingTime = 70000;
-        break;
-        */
-      }
-    } while (!TractionStopActive && StepCount < 1); // 10 should be enough. This function is called only from scan, and each pass it performs a max of 4 steps
-    delayMicroseconds(1000);
+    TractionStopActive = digitalRead(TractionStopPin);
+
+    if (!TractionStopActive) {
+      //delayMicroseconds(1000);
+      digitalWrite(MotorC_Stepper, LOW); 
+      digitalWrite(MotorC_Stepper, HIGH); 
+    }
+    else {
+      TractionStopLastWaitEventTime = CurrentTime;
+      /* This algorythm ois a bit complicated, and not sure it is that useful. Better to have a fixed time to avoid checking too often for traction  stop
+      TractionStopWaitingTime = TractionStopWaitingTime + 2000;
+      if (TractionStopWaitingTime >= 120000)
+        TractionStopWaitingTime = 70000;
+      break;
+      */
+    }
     digitalWrite(MotorC_Stepper, LOW); 
   } 
 }
