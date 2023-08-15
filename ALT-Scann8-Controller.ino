@@ -93,9 +93,9 @@ int PerforationThresholdLevelR8 = 180;                          // Default value
 int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int MinFrameStepsR8 = 257;            // Default value for R8
-int MinFrameStepsS8 = 283;            // Default value for S8
+int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsBefore = 10;
+int DecreaseSpeedFrameStepsBefore = 0;  // No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -113,9 +113,9 @@ boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in ori
 int TractionStopEventCount = 2;
 
 unsigned long TractionStopWaitingTime = 800000;  // JRE: Delay to throttle winding process, avoid it beign too agressive (make sure spring is noo to strong)
+unsigned int CollectFilmFrameCounter = 0;   // New method to collect file, based on number of frames scanned, not in time
 // unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
-unsigned long TractionStopLastWaitEventTime = 0;
 
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
@@ -227,13 +227,14 @@ void loop() {
               DebugPrintAux(">PTLevel",param);
             break;
           case 52:
-            if (param >= 100 && param <= 300)
+            if (param >= 100 && param <= 350)
               MinFrameSteps = param;
               OriginalMinFrameSteps = param;
               if (IsS8)
                 MinFrameStepsS8 = param;
               else
                 MinFrameStepsR8 = param;
+              MinFrameSteps = param;
               DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
               DebugPrintAux(">MinSteps",param);
             break;
@@ -370,10 +371,7 @@ void loop() {
         }
         break;
       case Sts_Scan:
-        if (!TractionStopActive) { // Wind outgoing film on reel C, if traction stop swicth not active
-          delay (5); 
-          digitalWrite(MotorC_Stepper, HIGH);
-        }
+        CollectOutgoingFilm();
         if (Ic == 10) {
           DebugPrint("-Scan"); 
           ScanState = Sts_Idle; // Exit scan loop
@@ -526,29 +524,28 @@ boolean FastForwardFilm(int Ic) {
 }
 
 // ------------- Collect outgoing film
+// New version, collection is triggered by the number of scanned frames.
+// This new method provider a more regular mechanism, and it keeps tension in the film to make sure it advances properly.
+// Anyhow, for better performance, it is advised to use a pinch roller (https://www.thingiverse.com/thing:5583753) 
+// and a microswitch (https://www.thingiverse.com/thing:5541340)
 void CollectOutgoingFilm(void) {
+  static int collect_throttle = 0;  // To make collection softer
   // --- New code by JRE (to put the new switch to good use)
-  unsigned long CurrentTime = micros();
-
-  if ((CurrentTime - TractionStopLastWaitEventTime) >= TractionStopWaitingTime) {
+  if (CollectFilmFrameCounter >= 3 && collect_throttle%4 == 0) {
     TractionStopActive = digitalRead(TractionStopPin);
 
     if (!TractionStopActive) {
       //delayMicroseconds(1000);
       digitalWrite(MotorC_Stepper, LOW); 
       digitalWrite(MotorC_Stepper, HIGH); 
+      DebugPrint("Collecting");
     }
-    else {
-      TractionStopLastWaitEventTime = CurrentTime;
-      /* This algorythm ois a bit complicated, and not sure it is that useful. Better to have a fixed time to avoid checking too often for traction  stop
-      TractionStopWaitingTime = TractionStopWaitingTime + 2000;
-      if (TractionStopWaitingTime >= 120000)
-        TractionStopWaitingTime = 70000;
-      break;
-      */
-    }
+    else
+      CollectFilmFrameCounter = 0;  //Reset counter
+
     digitalWrite(MotorC_Stepper, LOW); 
   } 
+  collect_throttle++;
 }
 
 // ------------- Centralized phototransistor level read ---------------
@@ -653,9 +650,6 @@ ScanResult scan(int Ic) {
     //DebugPrintAux("SSpeed",ScanSpeed);
   }
 
-  // ------------ Stretching film pickup wheel (C) ------ 
-  CollectOutgoingFilm();
-
   //-------------ScanFilm-----------
   if (Ic == 10) {   // UI Requesting to end current scan
     retvalue = SCAN_TERMINATION_REQUESTED; 
@@ -695,7 +689,8 @@ ScanResult scan(int Ic) {
 
   if (FrameDetected) {
     DebugPrint("Frame!"); 
-    LastFrameSteps = FrameStepsDone; 
+    CollectFilmFrameCounter++;
+    LastFrameSteps = FrameStepsDone;
     FrameStepsDone = 0; 
     StartPictureSaveTime = micros();
     // Tell UI (Raspberry PI) a new frame is available for processing
