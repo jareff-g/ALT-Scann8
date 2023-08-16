@@ -524,28 +524,41 @@ boolean FastForwardFilm(int Ic) {
 }
 
 // ------------- Collect outgoing film
-// New version, collection is triggered by the number of scanned frames.
-// This new method provider a more regular mechanism, and it keeps tension in the film to make sure it advances properly.
-// Anyhow, for better performance, it is advised to use a pinch roller (https://www.thingiverse.com/thing:5583753) 
-// and a microswitch (https://www.thingiverse.com/thing:5541340)
+// New version, collection speedd is throttled based on the frequency of microswitch activation.
+// This new method provides a more regular mechanism, and it keeps minimum tension in the film.
+// Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
+// (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
+// tension is not enough for the capstan to pull the film
 void CollectOutgoingFilm(void) {
-  static int collect_throttle = 0;  // To make collection softer
-  // --- New code by JRE (to put the new switch to good use)
-  if (CollectFilmFrameCounter >= 3 && collect_throttle%4 == 0) {
-    TractionStopActive = digitalRead(TractionStopPin);
+  static int collect_throttle = 8; 
+  static int loop_counter = 0; 
+  static boolean WaitTractionStopInactive = false;
 
+  static unsigned long LastStopTime = millis()-2000;
+  unsigned long CurrentTime = millis();
+
+  if (loop_counter % collect_throttle == 0) {
+    TractionStopActive = digitalRead(TractionStopPin);
     if (!TractionStopActive) {
+      WaitTractionStopInactive = false;
       //delayMicroseconds(1000);
       digitalWrite(MotorC_Stepper, LOW); 
-      digitalWrite(MotorC_Stepper, HIGH); 
-      DebugPrint("Collecting");
+      digitalWrite(MotorC_Stepper, HIGH);
     }
-    else
-      CollectFilmFrameCounter = 0;  //Reset counter
+    else if (not WaitTractionStopInactive) {
+      WaitTractionStopInactive = true;
+      if ((CurrentTime - LastStopTime) > 2000)
+        collect_throttle--;
+      if ((CurrentTime - LastStopTime) < 1000)
+        collect_throttle++;
+      SerialPrintInt(CurrentTime - LastStopTime);
+      SerialPrintInt(collect_throttle);
+      LastStopTime = millis();
+    }
 
     digitalWrite(MotorC_Stepper, LOW); 
   } 
-  collect_throttle++;
+  loop_counter++;
 }
 
 // ------------- Centralized phototransistor level read ---------------
@@ -554,13 +567,13 @@ int GetLevelPT() {
   int SignalLevel = analogRead(PHOTODETECT);
   MaxPT = max(SignalLevel, MaxPT);
   MinPT = min(SignalLevel, MinPT);
-  if (DebugState == PT_Level)
+  if (DebugState == PT_Level) {
     count = (count+1) % 20;  // Report only one in twenty
     if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
       SerialPrintInt(SignalLevel);
       count = 0;
     }
-
+  }
   return(SignalLevel);
 }
 // ------------- is there film loaded in filmgate? ---------------
