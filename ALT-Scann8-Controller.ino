@@ -27,8 +27,8 @@ More info in README.md file
 #include <stdio.h>
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
-int MaxPT = 200;
-int MinPT = 0;
+int MaxPT = 0;
+int MinPT = 200;
 
 
 enum {
@@ -109,7 +109,7 @@ int LastFrameSteps = 0;                     // stores number of steps
 
 boolean IsS8 = true;
 
-boolean TractionStopActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
+boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 int TractionStopEventCount = 2;
 
 unsigned long TractionStopWaitingTime = 800000;  // JRE: Delay to throttle winding process, avoid it beign too agressive (make sure spring is noo to strong)
@@ -203,7 +203,7 @@ void loop() {
     // First do some common stuff (set port, push phototransistor level)
     Wire.begin(16);
 
-    TractionStopActive = digitalRead(TractionStopPin);
+    TractionSwitchActive = digitalRead(TractionStopPin);
 
     if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
       // Set default state and direction of motors B and C (disabled, clockwise)
@@ -533,31 +533,48 @@ void CollectOutgoingFilm(void) {
   static int collect_throttle = 8; 
   static int loop_counter = 0; 
   static boolean WaitTractionStopInactive = false;
+  static boolean CollectOngoing = true;
 
-  static unsigned long LastStopTime = millis()-2000;
+  static unsigned long LastMotionTime = 0;
+  static unsigned long TimeToCheckStops = millis()+3000;
+  static unsigned int stop_counter = 0;
   unsigned long CurrentTime = millis();
 
+  TractionSwitchActive = digitalRead(TractionStopPin);
   if (loop_counter % collect_throttle == 0) {
-    TractionStopActive = digitalRead(TractionStopPin);
-    if (!TractionStopActive) {
-      WaitTractionStopInactive = false;
+    if (!TractionSwitchActive) {  //Motor allowed to turn
+      CollectOngoing = true;
       //delayMicroseconds(1000);
       digitalWrite(MotorC_Stepper, LOW); 
       digitalWrite(MotorC_Stepper, HIGH);
+      LastMotionTime = millis();
     }
-    else if (not WaitTractionStopInactive) {
-      WaitTractionStopInactive = true;
-      if ((CurrentTime - LastStopTime) > 2000)
-        collect_throttle--;
-      if ((CurrentTime - LastStopTime) < 1000)
-        collect_throttle++;
-      SerialPrintInt(CurrentTime - LastStopTime);
-      SerialPrintInt(collect_throttle);
-      LastStopTime = millis();
+    else {
+      if (CollectOngoing)
+        stop_counter++;
+      CollectOngoing = false;
     }
-
     digitalWrite(MotorC_Stepper, LOW); 
-  } 
+  }
+  /*
+  if (not CollectOngoing) {
+    if ((CurrentTime - LastMotionTime) > 2000 && collect_throttle > 1) {
+      collect_throttle--;
+      SerialPrintInt(collect_throttle);
+      loop_counter = 0;
+    }
+  }
+  */
+  if (CurrentTime > TimeToCheckStops) {
+    if (stop_counter > 2)
+      collect_throttle++;
+    else if (stop_counter == 0)
+      collect_throttle--;
+    SerialPrintInt(collect_throttle);
+    TimeToCheckStops = millis()+3000;
+    stop_counter = 0;
+  }
+
   loop_counter++;
 }
 
@@ -568,7 +585,7 @@ int GetLevelPT() {
   MaxPT = max(SignalLevel, MaxPT);
   MinPT = min(SignalLevel, MinPT);
   if (DebugState == PT_Level) {
-    count = (count+1) % 20;  // Report only one in twenty
+    count = (count+1) % 1;  // Report only one in twenty
     if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
       SerialPrintInt(SignalLevel);
       count = 0;
@@ -655,7 +672,7 @@ ScanResult scan(int Ic) {
 
   unsigned long CurrentTime = micros();
 
-  TractionStopActive = digitalRead(TractionStopPin);
+  TractionSwitchActive = digitalRead(TractionStopPin);
 
   if (FrameStepsDone >= DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
     //ScanSpeed = FetchFrameScanSpeed;
