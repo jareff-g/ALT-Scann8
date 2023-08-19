@@ -192,7 +192,7 @@ void loop() {
       Ic = pop(&param);   // Get next command from queue if one exists
       if (!ALT_Scann8_UI_detected && Ic != 1) {
         Ic = 0; // Drop dequeued commend until ALT UI version detected
-        DebugPrint("UI req no id"); 
+        DebugPrintStr("UI req no id"); 
         EventForRPi = 3;  // Tell ALT UI to identify itself
         digitalWrite(13, HIGH);
       }
@@ -224,7 +224,7 @@ void loop() {
             if (param >= 0 && param <= 900)
               PerforationThresholdLevel = param;
               OriginalPerforationThresholdLevel = param;
-              DebugPrintAux(">PTLevel",param);
+              DebugPrint(">PTLevel",param);
             break;
           case 52:
             if (param >= 100 && param <= 350)
@@ -236,7 +236,7 @@ void loop() {
                 MinFrameStepsR8 = param;
               MinFrameSteps = param;
               DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-              DebugPrintAux(">MinSteps",param);
+              DebugPrint(">MinSteps",param);
             break;
         }      
     }
@@ -246,17 +246,17 @@ void loop() {
           case 1:
             if (param == 1) {
               ALT_Scann8_UI_detected = true;
-              DebugPrint("ALT UI OK"); 
+              DebugPrintStr("ALT UI OK"); 
               EventForRPi = 1;  // Tell ALT UI that ALT controller is present too
               digitalWrite(13, HIGH);
             }
             else {
               // UI version does not support I2C multi-byte exchange, can't work
-              DebugPrint("Pre 0.9.1 ALT UI - KO"); 
+              DebugPrintStr("Pre 0.9.1 ALT UI - KO"); 
             }
             break;
           case 10:
-            DebugPrint(">Scan"); 
+            DebugPrintStr(">Scan"); 
             ScanState = Sts_Scan;
             //delay(250); 
             StartFrameTime = micros();
@@ -276,8 +276,8 @@ void loop() {
             MinFrameSteps = OriginalMinFrameSteps; 
             StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
-            DebugPrintAux("Save t.",StartFrameTime-StartPictureSaveTime);
-            DebugPrint(">Next fr.");
+            DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
+            DebugPrintStr(">Next fr.");
             break;
           case 18:  // Select R8 film
             IsS8 = false;
@@ -304,7 +304,7 @@ void loop() {
             delay(50);
             break;
           case 40:
-            DebugPrint(">SStep"); 
+            DebugPrintStr(">SStep"); 
             ScanState = Sts_SingleStep;
             MinFrameSteps = 100; // Used to be 100
             delay(50);
@@ -312,7 +312,7 @@ void loop() {
           case 60: // Rewind
           case 64: // Rewind unconditional
             if (FilmInFilmgate() and Ic == 60) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
-              DebugPrint("Rwnd err"); 
+              DebugPrintStr("Rwnd err"); 
               EventForRPi = 64;
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -320,7 +320,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
-              DebugPrint("Rwnd"); 
+              DebugPrintStr("Rwnd"); 
               ScanState = Sts_Rewind;
               delay (100); 
               digitalWrite(MotorA_Neutral, LOW); 
@@ -338,7 +338,7 @@ void loop() {
           case 61:  // Fast Forward
           case 65:  // Fast Forward unconditional
             if (FilmInFilmgate() and Ic == 61) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
-              DebugPrint("FF err"); 
+              DebugPrintStr("FF err"); 
               EventForRPi = 65; 
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
@@ -346,7 +346,7 @@ void loop() {
               tone(A2, 1000, 100); 
             }
             else {
-              DebugPrint(">FF"); 
+              DebugPrintStr(">FF"); 
               ScanState = Sts_FastForward;
               delay (100); 
               digitalWrite(MotorA_Neutral, HIGH); 
@@ -373,7 +373,7 @@ void loop() {
       case Sts_Scan:
         CollectOutgoingFilm();
         if (Ic == 10) {
-          DebugPrint("-Scan"); 
+          DebugPrintStr("-Scan"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
         else if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
@@ -412,13 +412,13 @@ void loop() {
         break;
       case Sts_Rewind:
         if (!RewindFilm(Ic)) {
-          DebugPrint("-rwnd"); 
+          DebugPrintStr("-rwnd"); 
           ScanState = Sts_Idle;
         }
         break;
       case Sts_FastForward:
         if (!FastForwardFilm(Ic)) {
-          DebugPrint("-FF"); 
+          DebugPrintStr("-FF"); 
           ScanState = Sts_Idle;
         }
         break;
@@ -677,7 +677,7 @@ ScanResult scan(int Ic) {
   if (FrameStepsDone >= DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
     //ScanSpeed = FetchFrameScanSpeed;
     ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
-    //DebugPrintAux("SSpeed",ScanSpeed);
+    //DebugPrint("SSpeed",ScanSpeed);
   }
 
   //-------------ScanFilm-----------
@@ -718,7 +718,7 @@ ScanResult scan(int Ic) {
   }
 
   if (FrameDetected) {
-    DebugPrint("Frame!"); 
+    DebugPrintStr("Frame!"); 
     CollectFilmFrameCounter++;
     LastFrameSteps = FrameStepsDone;
     FrameStepsDone = 0; 
@@ -734,15 +734,15 @@ ScanResult scan(int Ic) {
     
     FrameDetected = false;
     retvalue = SCAN_FRAME_DETECTED;
-    DebugPrintAux("FrmS",LastFrameSteps);
-    DebugPrintAux("FrmT",CurrentTime-StartFrameTime);
+    DebugPrint("FrmS",LastFrameSteps);
+    DebugPrint("FrmT",CurrentTime-StartFrameTime);
     if (DebugState == FrameSteps)
       SerialPrintInt(LastFrameSteps);
   }
   else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
     retvalue = SCAN_FRAME_DETECTION_ERROR;    
     FrameStepsDone = 0;
-    DebugPrint("Err/scan");
+    DebugPrintStr("Err/scan");
     // Tell UI (Raspberry PI) an error happened during scanning
     EventForRPi = 12; 
     digitalWrite(13, HIGH);
@@ -810,13 +810,12 @@ void DebugPrintAux(const char * str, unsigned long i) {
   static int CurrentRepetitions = 0;
   boolean GoPrint = true;
   
-  if (DebugState != DebugInfo) return;
+  if (DebugState != DebugInfo && DebugState != DebugInfoSingle) return;
 
   if (strlen(str) >= 50) {
     Serial.println("Cannot print debug line, too long");
     return;
   }
-
 
   if (i != -1)
     sprintf(PrintLine,"%s=%u",str,i);
@@ -843,8 +842,15 @@ void DebugPrintAux(const char * str, unsigned long i) {
   if (GoPrint) Serial.println(PrintLine);
 }
 
-void DebugPrint(const char * str) {
+void DebugPrintStr(const char * str) {
+  if (DebugState != DebugInfo) return;
   DebugPrintAux(str,-1);
+}
+
+// Differentiated debug print function to debug specifics without printing all debug lines
+void DebugPrint(const char * str, unsigned long i) {
+  if (DebugState != DebugInfo) return;
+  DebugPrintAux(str,i);
 }
 
 
