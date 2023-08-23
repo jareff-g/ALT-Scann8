@@ -35,6 +35,7 @@ enum {
   PT_Level,
   FrameSteps,
   DebugInfo,
+  DebugInfoSingle,
   None
 } DebugState = None;
 
@@ -95,7 +96,7 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int MinFrameStepsR8 = 257;            // Default value for R8
 int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsBefore = 0;  // No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 5;  // No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -127,6 +128,9 @@ int PT_SignalLevelRead;   // Level out signal phototransistor detection
 // Flag to detect ALT UI version
 // Need to prevent operation with main version since compatibility cannot be maintained
 boolean ALT_Scann8_UI_detected = false;
+
+// Forward definition
+void CollectOutgoingFilm(bool);
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
@@ -371,7 +375,7 @@ void loop() {
         }
         break;
       case Sts_Scan:
-        CollectOutgoingFilm();
+        CollectOutgoingFilm(false);
         if (Ic == 10) {
           DebugPrintStr("-Scan"); 
           ScanState = Sts_Idle; // Exit scan loop
@@ -428,8 +432,8 @@ void loop() {
           ScanState = Sts_Idle;
         }
         else {
-          CollectOutgoingFilm();
-          delay(1); 
+          CollectOutgoingFilm(true);
+          //delay(1); 
 
           GetLevelPT(); // Just to collect stats (MaxPT, MinPT)
           digitalWrite(MotorB_Stepper, HIGH);
@@ -529,52 +533,50 @@ boolean FastForwardFilm(int Ic) {
 // Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension is not enough for the capstan to pull the film
-void CollectOutgoingFilm(void) {
-  static int collect_throttle = 8; 
+void CollectOutgoingFilm(bool ff_collect = false) {
+  static int collect_modulo = 4; 
   static int loop_counter = 0; 
-  static boolean WaitTractionStopInactive = false;
+  static long collect_steps = 0;
+  static long last_collect_steps = 0;
   static boolean CollectOngoing = true;
 
-  static unsigned long LastMotionTime = 0;
-  static unsigned long TimeToCheckStops = millis()+3000;
-  static unsigned int stop_counter = 0;
+  static unsigned long LastSwitchActivationCheckTime = millis()+10000;
+  static unsigned long TimeToRestart = millis()+3000;
   unsigned long CurrentTime = millis();
 
-  TractionSwitchActive = digitalRead(TractionStopPin);
-  if (loop_counter % collect_throttle == 0) {
-    if (!TractionSwitchActive) {  //Motor allowed to turn
+  if (loop_counter % collect_modulo == 0) {
+    TractionSwitchActive = digitalRead(TractionStopPin);
+    if (!TractionSwitchActive && CurrentTime > TimeToRestart) {  //Motor allowed to turn
       CollectOngoing = true;
       //delayMicroseconds(1000);
       digitalWrite(MotorC_Stepper, LOW); 
       digitalWrite(MotorC_Stepper, HIGH);
-      LastMotionTime = millis();
+      collect_steps++;
     }
     else {
-      if (CollectOngoing)
-        stop_counter++;
+      if (CollectOngoing) {
+        DebugPrintAux("Collect steps - ", collect_steps);
+        if (collect_steps < (last_collect_steps - 50)){  // We need less steps: Increase modulo
+          collect_modulo++;
+        }
+        else if (collect_modulo > 1 && collect_steps > (last_collect_steps + 50)) {  // We need more steps: Decrease modulo
+          collect_modulo--;
+        }
+        last_collect_steps = collect_steps;
+        collect_steps = 0;
+        TimeToRestart = millis() + (ff_collect ? 500 : 500);
+        DebugPrintAux("Upd mod - ", collect_modulo);
+        LastSwitchActivationCheckTime = CurrentTime + 10000;
+      }
       CollectOngoing = false;
     }
     digitalWrite(MotorC_Stepper, LOW); 
-  }
-  /*
-  if (not CollectOngoing) {
-    if ((CurrentTime - LastMotionTime) > 2000 && collect_throttle > 1) {
-      collect_throttle--;
-      SerialPrintInt(collect_throttle);
-      loop_counter = 0;
+    if (collect_modulo > 1 && CurrentTime > LastSwitchActivationCheckTime) {
+      collect_modulo--;
+      LastSwitchActivationCheckTime = CurrentTime + 10000;
+      DebugPrintAux("Dec mod by t.o. - ", collect_modulo);
     }
   }
-  */
-  if (CurrentTime > TimeToCheckStops) {
-    if (stop_counter > 2)
-      collect_throttle++;
-    else if (stop_counter == 0)
-      collect_throttle--;
-    SerialPrintInt(collect_throttle);
-    TimeToCheckStops = millis()+3000;
-    stop_counter = 0;
-  }
-
   loop_counter++;
 }
 
@@ -586,11 +588,11 @@ int GetLevelPT() {
   MinPT = min(SignalLevel, MinPT);
   if (DebugState == PT_Level) {
     count = (count+1) % 1;  // Report only one in twenty
-    if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
+    //if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
+    if (count == 0)
       SerialPrintInt(SignalLevel);
-      count = 0;
-    }
   }
+  
   return(SignalLevel);
 }
 // ------------- is there film loaded in filmgate? ---------------
@@ -630,18 +632,22 @@ boolean IsHoleDetected() {
   boolean hole_detected = false;
   
   PT_SignalLevelRead = GetLevelPT();
+
+  if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
+    return false;
+
   if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
     FilteredSignalLevel = PT_SignalLevelRead;
   }
-
+/*
   if (PT_SignalLevelRead >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
     PerforationThresholdLevel = PerforationMaxLevel;
   }
   else if (PT_SignalLevelRead < PerforationMinLevel) {
     PerforationThresholdLevel = OriginalPerforationThresholdLevel;
   }
-
-  if (PT_SignalLevelRead < PerforationThresholdLevel) {
+*/
+  if (PT_SignalLevelRead < PerforationThresholdLevel-20) {
     FilteredSignalLevel = 0;
   }
 
@@ -674,7 +680,7 @@ ScanResult scan(int Ic) {
 
   TractionSwitchActive = digitalRead(TractionStopPin);
 
-  if (FrameStepsDone >= DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
+  if (FrameStepsDone > DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
     //ScanSpeed = FetchFrameScanSpeed;
     ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
     //DebugPrint("SSpeed",ScanSpeed);
@@ -702,9 +708,10 @@ ScanResult scan(int Ic) {
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
+          //delayMicroseconds(100);  
           FrameDetected = IsHoleDetected();
           if (FrameDetected || FrameStepsDone > 3*DecreaseSpeedFrameSteps) break;
-          else delayMicroseconds(100);  
+          //else delayMicroseconds(100);  
           // Explanation of delay in previous line:
           // Info sent on serial port, specially at low speeds (9600) introduces a delay 
           // that affects ATL-Scann 8 behaviour. So, when debug is disabled, scanning 
