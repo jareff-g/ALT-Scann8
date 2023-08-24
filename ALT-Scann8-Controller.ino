@@ -171,15 +171,9 @@ void setup() {
   // neutral position
   digitalWrite(MotorA_Neutral, HIGH);
 
-
   // set direction on stepper motors
   digitalWrite(MotorA_Direction, LOW);
   digitalWrite(MotorB_Direction, LOW);
-
-
-  analogWrite(11, UVLedBrightness); // Turn on UV LED
-  UVLedOn = true;
-
 
   digitalWrite(MotorA_Stepper, LOW);
   digitalWrite(MotorB_Stepper, LOW);
@@ -262,14 +256,16 @@ void loop() {
           case 10:
             DebugPrintStr(">Scan"); 
             ScanState = Sts_Scan;
-            //delay(250); 
+            analogWrite(11, UVLedBrightness); // Turn on UV LED
+            UVLedOn = true;
+            delay(500);     // Wait for PT to stabilize after switching UV led on
             StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
             //MinFrameSteps = 5; 
             MinFrameSteps = 100; 
             tone(A2, 2000, 50);
             break;
-          case 11:
+          case 11:  //Exit app
             if (UVLedOn) {
                 analogWrite(11, 0); // Turn off UV LED
                 UVLedOn = false;
@@ -528,53 +524,44 @@ boolean FastForwardFilm(int Ic) {
 }
 
 // ------------- Collect outgoing film
-// New version, collection speedd is throttled based on the frequency of microswitch activation.
+// New version, collection speed is throttled based on the frequency of microswitch activation.
 // This new method provides a more regular mechanism, and it keeps minimum tension in the film.
 // Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
-// tension is not enough for the capstan to pull the film
+// tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(bool ff_collect = false) {
-  static int collect_modulo = 4; 
+  static int collect_modulo = 10; 
   static int loop_counter = 0; 
-  static long collect_steps = 0;
-  static long last_collect_steps = 0;
   static boolean CollectOngoing = true;
 
+  static unsigned long LastSwitchActivationTime = 0L;
   static unsigned long LastSwitchActivationCheckTime = millis()+10000;
-  static unsigned long TimeToRestart = millis()+3000;
   unsigned long CurrentTime = millis();
 
   if (loop_counter % collect_modulo == 0) {
     TractionSwitchActive = digitalRead(TractionStopPin);
-    if (!TractionSwitchActive && CurrentTime > TimeToRestart) {  //Motor allowed to turn
+    if (!TractionSwitchActive) {  //Motor allowed to turn
       CollectOngoing = true;
       //delayMicroseconds(1000);
       digitalWrite(MotorC_Stepper, LOW); 
       digitalWrite(MotorC_Stepper, HIGH);
-      collect_steps++;
+      digitalWrite(MotorC_Stepper, LOW); 
     }
-    else {
+    TractionSwitchActive = digitalRead(TractionStopPin);
+    if (TractionSwitchActive) {
       if (CollectOngoing) {
-        DebugPrintAux("Collect steps - ", collect_steps);
-        if (collect_steps < (last_collect_steps - 50)){  // We need less steps: Increase modulo
+        if (CurrentTime < LastSwitchActivationTime + 1000){  // Collecting too often: Increase modulo
           collect_modulo++;
         }
-        else if (collect_modulo > 1 && collect_steps > (last_collect_steps + 50)) {  // We need more steps: Decrease modulo
-          collect_modulo--;
-        }
-        last_collect_steps = collect_steps;
-        collect_steps = 0;
-        TimeToRestart = millis() + (ff_collect ? 500 : 500);
-        DebugPrintAux("Upd mod - ", collect_modulo);
-        LastSwitchActivationCheckTime = CurrentTime + 10000;
+        DebugPrint("Collect Mod", collect_modulo);
+        LastSwitchActivationTime = CurrentTime;
       }
       CollectOngoing = false;
     }
-    digitalWrite(MotorC_Stepper, LOW); 
-    if (collect_modulo > 1 && CurrentTime > LastSwitchActivationCheckTime) {
+    else if (collect_modulo > 1 && CurrentTime > LastSwitchActivationTime + 2000) {  // Not collecting enough : Decrease modulo
+      LastSwitchActivationTime = CurrentTime;
       collect_modulo--;
-      LastSwitchActivationCheckTime = CurrentTime + 10000;
-      DebugPrintAux("Dec mod by t.o. - ", collect_modulo);
+      DebugPrint("Collect Mod", collect_modulo);
     }
   }
   loop_counter++;
@@ -680,10 +667,8 @@ ScanResult scan(int Ic) {
 
   TractionSwitchActive = digitalRead(TractionStopPin);
 
-  if (FrameStepsDone > DecreaseSpeedFrameSteps /*&& ScanSpeed != FetchFrameScanSpeed*/) {
-    //ScanSpeed = FetchFrameScanSpeed;
+  if (FrameStepsDone > DecreaseSpeedFrameSteps) {
     ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
-    //DebugPrint("SSpeed",ScanSpeed);
   }
 
   //-------------ScanFilm-----------
@@ -704,20 +689,14 @@ ScanResult scan(int Ic) {
       // ---- Speed on stepper motors  ------------------
       if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
         LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
-        for (int x = 0; x <= 3; x++) {    // Originally from 0 to 3. Looping more than that required the collection code above to be optimized
+        for (int x = 0; x < 5; x++) {    // Advance steps five at a time, otherwise too slow
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
-          //delayMicroseconds(100);  
-          FrameDetected = IsHoleDetected();
-          if (FrameDetected || FrameStepsDone > 3*DecreaseSpeedFrameSteps) break;
-          //else delayMicroseconds(100);  
-          // Explanation of delay in previous line:
-          // Info sent on serial port, specially at low speeds (9600) introduces a delay 
-          // that affects ATL-Scann 8 behaviour. So, when debug is disabled, scanning 
-          // process go a bit out of control. 
-          // That needs to be investigated, in the meantime this delay (0.1 ms) seems to keep 
-          // things under control
+          // The phototransistor cannot react immediatelly after the motor moves, therefore, 
+          // instead of checking it in this loop, we leave it for the next main loop, since 
+          // cheking it here would require  inserting a delay that would considerably slow 
+          // down the process.
         }
         digitalWrite(MotorB_Stepper, LOW);
       }
