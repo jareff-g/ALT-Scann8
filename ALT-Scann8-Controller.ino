@@ -43,7 +43,25 @@ int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
 
 int Pulse = LOW;
-int Ic; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=80 / Set Perf Level=90
+int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
+// I2C commands: Constant definition
+ #define CMD_VERSION_ID_CHECK 1
+ #define CMD_START_SCAN 10
+ #define CMD_TERMINATE 11
+ #define CMD_GET_NEXT_FRAME 12
+ #define CMD_SET_REGULAR_8 18
+ #define CMD_SET_SUPER_8 19
+ #define CMD_SWITCH_REEL_LOCK_STATUS 20
+ #define CMD_FILM_FORWARD 30
+ #define CMD_SINGLE_STEP 40
+ #define CMD_SET_PT_LEVEL 50
+ #define CMD_SET_MIN_FRAME_STEPS 52
+ #define CMD_REWIND 60
+ #define CMD_FAST_FORWARD 61
+ #define CMD_INCREASE_WIND_SPEED 62
+ #define CMD_DECREASE_WIND_SPEED 63
+ #define CMD_UNCONDITIONAL_REWIND 64
+ #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 
 //------------ Stepper motors control ----------------
 const int MotorA_Stepper = 2;     // Stepper motor film feed
@@ -187,16 +205,16 @@ void loop() {
   int param;
   while (1) {
     if (dataInQueue()) {
-      Ic = pop(&param);   // Get next command from queue if one exists
-      if (!ALT_Scann8_UI_detected && Ic != 1) {
-        Ic = 0; // Drop dequeued commend until ALT UI version detected
+      UI_Command = pop(&param);   // Get next command from queue if one exists
+      if (!ALT_Scann8_UI_detected && UI_Command != CMD_VERSION_ID_CHECK) {
+        UI_Command = 0; // Drop dequeued command until ALT UI version detected
         DebugPrintStr("UI req no id"); 
         EventForRPi = 3;  // Tell ALT UI to identify itself
         digitalWrite(13, HIGH);
       }
     }
     else
-      Ic = 0;
+      UI_Command = 0;
 
     // First do some common stuff (set port, push phototransistor level)
     Wire.begin(16);
@@ -205,10 +223,10 @@ void loop() {
 
     if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
       // Set default state and direction of motors B and C (disabled, clockwise)
-      // In the original main loop this was done when the Ic commamnd was NOT Single Step (49). Why???
+      // In the original main loop this was done when UI_Command was NOT Single Step (49). Why???
       // JRE 23-08-2022: Explanation: THis is done mainly for the slow forward function, so that
       //    setting to high both the motors B and C they will move one step forward
-      if (Ic != 40){  // In case we need the exact behavior of original code
+      if (UI_Command != CMD_SINGLE_STEP){  // In case we need the exact behavior of original code
         digitalWrite(MotorB_Stepper, LOW); 
         digitalWrite(MotorC_Stepper, LOW); 
         digitalWrite(MotorC_Direction, HIGH); 
@@ -216,16 +234,16 @@ void loop() {
       }
     }
 
-    if (Ic == 50 || Ic == 52) {
-        switch (Ic) {
-          case 50:
+    if (UI_Command == CMD_SET_PT_LEVEL || UI_Command == CMD_SET_MIN_FRAME_STEPS) {
+        switch (UI_Command) {
+          case CMD_SET_PT_LEVEL:
             if (param >= 0 && param <= 900)
               PerforationThresholdLevel = param;
               OriginalPerforationThresholdLevel = param;
               DebugPrint(">PTLevel",param);
             break;
-          case 52:
-            if (param >= 100 && param <= 350)
+          case CMD_SET_MIN_FRAME_STEPS:
+            if (param >= 100 && param <= 450)
               MinFrameSteps = param;
               OriginalMinFrameSteps = param;
               if (IsS8)
@@ -240,12 +258,12 @@ void loop() {
     }
     switch (ScanState) {
       case Sts_Idle:
-        switch (Ic) {
-          case 1:
+        switch (UI_Command) {
+          case CMD_VERSION_ID_CHECK:
             if (param == 1) {
               ALT_Scann8_UI_detected = true;
               DebugPrintStr("ALT UI OK"); 
-              EventForRPi = 1;  // Tell ALT UI that ALT controller is present too
+              EventForRPi = CMD_VERSION_ID_CHECK;  // Tell ALT UI that ALT controller is present too
               digitalWrite(13, HIGH);
             }
             else {
@@ -253,7 +271,7 @@ void loop() {
               DebugPrintStr("Pre 0.9.1 ALT UI - KO"); 
             }
             break;
-          case 10:
+          case CMD_START_SCAN:
             DebugPrintStr(">Scan"); 
             ScanState = Sts_Scan;
             analogWrite(11, UVLedBrightness); // Turn on UV LED
@@ -265,13 +283,13 @@ void loop() {
             MinFrameSteps = 100; 
             tone(A2, 2000, 50);
             break;
-          case 11:  //Exit app
+          case CMD_TERMINATE:  //Exit app
             if (UVLedOn) {
                 analogWrite(11, 0); // Turn off UV LED
                 UVLedOn = false;
             }
             break;
-          case 12:  // Continue scan to next frame
+          case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
             ScanState = Sts_Scan;
             MinFrameSteps = OriginalMinFrameSteps; 
             StartFrameTime = micros();
@@ -279,7 +297,7 @@ void loop() {
             DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
             DebugPrintStr(">Next fr.");
             break;
-          case 18:  // Select R8 film
+          case CMD_SET_REGULAR_8:  // Select R8 film
             IsS8 = false;
             MinFrameSteps = MinFrameStepsR8;
             DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -287,7 +305,7 @@ void loop() {
             OriginalMinFrameSteps = MinFrameSteps;
             OriginalPerforationThresholdLevel = PerforationThresholdLevel;
             break;
-          case 19:  // Select S8 film
+          case CMD_SET_SUPER_8:  // Select S8 film
             IsS8 = true;
             MinFrameSteps = MinFrameStepsS8;
             DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -295,25 +313,25 @@ void loop() {
             OriginalMinFrameSteps = MinFrameSteps;
             OriginalPerforationThresholdLevel = PerforationThresholdLevel;
             break;
-          case 20:
+          case CMD_SWITCH_REEL_LOCK_STATUS:
             ScanState = Sts_UnlockReels;
             delay(50);
             break;
-          case 30:
+          case CMD_FILM_FORWARD:
             ScanState = Sts_SlowForward;
             delay(50);
             break;
-          case 40:
+          case CMD_SINGLE_STEP:
             DebugPrintStr(">SStep"); 
             ScanState = Sts_SingleStep;
             MinFrameSteps = 100; // Used to be 100
             delay(50);
             break;
-          case 60: // Rewind
-          case 64: // Rewind unconditional
-            if (FilmInFilmgate() and Ic == 60) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+          case CMD_REWIND: // Rewind
+          case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
+            if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
               DebugPrintStr("Rwnd err"); 
-              EventForRPi = 64;
+              EventForRPi = CMD_UNCONDITIONAL_REWIND;
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -335,11 +353,11 @@ void loop() {
             }
             delay(50);
             break;
-          case 61:  // Fast Forward
-          case 65:  // Fast Forward unconditional
-            if (FilmInFilmgate() and Ic == 61) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+          case CMD_FAST_FORWARD:  // Fast Forward
+          case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
+            if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
               DebugPrintStr("FF err"); 
-              EventForRPi = 65; 
+              EventForRPi = CMD_UNCONDITIONAL_FAST_FORWARD;
               digitalWrite(13, HIGH);
               tone(A2, 2000, 100); 
               delay (150); 
@@ -360,11 +378,11 @@ void loop() {
               RewindSpeed = 4000;
             }
             break;
-          case 62:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
+          case CMD_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
             if (TargetRewindSpeedLoop < 4000)
               TargetRewindSpeedLoop += 20;
             break;
-          case 63:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
+          case CMD_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
             if (TargetRewindSpeedLoop > 200)
               TargetRewindSpeedLoop -= 20;
             break;
@@ -372,11 +390,11 @@ void loop() {
         break;
       case Sts_Scan:
         CollectOutgoingFilm(false);
-        if (Ic == 10) {
+        if (UI_Command == CMD_START_SCAN) {
           DebugPrintStr("-Scan"); 
           ScanState = Sts_Idle; // Exit scan loop
         }
-        else if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
+        else if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
           ScanState = Sts_Idle; // Exit scan loop
         }
         else {
@@ -391,12 +409,12 @@ void loop() {
         }
         break;
       case Sts_SingleStep:
-        if (scan(Ic) != SCAN_NO_FRAME_DETECTED) {
+        if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
           ScanState = Sts_Idle;
         }
         break;
       case Sts_UnlockReels:
-        if (Ic == 20) { //request to lock reels again
+        if (UI_Command == CMD_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
           ReelsUnlocked = false;
           digitalWrite(MotorB_Neutral, LOW); 
           digitalWrite(MotorC_Neutral, LOW);
@@ -411,19 +429,19 @@ void loop() {
         }
         break;
       case Sts_Rewind:
-        if (!RewindFilm(Ic)) {
+        if (!RewindFilm(UI_Command)) {
           DebugPrintStr("-rwnd"); 
           ScanState = Sts_Idle;
         }
         break;
       case Sts_FastForward:
-        if (!FastForwardFilm(Ic)) {
+        if (!FastForwardFilm(UI_Command)) {
           DebugPrintStr("-FF"); 
           ScanState = Sts_Idle;
         }
         break;
       case Sts_SlowForward:
-        if (Ic == 30) { // Stop slow forward
+        if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
           delay(50);
           ScanState = Sts_Idle;
         }
@@ -446,13 +464,13 @@ void loop() {
 
 
 // ------ rewind the movie ------
-boolean RewindFilm(int Ic) {
+boolean RewindFilm(int UI_Command) {
   boolean retvalue = true;
   static boolean stopping = false;
   
   Wire.begin(16);
 
-  if (Ic == 60) {
+  if (UI_Command == CMD_REWIND) {
     stopping = true;
   }
   else if (stopping) {
@@ -469,7 +487,7 @@ boolean RewindFilm(int Ic) {
       digitalWrite(MotorB_Neutral, LOW);  
       digitalWrite(MotorC_Neutral, LOW); 
       delay (100);
-      EventForRPi = 60; 
+      EventForRPi = CMD_REWIND;
       digitalWrite(13, HIGH);
     }
   }
@@ -485,13 +503,13 @@ boolean RewindFilm(int Ic) {
 }
 
 // ------ fast forward the movie ------
-boolean FastForwardFilm(int Ic) {
+boolean FastForwardFilm(int UI_Command) {
   boolean retvalue = true;
   static boolean stopping = false;
 
   Wire.begin(16);  // join I2c bus with address #16
 
-  if (Ic == 61) {
+  if (UI_Command == CMD_FAST_FORWARD) {
     stopping = true;
   }
   else if (stopping) {
@@ -508,7 +526,7 @@ boolean FastForwardFilm(int Ic) {
       digitalWrite(MotorB_Neutral, LOW);
       digitalWrite(MotorC_Neutral, LOW); 
       delay (100);
-      EventForRPi = 61; 
+      EventForRPi = CMD_FAST_FORWARD;
       digitalWrite(13, HIGH);
     }
   }
@@ -655,7 +673,7 @@ boolean IsHoleDetected() {
 
 // ----- This is the function to "ScanFilm" -----
 // Returns false when done
-ScanResult scan(int Ic) {
+ScanResult scan(int UI_Command) {
   ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
   
   Wire.begin(16);
@@ -672,7 +690,7 @@ ScanResult scan(int Ic) {
   }
 
   //-------------ScanFilm-----------
-  if (Ic == 10) {   // UI Requesting to end current scan
+  if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
     retvalue = SCAN_TERMINATION_REQUESTED; 
     FrameDetected = false; 
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
@@ -693,9 +711,9 @@ ScanResult scan(int Ic) {
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
-          // The phototransistor cannot react immediatelly after the motor moves, therefore, 
+          // The photo-transistor cannot react immediatelly after the motor moves, therefore,
           // instead of checking it in this loop, we leave it for the next main loop, since 
-          // cheking it here would require  inserting a delay that would considerably slow 
+          // checking it here would require  inserting a delay that would considerably slow
           // down the process.
         }
         digitalWrite(MotorB_Stepper, LOW);
@@ -738,7 +756,7 @@ ScanResult scan(int Ic) {
 }
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
-// JRE 13/09/22: Theoretically this might happen any time, thu Ic might change in the middle of the loop. Adding a queue...
+// JRE 13/09/22: Theoretically this might happen any time, thu UI_Command might change in the middle of the loop. Adding a queue...
 void receiveEvent(int byteCount) {
   int IncomingIc, param = 0;
 
