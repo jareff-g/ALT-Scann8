@@ -37,7 +37,7 @@ enum {
   DebugInfo,
   DebugInfoSingle,
   None
-} DebugState = None;
+} DebugState = PT_Level;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -100,10 +100,10 @@ int FilteredSignalLevel = 0;
 
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
-int UVLedBrightness = 250;                   // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 500 ;              // Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 5000;    // Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 1500;  // Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+int UVLedBrightness = 255;                   // Brightness UV led, may need to be changed depending on LED type
+unsigned long ScanSpeed = 250 ;              // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 500;    // 5000 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long DecreaseScanSpeedStep = 500;  // 2000 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
@@ -114,7 +114,7 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int MinFrameStepsR8 = 257;            // Default value for R8
 int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsBefore = 5;  // No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 20;  // No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -243,7 +243,7 @@ void loop() {
               DebugPrint(">PTLevel",param);
             break;
           case CMD_SET_MIN_FRAME_STEPS:
-            if (param >= 100 && param <= 450)
+            if (param >= 100 && param <= 600)
               MinFrameSteps = param;
               OriginalMinFrameSteps = param;
               if (IsS8)
@@ -419,13 +419,17 @@ void loop() {
           digitalWrite(MotorB_Neutral, LOW); 
           digitalWrite(MotorC_Neutral, LOW);
           ScanState = Sts_Idle;
+          analogWrite(11, 0); // Turn off UV LED
         }
         else {
           if (not ReelsUnlocked){
             ReelsUnlocked = true;
             digitalWrite(MotorB_Neutral, HIGH); 
             digitalWrite(MotorC_Neutral, HIGH);
+            analogWrite(11, UVLedBrightness); // Turn on UV LED
           }
+          // While reels unlocked, send PT level 10 times/sec to allow tuning
+          ReportLevelPT();
         }
         break;
       case Sts_Rewind:
@@ -449,7 +453,6 @@ void loop() {
           CollectOutgoingFilm(true);
           //delay(1); 
 
-          GetLevelPT(); // Just to collect stats (MaxPT, MinPT)
           digitalWrite(MotorB_Stepper, HIGH);
         }
         break;
@@ -576,7 +579,7 @@ void CollectOutgoingFilm(bool ff_collect = false) {
       }
       CollectOngoing = false;
     }
-    else if (collect_modulo > 1 && CurrentTime > LastSwitchActivationTime + 2000) {  // Not collecting enough : Decrease modulo
+    else if (collect_modulo > 1 && CurrentTime > LastSwitchActivationTime + 1000) {  // Not collecting enough : Decrease modulo
       LastSwitchActivationTime = CurrentTime;
       collect_modulo--;
       DebugPrint("Collect Mod", collect_modulo);
@@ -591,15 +594,21 @@ int GetLevelPT() {
   int SignalLevel = analogRead(PHOTODETECT);
   MaxPT = max(SignalLevel, MaxPT);
   MinPT = min(SignalLevel, MinPT);
-  if (DebugState == PT_Level) {
-    count = (count+1) % 1;  // Report only one in twenty
-    //if (count == 0 || (SignalLevel > PerforationThresholdLevel && Pulse == LOW)) {
-    if (count == 0)
-      SerialPrintInt(SignalLevel);
-  }
-  
+  if (DebugState == PT_Level)
+    SerialPrintInt(SignalLevel);
+
   return(SignalLevel);
 }
+
+// ------------ Reports UV Led brightness to Serial Plotter 10 times/sec ----------
+void ReportLevelPT() {
+  static unsigned long LastReport = 0;
+  if (millis() > LastReport) {
+    GetLevelPT();
+    LastReport = millis() + 100;
+  }
+}
+
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
   int SignalLevel;
