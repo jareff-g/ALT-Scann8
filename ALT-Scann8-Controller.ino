@@ -451,7 +451,7 @@ void loop() {
         }
         else {
           CollectOutgoingFilm(true);
-          //delay(1); 
+          delay(1); 
 
           digitalWrite(MotorB_Stepper, HIGH);
         }
