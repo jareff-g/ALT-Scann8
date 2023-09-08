@@ -2815,7 +2815,7 @@ def build_ui():
         min_frame_steps_spinbox = tk.Spinbox(
             frame_alignment_frame,
             command=(min_frame_steps_selection_aux, '%d'), width=8,
-            textvariable=min_frame_steps_str, from_=100, to=450, font=("Arial", 7))
+            textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", 7))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         min_frame_steps_selection('down')
