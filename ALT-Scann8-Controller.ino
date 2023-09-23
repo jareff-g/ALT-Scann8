@@ -129,11 +129,7 @@ int LastFrameSteps = 0;                     // stores number of steps
 boolean IsS8 = true;
 
 boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
-int TractionStopEventCount = 2;
 
-unsigned long TractionStopWaitingTime = 800000;  // JRE: Delay to throttle winding process, avoid it beign too agressive (make sure spring is noo to strong)
-unsigned int CollectFilmFrameCounter = 0;   // New method to collect file, based on number of frames scanned, not in time
-// unsigned long time; // Reference time. Will get number of microsecods since program started. Will cicle in 70 minutes. Redefined in 'scan', so useless here
 unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
 
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
@@ -146,6 +142,9 @@ int PT_SignalLevelRead;   // Level out signal phototransistor detection
 // Flag to detect ALT UI version
 // Need to prevent operation with main version since compatibility cannot be maintained
 boolean ALT_Scann8_UI_detected = false;
+
+// Collect outgoing film frequency
+int collect_modulo = 10; 
 
 // Forward definition
 void CollectOutgoingFilm(bool);
@@ -279,6 +278,7 @@ void loop() {
             delay(500);     // Wait for PT to stabilize after switching UV led on
             StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
+            collect_modulo = 10; 
             //MinFrameSteps = 5; 
             MinFrameSteps = 100; 
             tone(A2, 2000, 50);
@@ -318,6 +318,7 @@ void loop() {
             delay(50);
             break;
           case CMD_FILM_FORWARD:
+            collect_modulo = 4; 
             ScanState = Sts_SlowForward;
             delay(50);
             break;
@@ -551,7 +552,6 @@ boolean FastForwardFilm(int UI_Command) {
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(bool ff_collect = false) {
-  static int collect_modulo = 10; 
   static int loop_counter = 0; 
   static boolean CollectOngoing = true;
 
@@ -696,14 +696,18 @@ ScanResult scan(int UI_Command) {
 
   if (FrameStepsDone > DecreaseSpeedFrameSteps) {
     ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+    steps_to_do = 1;    // Only one step per loop once we are close to frame detection
   }
+  else     
+    steps_to_do = 5;    // 5 steps per loop if not yet there
+
+  FrameDetected = false; 
 
   //-------------ScanFilm-----------
   if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
     retvalue = SCAN_TERMINATION_REQUESTED; 
     FrameDetected = false; 
     //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
-    TractionStopWaitingTime = 100000; 
     LastFrameSteps = 0;
     if (UVLedOn) {
         analogWrite(11, 0); // Turn off UV LED
@@ -732,7 +736,6 @@ ScanResult scan(int UI_Command) {
 
   if (FrameDetected) {
     DebugPrintStr("Frame!"); 
-    CollectFilmFrameCounter++;
     LastFrameSteps = FrameStepsDone;
     FrameStepsDone = 0; 
     StartPictureSaveTime = micros();
