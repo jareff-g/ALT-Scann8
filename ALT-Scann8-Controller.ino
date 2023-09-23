@@ -451,10 +451,7 @@ void loop() {
           ScanState = Sts_Idle;
         }
         else {
-          CollectOutgoingFilm(true);
-          delay(1); 
-
-          digitalWrite(MotorB_Stepper, HIGH);
+          SlowForward();
         }
         break;
     }
@@ -606,6 +603,16 @@ void ReportLevelPT() {
   if (millis() > LastReport) {
     GetLevelPT();
     LastReport = millis() + 100;
+  }
+}
+
+void SlowForward(){
+  static unsigned long LastMove = 0;
+  if (millis() > LastMove) {
+    ReportLevelPT();
+    CollectOutgoingFilm(true);
+    digitalWrite(MotorB_Stepper, HIGH);
+    LastMove = millis() + 1;
   }
 }
 
