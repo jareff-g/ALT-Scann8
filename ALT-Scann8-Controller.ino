@@ -32,12 +32,12 @@ int MinPT = 200;
 
 
 enum {
-  PT_Level,
+  PlotterInfo,
   FrameSteps,
   DebugInfo,
   DebugInfoSingle,
   None
-} DebugState = PT_Level;
+} DebugState = PlotterInfo;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -103,7 +103,7 @@ int FilteredSignalLevel = 0;
 int UVLedBrightness = 255;                   // Brightness UV led, may need to be changed depending on LED type
 unsigned long ScanSpeed = 250 ;              // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
 unsigned long FetchFrameScanSpeed = 500;    // 5000 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 500;  // 2000 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+unsigned long DecreaseScanSpeedStep = 100;  // 2000 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
@@ -130,14 +130,12 @@ boolean IsS8 = true;
 
 boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
 
-unsigned long LastTime = 0;   // This is not modified anywhere. What is the purpose? JRE: Corrected, updated when moving capstan to find next frame
-
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
 int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60-Rewind end, 61-FF end, 64-Rewind error, 65-FF error
 
-int PT_SignalLevelRead;   // Level out signal phototransistor detection
+int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 
 // Flag to detect ALT UI version
 // Need to prevent operation with main version since compatibility cannot be maintained
@@ -219,6 +217,8 @@ void loop() {
     Wire.begin(16);
 
     TractionSwitchActive = digitalRead(TractionStopPin);
+
+    ReportPlotterInfo();    // Regular report of plotter info
 
     if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
       // Set default state and direction of motors B and C (disabled, clockwise)
@@ -429,8 +429,7 @@ void loop() {
             digitalWrite(MotorC_Neutral, HIGH);
             analogWrite(11, UVLedBrightness); // Turn on UV LED
           }
-          // While reels unlocked, send PT level 10 times/sec to allow tuning
-          ReportLevelPT();
+          GetLevelPT();   // No need to know PT level here, but used to update plotter data
         }
         break;
       case Sts_Rewind:
@@ -576,9 +575,9 @@ void CollectOutgoingFilm(bool ff_collect = false) {
       }
       CollectOngoing = false;
     }
-    else if (collect_modulo > 1 && CurrentTime > LastSwitchActivationTime + 1000) {  // Not collecting enough : Decrease modulo
+    else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationTime + 1000) {  // Not collecting enough : Decrease modulo
       LastSwitchActivationTime = CurrentTime;
-      collect_modulo--;
+      collect_modulo-=2;
       DebugPrint("Collect Mod", collect_modulo);
     }
   }
@@ -588,28 +587,36 @@ void CollectOutgoingFilm(bool ff_collect = false) {
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
   static int count = 0;
-  int SignalLevel = analogRead(PHOTODETECT);
-  MaxPT = max(SignalLevel, MaxPT);
-  MinPT = min(SignalLevel, MinPT);
-  if (DebugState == PT_Level)
-    SerialPrintInt(SignalLevel);
 
-  return(SignalLevel);
+  //delayMicroseconds(100);
+  PT_SignalLevelRead = analogRead(PHOTODETECT);
+  MaxPT = max(PT_SignalLevelRead, MaxPT);
+  MinPT = min(PT_SignalLevelRead, MinPT);
+
+  return(PT_SignalLevelRead);
 }
 
-// ------------ Reports UV Led brightness to Serial Plotter 10 times/sec ----------
-void ReportLevelPT() {
-  static unsigned long LastReport = 0;
-  if (millis() > LastReport) {
-    GetLevelPT();
-    LastReport = millis() + 100;
+// ------------ Reports info (PT level, steps/frame, etc) to Serial Plotter 10 times/sec ----------
+void ReportPlotterInfo() {
+  static unsigned long NextReport = 0;
+  static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
+  char out[20];
+
+  if (DebugState == PlotterInfo && millis() > NextReport) {
+    if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
+      NextReport = millis() + 1;
+      sprintf(out,"%i,%i,%i,%i,1200", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed);
+      SerialPrintStr(out);
+      Previous_PT_Signal = PT_SignalLevelRead;
+      PreviousFrameSteps = LastFrameSteps;
+    }
   }
 }
 
 void SlowForward(){
   static unsigned long LastMove = 0;
   if (millis() > LastMove) {
-    ReportLevelPT();
+    GetLevelPT();   // No need to know PT level here, but used to update plotter data
     CollectOutgoingFilm(true);
     digitalWrite(MotorB_Stepper, HIGH);
     LastMove = millis() + 1;
@@ -651,36 +658,38 @@ boolean FilmInFilmgate() {
 // Returns false if status should change to idle
 boolean IsHoleDetected() {
   boolean hole_detected = false;
+  int PT_Level;
   
-  PT_SignalLevelRead = GetLevelPT();
-
-  if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
-    return false;
-
-  if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
-    FilteredSignalLevel = PT_SignalLevelRead;
+  if (Pulse == HIGH) {  // If last time frame was detected ...
+    Pulse = LOW; 
+    analogWrite(A1, 0); // ... Turn off green led
   }
+
+  PT_Level = GetLevelPT();
+  //if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
+  //  return false;
+
+
 /*
-  if (PT_SignalLevelRead >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
+  if (PT_Level >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
+    FilteredSignalLevel = PT_Level;
+  }
+  if (PT_Level >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
     PerforationThresholdLevel = PerforationMaxLevel;
   }
-  else if (PT_SignalLevelRead < PerforationMinLevel) {
+  else if (PT_Level < PerforationMinLevel) {
     PerforationThresholdLevel = OriginalPerforationThresholdLevel;
   }
-*/
-  if (PT_SignalLevelRead < PerforationThresholdLevel-20) {
+  if (PT_Level < PerforationThresholdLevel-20) {
     FilteredSignalLevel = 0;
   }
+*/
 
   // ------------- Frame detection ----
-  if (FrameStepsDone >= MinFrameSteps && FilteredSignalLevel >= PerforationThresholdLevel && Pulse == LOW) {
+  if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel && Pulse == LOW) {
     hole_detected = true;
     Pulse = HIGH; 
     analogWrite(A1, 255); // Light green led
-  }
-  else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
-    Pulse = LOW; 
-    analogWrite(A1, 0); // Turn off green led
   }
 
   return(hole_detected);
@@ -691,43 +700,48 @@ boolean IsHoleDetected() {
 // Returns false when done
 ScanResult scan(int UI_Command) {
   ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
-  
-  Wire.begin(16);
-
-  analogWrite(11, UVLedBrightness);
-  UVLedOn = true;
-
+  int steps_to_do = 5;
+  static unsigned long TimeToScan = 0;
   unsigned long CurrentTime = micros();
 
-  TractionSwitchActive = digitalRead(TractionStopPin);
-
-  if (FrameStepsDone > DecreaseSpeedFrameSteps) {
-    ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
-    steps_to_do = 1;    // Only one step per loop once we are close to frame detection
-  }
-  else     
-    steps_to_do = 5;    // 5 steps per loop if not yet there
-
-  FrameDetected = false; 
-
-  //-------------ScanFilm-----------
-  if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
-    retvalue = SCAN_TERMINATION_REQUESTED; 
-    FrameDetected = false; 
-    //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
-    LastFrameSteps = 0;
-    if (UVLedOn) {
-        analogWrite(11, 0); // Turn off UV LED
-        UVLedOn = false;
-    }
-  }
+  if (CurrentTime < TimeToScan)
+    return (retvalue);
   else {
-    FrameDetected = IsHoleDetected();
-    if (!FrameDetected) {
+    TimeToScan = CurrentTime + ScanSpeed;
+
+    Wire.begin(16);
+
+    analogWrite(11, UVLedBrightness);
+    UVLedOn = true;
+
+    TractionSwitchActive = digitalRead(TractionStopPin);
+
+    if (FrameStepsDone > DecreaseSpeedFrameSteps) {
+      ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+      //ScanSpeed = FetchFrameScanSpeed + 0;
+      steps_to_do = 1;    // Only one step per loop once we are close to frame detection
+    }
+    else     
+      steps_to_do = 5;    // 5 steps per loop if not yet there
+
+    FrameDetected = false; 
+
+    //-------------ScanFilm-----------
+    if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
+      retvalue = SCAN_TERMINATION_REQUESTED; 
+      FrameDetected = false; 
+      //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
+      LastFrameSteps = 0;
+      if (UVLedOn) {
+          analogWrite(11, 0); // Turn off UV LED
+          UVLedOn = false;
+      }
+    }
+    else {
+      FrameDetected = IsHoleDetected();
+      if (!FrameDetected) {
       // ---- Speed on stepper motors  ------------------
-      if ((CurrentTime - LastTime) >= ScanSpeed ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-        LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
-        for (int x = 0; x < 5; x++) {    // Advance steps five at a time, otherwise too slow
+        for (int x = 0; x < steps_to_do; x++) {    // Advance steps five at a time, otherwise too slow
           FrameStepsDone = FrameStepsDone + 1; 
           digitalWrite(MotorB_Stepper, LOW); 
           digitalWrite(MotorB_Stepper, HIGH); 
@@ -739,39 +753,39 @@ ScanResult scan(int UI_Command) {
         digitalWrite(MotorB_Stepper, LOW);
       }
     }
-  }
 
-  if (FrameDetected) {
-    DebugPrintStr("Frame!"); 
-    LastFrameSteps = FrameStepsDone;
-    FrameStepsDone = 0; 
-    StartPictureSaveTime = micros();
-    // Tell UI (Raspberry PI) a new frame is available for processing
-    if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
-      tone(A2, 2000, 35); 
+    if (FrameDetected) {
+      DebugPrintStr("Frame!"); 
+      LastFrameSteps = FrameStepsDone;
+      FrameStepsDone = 0; 
+      StartPictureSaveTime = micros();
+      // Tell UI (Raspberry PI) a new frame is available for processing
+      if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
+        tone(A2, 2000, 35); 
+      }
+      else {
+        EventForRPi = 11; 
+        digitalWrite(13, HIGH);
+      }
+      
+      FrameDetected = false;
+      retvalue = SCAN_FRAME_DETECTED;
+      DebugPrint("FrmS",LastFrameSteps);
+      DebugPrint("FrmT",CurrentTime-StartFrameTime);
+      if (DebugState == FrameSteps)
+        SerialPrintInt(LastFrameSteps);
     }
-    else {
-      EventForRPi = 11; 
+    else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
+      retvalue = SCAN_FRAME_DETECTION_ERROR;    
+      FrameStepsDone = 0;
+      DebugPrintStr("Err/scan");
+      // Tell UI (Raspberry PI) an error happened during scanning
+      EventForRPi = 12; 
       digitalWrite(13, HIGH);
     }
-    
-    FrameDetected = false;
-    retvalue = SCAN_FRAME_DETECTED;
-    DebugPrint("FrmS",LastFrameSteps);
-    DebugPrint("FrmT",CurrentTime-StartFrameTime);
-    if (DebugState == FrameSteps)
-      SerialPrintInt(LastFrameSteps);
-  }
-  else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
-    retvalue = SCAN_FRAME_DETECTION_ERROR;    
-    FrameStepsDone = 0;
-    DebugPrintStr("Err/scan");
-    // Tell UI (Raspberry PI) an error happened during scanning
-    EventForRPi = 12; 
-    digitalWrite(13, HIGH);
-  }
 
-  return (retvalue);
+    return (retvalue);
+  }
 }
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
