@@ -107,6 +107,7 @@ ScriptDir = os.path.dirname(
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
+last_cmd_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
