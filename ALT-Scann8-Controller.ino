@@ -582,7 +582,7 @@ void ReportPlotterInfo() {
 
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
-      NextReport = millis() + 1;
+      NextReport = millis() + 10;
       sprintf(out,"%i,%i,%i,%i,1200", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
@@ -593,11 +593,11 @@ void ReportPlotterInfo() {
 
 void SlowForward(){
   static unsigned long LastMove = 0;
-  if (millis() > LastMove) {
+  if (micros() > LastMove) {
     GetLevelPT();   // No need to know PT level here, but used to update plotter data
     CollectOutgoingFilm(true);
     digitalWrite(MotorB_Stepper, HIGH);
-    LastMove = millis() + 1;
+    LastMove = micros() + 700;
   }
 }
 
