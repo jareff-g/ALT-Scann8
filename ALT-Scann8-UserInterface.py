@@ -220,13 +220,9 @@ def send_arduino_command(cmd, param=12345):
     global SimulatedRun, ALT_Scann8_controller_detected
 
     if not SimulatedRun:
-        if ALT_Scann8_controller_detected or cmd == 1:
-            #i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
-            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param/256)])  # Send command to Arduino
-            logging.debug("Sending command %i to Arduino", cmd)
-        else:
-            logging.error("Trying to send command %i to Arduino, "
-                          "but ALT version not detected", cmd)
+        #i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
+        i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param/256)])  # Send command to Arduino
+        logging.debug("Sending command %i to Arduino", cmd)
 
 
 def exit_app():  # Exit Application
@@ -1935,14 +1931,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
-    elif ArduinoTrigger == 1:  # ALT Controller 0.9.1 or higher identified
-        ALT_Scann8_controller_detected = True
-        logging.info("Received ALT ID answer from Arduino - OK")
-    elif ArduinoTrigger == 2:  # ALT Controller identified
-        logging.info("Received pre-0.9.1 ALT ID answer from Arduino - KO")
-    elif ArduinoTrigger == 3:  # ALT Controller was reloaded, need to identify again
-        send_arduino_command(1, 1)
-        logging.info("Received ALT ID request from Arduino, resending ID")
     elif ArduinoTrigger == 11:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == 12:  # Error during scan
@@ -2919,7 +2907,6 @@ def main(argv):
 
     if not SimulatedRun:
         arduino_listen_loop()
-        send_arduino_command(1, 1)
 
     build_ui()
 

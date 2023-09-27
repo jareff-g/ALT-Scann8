@@ -45,7 +45,6 @@ int MaxDebugRepetitions = 3;
 int Pulse = LOW;
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
 // I2C commands: Constant definition
- #define CMD_VERSION_ID_CHECK 1
  #define CMD_START_SCAN 10
  #define CMD_TERMINATE 11
  #define CMD_GET_NEXT_FRAME 12
@@ -137,9 +136,6 @@ int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 
-// Flag to detect ALT UI version
-// Need to prevent operation with main version since compatibility cannot be maintained
-boolean ALT_Scann8_UI_detected = false;
 
 // Collect outgoing film frequency
 int collect_modulo = 10; 
@@ -203,12 +199,6 @@ void loop() {
   while (1) {
     if (dataInQueue()) {
       UI_Command = pop(&param);   // Get next command from queue if one exists
-      if (!ALT_Scann8_UI_detected && UI_Command != CMD_VERSION_ID_CHECK) {
-        UI_Command = 0; // Drop dequeued command until ALT UI version detected
-        DebugPrintStr("UI req no id"); 
-        EventForRPi = 3;  // Tell ALT UI to identify itself
-        digitalWrite(13, HIGH);
-      }
     }
     else
       UI_Command = 0;
@@ -258,18 +248,6 @@ void loop() {
     switch (ScanState) {
       case Sts_Idle:
         switch (UI_Command) {
-          case CMD_VERSION_ID_CHECK:
-            if (param == 1) {
-              ALT_Scann8_UI_detected = true;
-              DebugPrintStr("ALT UI OK"); 
-              EventForRPi = CMD_VERSION_ID_CHECK;  // Tell ALT UI that ALT controller is present too
-              digitalWrite(13, HIGH);
-            }
-            else {
-              // UI version does not support I2C multi-byte exchange, can't work
-              DebugPrintStr("Pre 0.9.1 ALT UI - KO"); 
-            }
-            break;
           case CMD_START_SCAN:
             DebugPrintStr(">Scan"); 
             ScanState = Sts_Scan;
