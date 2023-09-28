@@ -226,13 +226,14 @@ void loop() {
     if (UI_Command == CMD_SET_PT_LEVEL || UI_Command == CMD_SET_MIN_FRAME_STEPS) {
         switch (UI_Command) {
           case CMD_SET_PT_LEVEL:
-            if (param >= 0 && param <= 900)
+            if (param >= 0 && param <= 900) {
               PerforationThresholdLevel = param;
               OriginalPerforationThresholdLevel = param;
               DebugPrint(">PTLevel",param);
+            }
             break;
           case CMD_SET_MIN_FRAME_STEPS:
-            if (param >= 100 && param <= 600)
+            if (param >= 100 && param <= 600) {
               MinFrameSteps = param;
               OriginalMinFrameSteps = param;
               if (IsS8)
@@ -242,6 +243,7 @@ void loop() {
               MinFrameSteps = param;
               DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
               DebugPrint(">MinSteps",param);
+            }
             break;
         }      
     }
@@ -500,7 +502,7 @@ boolean FastForwardFilm(int UI_Command) {
     else {
       retvalue = false;
       stopping = false;
-      digitalWrite(MotorC_Neutral, HIGH); 
+      digitalWrite(MotorA_Neutral, HIGH);
       digitalWrite(MotorB_Neutral, LOW);
       digitalWrite(MotorC_Neutral, LOW); 
       delay (100);
@@ -582,8 +584,8 @@ void ReportPlotterInfo() {
 
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
-      NextReport = millis() + 10;
-      sprintf(out,"%i,%i,%i,%i,1200", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed);
+      NextReport = millis() + 5;
+      sprintf(out,"%i,%i,%i,%i,%i,%i", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed,MaxPT,MinPT);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
       PreviousFrameSteps = LastFrameSteps;
@@ -605,7 +607,7 @@ void SlowForward(){
 boolean FilmInFilmgate() {
   int SignalLevel;
   boolean retvalue = false;
-  int mini=300, maxi=0;
+  int mini=800, maxi=0;
 
   analogWrite(11, UVLedBrightness); // Turn on UV LED
   UVLedOn = true;
