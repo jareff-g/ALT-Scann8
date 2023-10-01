@@ -1899,7 +1899,7 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
     win.after(1000, temperature_loop)
 
 
-def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatches accordingly
+def arduino_listen_loop():  # Waits for Arduino communicated events and dispatches accordingly
     global NewFrameAvailable
     global RewindErrorOutstanding, RewindEndOutstanding
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
@@ -1912,7 +1912,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
 
     if not SimulatedRun:
         try:
-            ArduinoTrigger = i2c.read_byte_data(16, 0)
+            ArduinoData = i2c.read_i2c_block_data(16, 3)
+            ArduinoTrigger = ArduinoData[0]
+            ArduinoParam1 =  ArduinoData[1]
+            ArduinoParam2 =  ArduinoData[2]
         except IOError:
             ArduinoTrigger = 0
             # Log error to console
@@ -1949,6 +1952,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events adn dispatch
     elif ArduinoTrigger == 65:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
+    elif ArduinoTrigger == 50:  # Set PT level: Arduino reporting back autocalculated threshold level
+        pt_level_str.set(str(ArduinoParam1*256+ArduinoParam2))
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
