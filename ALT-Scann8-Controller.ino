@@ -29,6 +29,14 @@ More info in README.md file
 const int PHOTODETECT = A0; // Analog pin 0 perf
 int MaxPT = 0;
 int MinPT = 200;
+// These two vars are to keep max/min pt values for the recent past
+// Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
+// are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
+// (avoid decreasign/increasing too fast).
+// The idea is to see if we can mak ethe PT level value automatically set by the software, so that it adapt sto different 
+// part of the film (clear/dark around the holes) dynamically.
+int MaxPT_Dynamic = 0;
+int MinPT_Dynamic = 10000;
 
 
 enum {
@@ -100,9 +108,9 @@ int FilteredSignalLevel = 0;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 255;                   // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 250 ;              // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 500;    // 5000 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 100;  // 2000 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+unsigned long ScanSpeed = 250 ;              // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 500;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long DecreaseScanSpeedStep = 100;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
@@ -113,14 +121,14 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int MinFrameStepsR8 = 257;            // Default value for R8
 int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsBefore = 20;  // No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 20;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 // int Paus = LOW;                          // JRE: Unused
 int FrameStepsDone = 0;                     // Count steps
-int OriginalScanSpeed = ScanSpeed;          // restoration original value
+unsigned long OriginalScanSpeed = ScanSpeed;          // restoration original value
 int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
 
 int LastFrameSteps = 0;                     // stores number of steps
@@ -133,6 +141,7 @@ unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get n
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
 int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60-Rewind end, 61-FF end, 64-Rewind error, 65-FF error
+int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value to RPi for display)
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 
@@ -276,6 +285,10 @@ void loop() {
             ScanSpeed = OriginalScanSpeed; 
             DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
             DebugPrintStr(">Next fr.");
+            // Also send to RPi autocalculated threshold level every frame
+            EventForRPi = CMD_SET_PT_LEVEL;
+            ParamForRPi = PerforationThresholdLevel;
+            digitalWrite(13, HIGH);  
             break;
           case CMD_SET_REGULAR_8:  // Select R8 film
             IsS8 = false;
@@ -572,7 +585,11 @@ int GetLevelPT() {
   PT_SignalLevelRead = analogRead(PHOTODETECT);
   MaxPT = max(PT_SignalLevelRead, MaxPT);
   MinPT = min(PT_SignalLevelRead, MinPT);
-
+  MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
+  MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
+  if (MaxPT_Dynamic > 10) MaxPT_Dynamic--;
+  if (MinPT_Dynamic < 10000) MinPT_Dynamic++;
+  PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.7))/10);
   return(PT_SignalLevelRead);
 }
 
@@ -580,12 +597,12 @@ int GetLevelPT() {
 void ReportPlotterInfo() {
   static unsigned long NextReport = 0;
   static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
-  char out[20];
+  char out[40];
 
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
       NextReport = millis() + 5;
-      sprintf(out,"%i,%i,%i,%i,%i,%i", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed,MaxPT,MinPT);
+      sprintf(out,"%i,%i,%i,%lu,%i,%i,%i", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
       PreviousFrameSteps = LastFrameSteps;
@@ -785,8 +802,13 @@ void receiveEvent(int byteCount) {
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
+  byte cmd_array[3];
 
-  Wire.write(EventForRPi);
+  cmd_array[0] = EventForRPi;
+  cmd_array[1] = ParamForRPi/256;
+  cmd_array[2] = ParamForRPi%256;
+  Wire.write(cmd_array,3);
+
   EventForRPi = 0;
 }
 
