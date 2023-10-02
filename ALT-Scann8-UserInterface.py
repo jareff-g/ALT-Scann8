@@ -114,6 +114,7 @@ MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be p
 PTLevelS8 = 80
 PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
+PTLevel_auto = True
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
 FrameArrivalTime = 0
@@ -213,7 +214,8 @@ SessionData = {
     "MinFrameSteps":  290,
     "PTLevelS8":  80,
     "PTLevelR8":  200,
-    "PTLevel":  80
+    "PTLevel":  80,
+    "PTLevelAuto": True
 }
 
 
@@ -757,6 +759,20 @@ def pt_level_spinbox_focus_out(event):
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
     send_arduino_command(50, PTLevel)
+
+
+def pt_level_spinbox_dbl_click(event):
+    global pt_level_spinbox, pt_level_str
+    global PTLevel, PTLevel_auto
+
+    PTLevel_auto = not PTLevel_auto
+    SessionData["PTLevelAuto"] = PTLevel_auto
+    if PTLevel_auto:
+        pt_level_spinbox.config(state=DISABLED)
+    else:
+        pt_level_spinbox.config(state=NORMAL)
+    send_arduino_command(50, 0 if PTLevel_auto else PTLevel)
+
 
 
 def stabilization_delay_down():
@@ -1952,7 +1968,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == 65:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
-    elif ArduinoTrigger == 50:  # Set PT level: Arduino reporting back autocalculated threshold level
+    elif ArduinoTrigger == 50:  # Set PT level: Arduino tell us autocalculated threshold level
         pt_level_str.set(str(ArduinoParam1*256+ArduinoParam2))
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
@@ -2119,7 +2135,7 @@ def load_session_data():
     global exposure_frame_value_label
     global min_frame_steps_str, pt_level_str
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8
-    global PTLevel, PTLevelS8, PTLevelR8
+    global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2216,11 +2232,22 @@ def load_session_data():
                     PTLevel = SessionData["PTLevel"]
                     pt_level_str.set(str(PTLevel))
                     if not SimulatedRun:
-                        send_arduino_command(50, PTLevel)
+                        if (not PTLevel_auto):
+                            send_arduino_command(50, PTLevel)
                 if 'PTLevelS8' in SessionData:
                     PTLevelS8 = SessionData["PTLevelS8"]
                 if 'PTLevelR8' in SessionData:
                     PTLevelR8 = SessionData["PTLevelR8"]
+                if 'PTLevelAuto' in SessionData:
+                    PTLevel_auto = SessionData["PTLevelAuto"]
+                    pt_level_str.set(str(PTLevel))
+                    if not SimulatedRun:
+                        if PTLevel_auto:
+                            pt_level_spinbox.config(state=DISABLED)
+                            send_arduino_command(50, 0)
+                        else:
+                            pt_level_spinbox.config(fg='black', state=NORMAL)
+                            send_arduino_command(50, PTLevel)
 
         display_preview()
 
@@ -2827,6 +2854,7 @@ def build_ui():
             textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
         pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
+        pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
         pt_level_selection('down')
 
         if ExperimentalMode:
