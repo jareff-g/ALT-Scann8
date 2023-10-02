@@ -45,12 +45,12 @@ enum {
   DebugInfo,
   DebugInfoSingle,
   None
-} DebugState = PlotterInfo;
+} DebugState = None;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
 
-int Pulse = LOW;
+boolean GreenLedOn = false;  
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
 // I2C commands: Constant definition
  #define CMD_START_SCAN 10
@@ -144,7 +144,7 @@ int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60
 int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value to RPi for display)
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
-
+boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 // Collect outgoing film frequency
 int collect_modulo = 10; 
@@ -164,7 +164,7 @@ volatile struct {
 void setup() {
 
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
-  Serial.begin(500000);  // As fast as possible for debug, otherwise it slows down execution
+  Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
   
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
@@ -236,9 +236,14 @@ void loop() {
         switch (UI_Command) {
           case CMD_SET_PT_LEVEL:
             if (param >= 0 && param <= 900) {
-              PerforationThresholdLevel = param;
-              OriginalPerforationThresholdLevel = param;
-              DebugPrint(">PTLevel",param);
+                if (param == 0)
+                  PT_Level_Auto = true;     // zero means we go in automatic mode
+                else{
+                  PT_Level_Auto = false;     // zero means we go in automatic mode
+                  PerforationThresholdLevel = param;
+                  OriginalPerforationThresholdLevel = param;
+                }
+                DebugPrint(">PTLevel",param);
             }
             break;
           case CMD_SET_MIN_FRAME_STEPS:
@@ -285,26 +290,30 @@ void loop() {
             ScanSpeed = OriginalScanSpeed; 
             DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
             DebugPrintStr(">Next fr.");
-            // Also send to RPi autocalculated threshold level every frame
-            EventForRPi = CMD_SET_PT_LEVEL;
-            ParamForRPi = PerforationThresholdLevel;
-            digitalWrite(13, HIGH);  
+            // Also send, if required, to RPi autocalculated threshold level every frame
+            if (PT_Level_Auto) {
+                EventForRPi = CMD_SET_PT_LEVEL;
+                ParamForRPi = PerforationThresholdLevel;
+                digitalWrite(13, HIGH);
+            }
             break;
           case CMD_SET_REGULAR_8:  // Select R8 film
             IsS8 = false;
             MinFrameSteps = MinFrameStepsR8;
             DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-            PerforationThresholdLevel = PerforationThresholdLevelR8;
             OriginalMinFrameSteps = MinFrameSteps;
-            OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+            if (!PT_Level_Auto)
+                PerforationThresholdLevel = PerforationThresholdLevelR8;
+            OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
             break;
           case CMD_SET_SUPER_8:  // Select S8 film
             IsS8 = true;
             MinFrameSteps = MinFrameStepsS8;
             DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-            PerforationThresholdLevel = PerforationThresholdLevelS8;
             OriginalMinFrameSteps = MinFrameSteps;
-            OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+            if (!PT_Level_Auto)
+                PerforationThresholdLevel = PerforationThresholdLevelS8;
+            OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
             break;
           case CMD_SWITCH_REEL_LOCK_STATUS:
             ScanState = Sts_UnlockReels;
@@ -579,17 +588,15 @@ void CollectOutgoingFilm(bool ff_collect = false) {
 
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
-  static int count = 0;
-
-  //delayMicroseconds(100);
   PT_SignalLevelRead = analogRead(PHOTODETECT);
   MaxPT = max(PT_SignalLevelRead, MaxPT);
   MinPT = min(PT_SignalLevelRead, MinPT);
   MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
   MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
-  if (MaxPT_Dynamic > 10) MaxPT_Dynamic--;
-  if (MinPT_Dynamic < 10000) MinPT_Dynamic++;
-  PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.7))/10);
+  if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
+  if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+  if (PT_Level_Auto)
+    PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
   return(PT_SignalLevelRead);
 }
 
@@ -597,12 +604,13 @@ int GetLevelPT() {
 void ReportPlotterInfo() {
   static unsigned long NextReport = 0;
   static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
-  char out[40];
+  static char out[100];
 
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
-      NextReport = millis() + 5;
-      sprintf(out,"%i,%i,%i,%lu,%i,%i,%i", PT_SignalLevelRead,LastFrameSteps,FrameStepsDone,ScanSpeed,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+      NextReport = millis() + 20;
+      sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+      //sprintf(out,"%i,%i,%i,%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
       PreviousFrameSteps = LastFrameSteps;
@@ -657,11 +665,6 @@ boolean IsHoleDetected() {
   boolean hole_detected = false;
   int PT_Level;
   
-  if (Pulse == HIGH) {  // If last time frame was detected ...
-    Pulse = LOW; 
-    analogWrite(A1, 0); // ... Turn off green led
-  }
-
   PT_Level = GetLevelPT();
   //if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
   //  return false;
@@ -683,9 +686,9 @@ boolean IsHoleDetected() {
 */
 
   // ------------- Frame detection ----
-  if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel && Pulse == LOW) {
+  if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
     hole_detected = true;
-    Pulse = HIGH; 
+    GreenLedOn = true; 
     analogWrite(A1, 255); // Light green led
   }
 
@@ -710,6 +713,11 @@ ScanResult scan(int UI_Command) {
 
     analogWrite(11, UVLedBrightness);
     UVLedOn = true;
+
+    if (GreenLedOn) {  // If last time frame was detected ...
+      GreenLedOn = false; 
+      analogWrite(A1, 0); // ... Turn off green led
+    }
 
     TractionSwitchActive = digitalRead(TractionStopPin);
 
