@@ -63,6 +63,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
  #define CMD_SINGLE_STEP 40
  #define CMD_SET_PT_LEVEL 50
  #define CMD_SET_MIN_FRAME_STEPS 52
+ #define CMD_SET_EXTRA_FRAME_STEPS 54
  #define CMD_REWIND 60
  #define CMD_FAST_FORWARD 61
  #define CMD_INCREASE_WIND_SPEED 62
@@ -121,6 +122,7 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int MinFrameStepsR8 = 257;            // Default value for R8
 int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
+int ExtraFrameSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 20;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
@@ -232,35 +234,37 @@ void loop() {
       }
     }
 
-    if (UI_Command == CMD_SET_PT_LEVEL || UI_Command == CMD_SET_MIN_FRAME_STEPS) {
-        switch (UI_Command) {
-          case CMD_SET_PT_LEVEL:
-            if (param >= 0 && param <= 900) {
-                if (param == 0)
-                  PT_Level_Auto = true;     // zero means we go in automatic mode
-                else{
-                  PT_Level_Auto = false;     // zero means we go in automatic mode
-                  PerforationThresholdLevel = param;
-                  OriginalPerforationThresholdLevel = param;
-                }
-                DebugPrint(">PTLevel",param);
+    switch (UI_Command) {
+      case CMD_SET_PT_LEVEL:
+        if (param >= 0 && param <= 900) {
+            if (param == 0)
+              PT_Level_Auto = true;     // zero means we go in automatic mode
+            else{
+              PT_Level_Auto = false;     // zero means we go in automatic mode
+              PerforationThresholdLevel = param;
+              OriginalPerforationThresholdLevel = param;
             }
-            break;
-          case CMD_SET_MIN_FRAME_STEPS:
-            if (param >= 100 && param <= 600) {
-              MinFrameSteps = param;
-              OriginalMinFrameSteps = param;
-              if (IsS8)
-                MinFrameStepsS8 = param;
-              else
-                MinFrameStepsR8 = param;
-              MinFrameSteps = param;
-              DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-              DebugPrint(">MinSteps",param);
-            }
-            break;
-        }      
-    }
+            DebugPrint(">PTLevel",param);
+        }
+        break;
+      case CMD_SET_MIN_FRAME_STEPS:
+        if (param >= 100 && param <= 600) {
+          MinFrameSteps = param;
+          OriginalMinFrameSteps = param;
+          if (IsS8)
+            MinFrameStepsS8 = param;
+          else
+            MinFrameStepsR8 = param;
+          MinFrameSteps = param;
+          DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+          DebugPrint(">MinSteps",param);
+        }
+        break;
+      case CMD_SET_EXTRA_FRAME_STEPS:
+        ExtraFrameSteps = param;
+        break;
+    }      
+
     switch (ScanState) {
       case Sts_Idle:
         switch (UI_Command) {
@@ -695,6 +699,14 @@ boolean IsHoleDetected() {
   return(hole_detected);
 }
 
+void capstan_advance(int steps)
+{
+  for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
+    digitalWrite(MotorB_Stepper, LOW); 
+    digitalWrite(MotorB_Stepper, HIGH); 
+  }
+  digitalWrite(MotorB_Stepper, LOW);
+}
 
 // ----- This is the function to "ScanFilm" -----
 // Returns false when done
@@ -745,22 +757,15 @@ ScanResult scan(int UI_Command) {
     else {
       FrameDetected = IsHoleDetected();
       if (!FrameDetected) {
-      // ---- Speed on stepper motors  ------------------
-        for (int x = 0; x < steps_to_do; x++) {    // Advance steps five at a time, otherwise too slow
-          FrameStepsDone = FrameStepsDone + 1; 
-          digitalWrite(MotorB_Stepper, LOW); 
-          digitalWrite(MotorB_Stepper, HIGH); 
-          // The photo-transistor cannot react immediatelly after the motor moves, therefore,
-          // instead of checking it in this loop, we leave it for the next main loop, since 
-          // checking it here would require  inserting a delay that would considerably slow
-          // down the process.
-        }
-        digitalWrite(MotorB_Stepper, LOW);
+        capstan_advance(steps_to_do);
+        FrameStepsDone += steps_to_do;
       }
     }
 
     if (FrameDetected) {
-      DebugPrintStr("Frame!"); 
+      DebugPrintStr("Frame!");
+      if (ExtraFrameSteps > 0)
+        capstan_advance(ExtraFrameSteps);
       LastFrameSteps = FrameStepsDone;
       FrameStepsDone = 0; 
       StartPictureSaveTime = micros();
