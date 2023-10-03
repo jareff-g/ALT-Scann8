@@ -70,7 +70,7 @@ import threading
 import queue
 
 
-#  ######### Global variable definition ##########
+#  ######### Global variable definition (I know, too many. Need to go back to school) ##########
 FocusState = True
 lastFocus = True
 FocusZoomActive = False
@@ -111,6 +111,7 @@ last_cmd_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
+ExtraFrameSteps = 0     # Extra steps manually added after frame detected for fine adjustment
 PTLevelS8 = 80
 PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
@@ -149,6 +150,25 @@ simulated_capture_image = ''
 simulated_images_in_list = 0
 FilmHoleY = 300
 SharpnessValue = 1
+
+#Arduino comnmands
+CMD_START_SCAN = 10
+CMD_TERMINATE = 11
+CMD_GET_NEXT_FRAME = 12
+CMD_SET_REGULAR_8 = 18
+CMD_SET_SUPER_8 = 19
+CMD_SWITCH_REEL_LOCK_STATUS = 20
+CMD_FILM_FORWARD = 30
+CMD_SINGLE_STEP = 40
+CMD_SET_PT_LEVEL = 50
+CMD_SET_MIN_FRAME_STEPS = 52
+CMD_SET_EXTRA_FRAME_STEPS = 54
+CMD_REWIND = 60
+CMD_FAST_FORWARD = 61
+CMD_INCREASE_WIND_SPEED = 62
+CMD_DECREASE_WIND_SPEED = 63
+CMD_UNCONDITIONAL_REWIND = 64
+CMD_UNCONDITIONAL_FAST_FORWARD = 65
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
@@ -212,6 +232,7 @@ SessionData = {
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8":  260,
     "MinFrameSteps":  290,
+    "ExtraFrameSteps":  0,
     "PTLevelS8":  80,
     "PTLevelR8":  200,
     "PTLevel":  80,
@@ -236,7 +257,7 @@ def exit_app():  # Exit Application
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
-        send_arduino_command(11)   # Tell Arduino we stop (to turn off uv led
+        send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
         # Close preview if required
         if not IsPiCamera2 or PiCam2PreviewEnabled:
             camera.stop_preview()
@@ -262,7 +283,7 @@ def set_free_mode():
         Free_btn.config(text='Unlock Reels', bg=save_bg, fg=save_fg, relief=RAISED)
 
     if not SimulatedRun:
-        send_arduino_command(20)
+        send_arduino_command(CMD_SWITCH_REEL_LOCK_STATUS)
 
     FreeWheelActive = not FreeWheelActive
 
@@ -731,7 +752,7 @@ def min_frame_steps_selection(updown):
     MinFrameSteps = int(min_frame_steps_spinbox.get())
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    send_arduino_command(52, MinFrameSteps)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_focus_out(event):
@@ -740,7 +761,25 @@ def min_frame_steps_spinbox_focus_out(event):
     MinFrameSteps = int(min_frame_steps_spinbox.get())
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    send_arduino_command(52, MinFrameSteps)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+
+
+def extra_frame_steps_selection(updown):
+    global extra_frame_steps_spinbox, extra_frame_steps_str
+    global ExtraFrameSteps
+    ExtraFrameSteps = int(extra_frame_steps_spinbox.get())
+    SessionData["ExtraFrameSteps"] = ExtraFrameSteps
+    SessionData["ExtraFrameSteps" + SessionData["FilmType"]] = ExtraFrameSteps
+    send_arduino_command(CMD_SET_EXTRA_FRAME_STEPS, ExtraFrameSteps)
+
+
+def extra_frame_steps_spinbox_focus_out(event):
+    global extra_frame_steps_spinbox, extra_frame_steps_str
+    global ExtraFrameSteps
+    ExtraFrameSteps = int(extra_frame_steps_spinbox.get())
+    SessionData["ExtraFrameSteps"] = ExtraFrameSteps
+    SessionData["ExtraFrameSteps" + SessionData["FilmType"]] = ExtraFrameSteps
+    send_arduino_command(CMD_SET_EXTRA_FRAME_STEPS, ExtraFrameSteps)
 
 
 def pt_level_selection(updown):
@@ -749,7 +788,7 @@ def pt_level_selection(updown):
     PTLevel = int(pt_level_spinbox.get())
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    send_arduino_command(50, PTLevel)
+    send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_focus_out(event):
@@ -758,7 +797,7 @@ def pt_level_spinbox_focus_out(event):
     PTLevel = int(pt_level_spinbox.get())
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    send_arduino_command(50, PTLevel)
+    send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_dbl_click(event):
@@ -771,7 +810,7 @@ def pt_level_spinbox_dbl_click(event):
         pt_level_spinbox.config(state=DISABLED)
     else:
         pt_level_spinbox.config(state=NORMAL)
-    send_arduino_command(50, 0 if PTLevel_auto else PTLevel)
+    send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
 
 
 
@@ -798,7 +837,7 @@ def rwnd_speed_down():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        send_arduino_command(62)
+        send_arduino_command(CMD_INCREASE_WIND_SPEED)
     if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
         rwnd_speed_delay += rwnd_speed_delay*0.1
     else:
@@ -811,7 +850,7 @@ def rwnd_speed_up():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        send_arduino_command(63)
+        send_arduino_command(CMD_DECREASE_WIND_SPEED)
     if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
         rwnd_speed_delay -= rwnd_speed_delay*0.1
     else:
@@ -887,7 +926,7 @@ def advance_movie():
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if not SimulatedRun:
-        send_arduino_command(30)
+        send_arduino_command(CMD_FILM_FORWARD)
 
     # Enable/Disable related buttons
     button_status_change_except(AdvanceMovie_btn, AdvanceMovieActive)
@@ -929,7 +968,7 @@ def rewind_movie():
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
-                send_arduino_command(64)    # Forced rewind, no filmgate check
+                send_arduino_command(CMD_UNCONDITIONAL_REWIND)    # Forced rewind, no filmgate check
                 # Invoke fast_forward_loop a first time when fast-forward starts
                 win.after(5, rewind_loop)
         else:
@@ -945,7 +984,7 @@ def rewind_movie():
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            send_arduino_command(60)
+            send_arduino_command(CMD_REWIND)
 
     if RewindErrorOutstanding:
         RewindErrorOutstanding = False
@@ -1004,7 +1043,7 @@ def fast_forward_movie():
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
-                send_arduino_command(65)    # Forced FF, no filmgate check
+                send_arduino_command(CMD_UNCONDITIONAL_FAST_FORWARD)    # Forced FF, no filmgate check
                 # Invoke fast_forward_loop a first time when fast-forward starts
                 win.after(5, fast_forward_loop)
         else:
@@ -1020,7 +1059,7 @@ def fast_forward_movie():
     if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            send_arduino_command(61)
+            send_arduino_command(CMD_FAST_FORWARD)
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
@@ -1126,7 +1165,7 @@ def single_step_movie():
     global camera
 
     if not SimulatedRun:
-        send_arduino_command(40)
+        send_arduino_command(CMD_SINGLE_STEP)
 
         if IsPiCamera2:
             # If no camera preview, capture frame in memory and display it
@@ -1301,9 +1340,9 @@ def set_s8():
     SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
     if not SimulatedRun:
-        send_arduino_command(19)
-        send_arduino_command(50, PTLevel)
-        send_arduino_command(52, MinFrameSteps)
+        send_arduino_command(CMD_SET_SUPER_8)
+        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 
@@ -1326,9 +1365,9 @@ def set_r8():
     SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
     if not SimulatedRun:
-        send_arduino_command(18)
-        send_arduino_command(50, PTLevel)
-        send_arduino_command(52, MinFrameSteps)
+        send_arduino_command(CMD_SET_REGULAR_8)
+        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def film_hole_up():
@@ -1772,7 +1811,7 @@ def start_scan():
 
         # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun:
-            send_arduino_command(10)
+            send_arduino_command(CMD_START_SCAN)
 
         # Invoke capture_loop a first time shen scan starts
         win.after(5, capture_loop)
@@ -1838,7 +1877,7 @@ def capture_loop():
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
                     NewFrameAvailable = False
                     logging.debug("Frame %i captured.", CurrentFrame)
-                    send_arduino_command(12)  # Tell Arduino to move to next frame
+                    send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
                 except IOError:
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
@@ -1962,10 +2001,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == 61:  # FastForward ended, we can re-enable buttons
         FastForwardEndOutstanding = True
         logging.info("Received fast forward end event from Arduino")
-    elif ArduinoTrigger == 64:  # Error during Rewind
+    elif ArduinoTrigger == CMD_UNCONDITIONAL_REWIND:  # Error during Rewind
         RewindErrorOutstanding = True
         logging.warning("Received rewind error from Arduino")
-    elif ArduinoTrigger == 65:  # Error during FastForward
+    elif ArduinoTrigger == CMD_UNCONDITIONAL_FAST_FORWARD:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == 50:  # Set PT level: Arduino tell us autocalculated threshold level
@@ -2133,8 +2172,8 @@ def load_session_data():
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global exposure_frame_value_label
-    global min_frame_steps_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8
+    global min_frame_steps_str, extra_frame_steps_str, pt_level_str
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, ExtraFrameSteps
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
 
     if PersistedDataLoaded:
@@ -2156,12 +2195,12 @@ def load_session_data():
             if 'FilmType' in SessionData:
                 if SessionData["FilmType"] == "R8":
                     if not SimulatedRun:
-                        send_arduino_command(18)
+                        send_arduino_command(CMD_SET_REGULAR_8)
                     film_type_R8_btn.config(relief=SUNKEN)
                     film_type_S8_btn.config(relief=RAISED)
                 elif SessionData["FilmType"] == "S8":
                     if not SimulatedRun:
-                        send_arduino_command(19)
+                        send_arduino_command(CMD_SET_SUPER_8)
                     film_type_R8_btn.config(relief=RAISED)
                     film_type_S8_btn.config(relief=SUNKEN)
             if 'NegativeCaptureActive' in SessionData:
@@ -2223,17 +2262,22 @@ def load_session_data():
                     MinFrameSteps = SessionData["MinFrameSteps"]
                     min_frame_steps_str.set(str(MinFrameSteps))
                     if not SimulatedRun:
-                        send_arduino_command(52, MinFrameSteps)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
                 if 'MinFrameStepsR8' in SessionData:
                     MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
+                if 'ExtraFrameSteps' in SessionData:
+                    ExtraFrameSteps = SessionData["ExtraFrameSteps"]
+                    extra_frame_steps_str.set(str(ExtraFrameSteps))
+                    if not SimulatedRun:
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, ExtraFrameSteps)
                 if 'PTLevel' in SessionData:
                     PTLevel = SessionData["PTLevel"]
                     pt_level_str.set(str(PTLevel))
                     if not SimulatedRun:
                         if (not PTLevel_auto):
-                            send_arduino_command(50, PTLevel)
+                            send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevelS8' in SessionData:
                     PTLevelS8 = SessionData["PTLevelS8"]
                 if 'PTLevelR8' in SessionData:
@@ -2244,10 +2288,10 @@ def load_session_data():
                     if not SimulatedRun:
                         if PTLevel_auto:
                             pt_level_spinbox.config(state=DISABLED)
-                            send_arduino_command(50, 0)
+                            send_arduino_command(CMD_SET_PT_LEVEL, 0)
                         else:
                             pt_level_spinbox.config(fg='black', state=NORMAL)
-                            send_arduino_command(50, PTLevel)
+                            send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
         display_preview()
 
@@ -2492,11 +2536,11 @@ def build_ui():
     global preview_border_frame
     global draw_capture_label
     global hdr_btn, hq_btn, turbo_btn
-    global min_frame_steps_spinbox, min_frame_steps_str
+    global min_frame_steps_str, extra_frame_steps_str
     global MinFrameSteps
     global pt_level_spinbox, pt_level_str
     global PTLevel
-    global min_frame_steps_spinbox, pt_level_spinbox
+    global min_frame_steps_spinbox, extra_frame_steps_spinbox, pt_level_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2840,11 +2884,26 @@ def build_ui():
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         min_frame_steps_selection('down')
+        # Spinbox to select ExtraFrameSteps on Arduino
+        extra_frame_steps_label = tk.Label(frame_alignment_frame,
+                                         text='Extra steps:',
+                                         width=10, font=("Arial", 7))
+        extra_frame_steps_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        extra_frame_steps_str = tk.StringVar(value=str(ExtraFrameSteps))
+        extra_frame_steps_selection_aux = frame_alignment_frame.register(
+            extra_frame_steps_selection)
+        extra_frame_steps_spinbox = tk.Spinbox(
+            frame_alignment_frame,
+            command=(extra_frame_steps_selection_aux, '%d'), width=8,
+            textvariable=extra_frame_steps_str, from_=0, to=20, font=("Arial", 7))
+        extra_frame_steps_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        extra_frame_steps_spinbox.bind("<FocusOut>", extra_frame_steps_spinbox_focus_out)
+        extra_frame_steps_selection('down')
         # Spinbox to select PTLevel on Arduino
         pt_level_label = tk.Label(frame_alignment_frame,
                                   text='PT Level:',
                                   width=10, font=("Arial", 7))
-        pt_level_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        pt_level_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
         pt_level_str = tk.StringVar(value=str(PTLevel))
         pt_level_selection_aux = frame_alignment_frame.register(
             pt_level_selection)
@@ -2852,7 +2911,7 @@ def build_ui():
             frame_alignment_frame,
             command=(pt_level_selection_aux, '%d'), width=8,
             textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
-        pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        pt_level_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
         pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
         pt_level_selection('down')
