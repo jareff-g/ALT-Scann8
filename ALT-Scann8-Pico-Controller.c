@@ -25,7 +25,7 @@ More info in README.md file
 
 // ######### Pin definition section ##########
 #define PIN_PT              28  // ADC2
-#define PIN_BUZZER          27
+#define PIN_BUZZER          12
 #define PIN_TRACTION_STOP   4
 #define PIN_UV_LED          5
 #define PIN_GREEN_LED       6
@@ -57,7 +57,16 @@ More info in README.md file
 // Handling of PT values dynamically
 int MaxPT = 0;
 int MinPT = 200;
-int Pulse = 0;  // PT Level after filtering, LOW/HIGH in Arduino
+// These two vars are to keep max/min pt values for the recent past
+// Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
+// are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
+// (avoid decreasing/increasing too fast).
+// The idea is to see if we can mak ethe PT level value automatically set by the software, so that it adapt sto different
+// part of the film (clear/dark around the holes) dynamically.
+int MaxPT_Dynamic = 0;
+int MinPT_Dynamic = 10000;
+
+boolean GreenLedOn = false;
 
 enum {
   PT_Level,
@@ -83,6 +92,7 @@ int UI_Command; // Stores I2C command from Raspberry PI
 #define CMD_SINGLE_STEP 40
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
+#define CMD_SET_EXTRA_FRAME_STEPS 54
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -104,10 +114,10 @@ enum ScanState{
 ScanState=Sts_Idle;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
-int UVLedBrightness = 255;                  // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 250 ;             // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 500;    // 5000 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 500;  // 2000 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+unsigned int UVLedBrightness = 65535;       // Brightness UV led, may need to be changed depending on LED type
+unsigned long ScanSpeed = 250 ;             // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 500;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long DecreaseScanSpeedStep = 100;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
@@ -118,7 +128,8 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int MinFrameStepsR8 = 257;                  // Default value for R8
 int MinFrameStepsS8 = 288;                  // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
-int DecreaseSpeedFrameStepsBefore = 20;     // No need to anticipate slow down, the default MinFrameStep should be always less
+int ExtraFrameSteps = 0;                    // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int DecreaseSpeedFrameStepsBefore = 20;     // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -128,7 +139,8 @@ boolean UVLedOn = false;
 int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 int FrameStepsDone = 0;                     // Count steps
-int OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
+int MaxFrameSteps = 100;                      // Required to calculate led brightness (init with non-zero value, below potential real max)
+unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
 int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
@@ -141,8 +153,10 @@ unsigned long StartFrameTime = 0;           // Time at which we get RPi command 
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 
 int EventForRPi = 0;    // Used by Pico to pass an event to RPi
+int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value to RPi for display)
 
 int PT_SignalLevelRead;   // Raw signal level from phototransistor
+boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 // Flag to detect ALT UI version
 // Need to prevent operation with main version since compatibility cannot be maintained
@@ -191,6 +205,8 @@ void scan_i2c() {
 }
 
 void setup() {
+    uint BuzzerSliceNum;
+    uint UVSliceNum;
 
     // stdio_init_all initializes serial over USB on Pico. Kind of 'Serial.begin(9600)' on Arduino.
     // Once initialized, use a plain printf to send stuff over serial
@@ -221,17 +237,18 @@ void setup() {
     // Assign function to pins
     adc_init(); // Initialize ADC HW
     adc_gpio_init(PIN_PT);  // Initialize PIN_PT as ADC (ADC2)
-    adc_gpio_init(PIN_BUZZER);
     gpio_init(PIN_TRACTION_STOP);
     gpio_set_dir(PIN_TRACTION_STOP, false);
     gpio_pull_up(PIN_TRACTION_STOP);
+    gpio_init(PIN_BUZZER);
+    gpio_set_dir(PIN_BUZZER, true);
+    gpio_set_function(PIN_BUZZER, GPIO_FUNC_PWM);
     gpio_init(PIN_UV_LED);
     gpio_set_dir(PIN_UV_LED, true);
-    gpio_set_function(PIN_UV_LED, GPIO_FUNC_PWM);    // GPIO5 needs to be PWM, some additional stuff needs to be done ....
-    pwm_init....
-    ...other?
+    gpio_set_function(PIN_UV_LED, GPIO_FUNC_PWM);
     gpio_init(PIN_GREEN_LED);
     gpio_set_dir(PIN_GREEN_LED, true);
+    gpio_set_function(PIN_GREEN_LED, GPIO_FUNC_PWM);
     gpio_init(PIN_AUX1);
     gpio_set_dir(PIN_AUX1, true);   // Odd aux jumpers are OUT, even are IN
     gpio_init(PIN_AUX2);
@@ -261,6 +278,20 @@ void setup() {
     gpio_init(PIN_MOTOR_C_DIR);
     gpio_set_dir(PIN_MOTOR_C_DIR, true);   // Odd aux jumpers are OUT, even are IN
 
+    // Init PWM
+    BuzzerSliceNum = pwm_gpio_to_slice_num(PIN_BUZZER);
+    pwm_config BuzzerConfig = pwm_get_default_config();
+    pwm_init(BuzzerSliceNum, &BuzzerConfig, false); // Buzzer PWM will be started on demand only, by a 'tone' function TBD
+    UVSliceNum = pwm_gpio_to_slice_num(PIN_UV_LED);
+    pwm_config UVConfig = pwm_get_default_config();
+    pwm_init(UVSliceNum, &UVConfig, true);
+    pwm_set_gpio_level (PIN_UV_LED, 0);   // UV off on startup
+    GreenLedSliceNum = pwm_gpio_to_slice_num(PIN_GREEN_LED);
+    pwm_config GreenLedConfig = pwm_get_default_config();
+    pwm_init(GreenLedSliceNum, &GreenLedConfig, true);
+    pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Grren led off on startup
+
+
     // neutral position for Motor A
     gpio_put(PIN_MOTOR_A_NEUTRAL,1);
 
@@ -283,29 +314,37 @@ void loop() {
 
         TractionSwitchActive = !gpio_get(PIN_TRACTION_STOP);    // 0 means traction switch active
 
-        if (UI_Command == CMD_SET_PT_LEVEL || UI_Command == CMD_SET_MIN_FRAME_STEPS) {
-            switch (UI_Command) {
-                case CMD_SET_PT_LEVEL:
-                    if (param >= 0 && param <= 900) {
+        ReportPlotterInfo();    // Regular report of plotter info
+
+        switch (UI_Command) {
+            case CMD_SET_PT_LEVEL:
+                if (param >= 0 && param <= 900) {
+                    if (param == 0)
+                      PT_Level_Auto = true;     // zero means we go in automatic mode
+                    else{
+                      PT_Level_Auto = false;     // zero means we go in automatic mode
                       PerforationThresholdLevel = param;
                       OriginalPerforationThresholdLevel = param;
-                      DebugPrint(">PTLevel",param);
                     }
-                    break;
-                case CMD_SET_MIN_FRAME_STEPS:
-                    if (param >= 100 && param <= 600) {
-                      MinFrameSteps = param;
-                      OriginalMinFrameSteps = param;
-                      if (IsS8)
-                        MinFrameStepsS8 = param;
-                      else
-                        MinFrameStepsR8 = param;
-                      MinFrameSteps = param;
-                      DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-                      DebugPrint(">MinSteps",param);
-                    }
-                    break;
-            }
+                    DebugPrint(">PTLevel",param);
+                }
+                break;
+            case CMD_SET_MIN_FRAME_STEPS:
+                if (param >= 100 && param <= 600) {
+                  MinFrameSteps = param;
+                  OriginalMinFrameSteps = param;
+                  if (IsS8)
+                    MinFrameStepsS8 = param;
+                  else
+                    MinFrameStepsR8 = param;
+                  MinFrameSteps = param;
+                  DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                  DebugPrint(">MinSteps",param);
+                }
+                break;
+            case CMD_SET_EXTRA_FRAME_STEPS:
+                ExtraFrameSteps = param;
+                break;
         }
 
         switch (ScanState) {
@@ -336,6 +375,12 @@ void loop() {
                         ScanSpeed = OriginalScanSpeed;
                         DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
                         DebugPrintStr(">Next fr.");
+                        // Also send, if required, to RPi autocalculated threshold level every frame
+                        if (PT_Level_Auto) {
+                            EventForRPi = CMD_SET_PT_LEVEL;
+                            ParamForRPi = PerforationThresholdLevel;
+                            digitalWrite(13, HIGH);
+                        }
                         break;
                     case CMD_SET_REGULAR_8:  // Select R8 film
                         IsS8 = false;
@@ -344,6 +389,9 @@ void loop() {
                         PerforationThresholdLevel = PerforationThresholdLevelR8;
                         OriginalMinFrameSteps = MinFrameSteps;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+                        if (!PT_Level_Auto)
+                            PerforationThresholdLevel = PerforationThresholdLevelR8;
+                        OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
                         break;
                     case CMD_SET_SUPER_8:  // Select S8 film
                         IsS8 = true;
@@ -352,6 +400,9 @@ void loop() {
                         PerforationThresholdLevel = PerforationThresholdLevelS8;
                         OriginalMinFrameSteps = MinFrameSteps;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevel;
+                        if (!PT_Level_Auto)
+                            PerforationThresholdLevel = PerforationThresholdLevelS8;
+                        OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
                         break;
                     case CMD_SWITCH_REEL_LOCK_STATUS:
                         ScanState = Sts_UnlockReels;
@@ -470,8 +521,6 @@ void loop() {
                         // analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                     }
-                    // While reels unlocked, send PT level to allow manual tuning
-                    ReportLevelPT();
                 }
                 break;
             case Sts_Rewind:
@@ -641,19 +690,31 @@ int GetLevelPT() {
 
     MaxPT = max(SignalLevel, MaxPT);
     MinPT = min(SignalLevel, MinPT);
-    if (DebugState == PT_Level)
-        SerialPrintInt(SignalLevel);
+    MaxPT_Dynamic = max(SignalLevel*10, MaxPT_Dynamic);
+    MinPT_Dynamic = min(SignalLevel*10, MinPT_Dynamic);
+    if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
+    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (PT_Level_Auto)
+        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
 
     return(SignalLevel);
 }
 
 
-// ------------ Reports UV Led brightness to Serial Plotter 10 times/sec ----------
-void ReportLevelPT() {
-    static unsigned long LastReport = 0;
-    if (get_absolute_time() > LastReport) {
-        GetLevelPT();
-        LastReport = delayed_by_ms(get_absolute_time(),100);  // millis() + 100;
+// ------------ Reports info (PT level, steps/frame, etc) to Serial Plotter 10 times/sec ----------
+void ReportPlotterInfo() {
+    static unsigned long NextReport = 0;
+    static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
+    static char out[100];
+
+    if (DebugState == PlotterInfo && get_absolute_time() > NextReport) {
+        if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
+            NextReport = delayed_by_ms(get_absolute_time(),20);
+            sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+            SerialPrintStr(out);
+            Previous_PT_Signal = PT_SignalLevelRead;
+            PreviousFrameSteps = LastFrameSteps;
+        }
     }
 }
 
@@ -693,42 +754,30 @@ boolean FilmInFilmgate() {
 // Returns false if status should change to idle
 boolean IsHoleDetected() {
     boolean hole_detected = false;
-  
-    PT_SignalLevelRead = GetLevelPT();
+    int PT_Level;
 
-    if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
-        return false;
-
-    if (PT_SignalLevelRead >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
-        FilteredSignalLevel = PT_SignalLevelRead;
-    }
-/*
-    if (PT_SignalLevelRead >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
-        PerforationThresholdLevel = PerforationMaxLevel;
-    }
-    else if (PT_SignalLevelRead < PerforationMinLevel) {
-        PerforationThresholdLevel = OriginalPerforationThresholdLevel;
-    }
-*/
-    if (PT_SignalLevelRead < PerforationThresholdLevel-20) {
-        FilteredSignalLevel = 0;
-    }
+    PT_Level = GetLevelPT();
 
     // ------------- Frame detection ----
-    if (FrameStepsDone >= MinFrameSteps && FilteredSignalLevel >= PerforationThresholdLevel && Pulse == LOW) {
+    if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
         hole_detected = true;
-        Pulse = HIGH;
-        gpio_put(PIN_GREEN_LED,1); // Light green led
-        //analogWrite(A1, 255); // Light green led
-    }
-    else if (FilteredSignalLevel == 0 && Pulse == HIGH) {
-        Pulse = LOW;
-        gpio_put(PIN_GREEN_LED,0); // Turn off green led
-        //analogWrite(A1, 0); // Turn off green led
+        GreenLedOn = true;
+        pwm_set_gpio_level (PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led off on startup
+        //gpio_put(PIN_GREEN_LED,1); // Light green led
     }
 
     return(hole_detected);
 }
+
+void capstan_advance(int steps)
+{
+    for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
+        gpio_put(PIN_MOTOR_B_STEP,0);
+        gpio_put(PIN_MOTOR_B_STEP,1);
+    }
+    gpio_put(PIN_MOTOR_B_STEP,0);
+}
+
 
 
 // ----- This is the function to "ScanFilm" -----
@@ -742,6 +791,11 @@ ScanResult scan(int UI_Command) {
     pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
     //analogWrite(11, UVLedBrightness);
     UVLedOn = true;
+
+    if (GreenLedOn) {  // If last time frame was detected ...
+        GreenLedOn = false;
+        pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Turn off green led
+    }
 
     TractionSwitchActive = !gpio_get(PIN_TRACTION_STOP);    // 0 means traction switch active
 
@@ -768,25 +822,16 @@ ScanResult scan(int UI_Command) {
     else {
         FrameDetected = IsHoleDetected();
         if (!FrameDetected) {
-            // ---- Speed on stepper motors  ------------------
-            if (CurrentTime >= delayed_by_us(LastTime, ScanSpeed) ) {  // Last time is set to zero, and never modified. What is the purpose? Somethign migth be mising
-                LastTime = CurrentTime; // JRE: Update LastTime here. Never updated in original code, meaning it was useless (previous condition always true)
-                for (int x = 0; x < steps_to_do; x++) {    // Advance steps five at a time, otherwise too slow
-                    FrameStepsDone = FrameStepsDone + 1;
-                    gpio_put(PIN_MOTOR_B_STEP,0);
-                    gpio_put(PIN_MOTOR_B_STEP,1);
-                    // The photo-transistor cannot react immediatelly after the motor moves, therefore,
-                    // instead of checking it in this loop, we leave it for the next main loop, since
-                    // checking it here would require  inserting a delay that would considerably slow
-                    // down the process.
-                }
-                gpio_put(PIN_MOTOR_B_STEP,0);
-            }
+            capstan_advance(steps_to_do);
+            FrameStepsDone += steps_to_do;
+            MaxFrameSteps = max(MaxFrameSteps, FrameStepsDone);
         }
     }
 
     if (FrameDetected) {
         DebugPrintStr("Frame!");
+        if (ExtraFrameSteps > 0)
+            capstan_advance(ExtraFrameSteps);
         LastFrameSteps = FrameStepsDone;
         FrameStepsDone = 0;
         StartPictureSaveTime = get_absolute_time();
@@ -836,11 +881,15 @@ void receiveEvent(i2c_inst_t *i2c, i2c_slave_event_t event) {
     }
 }
 
-// Not used for Pico? TBD
+// To be defined
 // -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
+  byte cmd_array[3];
 
-  Wire.write(EventForRPi);
+  cmd_array[0] = EventForRPi;
+  cmd_array[1] = ParamForRPi/256;
+  cmd_array[2] = ParamForRPi%256;
+  Wire.write(cmd_array,3);
   EventForRPi = 0;
 }
 
