@@ -32,7 +32,7 @@ int MinPT = 200;
 // These two vars are to keep max/min pt values for the recent past
 // Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
 // are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
-// (avoid decreasign/increasing too fast).
+// (avoid decreasing/increasing too fast).
 // The idea is to see if we can mak ethe PT level value automatically set by the software, so that it adapt sto different 
 // part of the film (clear/dark around the holes) dynamically.
 int MaxPT_Dynamic = 0;
