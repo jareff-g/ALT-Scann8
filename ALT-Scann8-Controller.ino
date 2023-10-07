@@ -600,7 +600,7 @@ int GetLevelPT() {
   if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
   if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
   if (PT_Level_Auto)
-    PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
+    PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.3))/10);
   return(PT_SignalLevelRead);
 }
 
