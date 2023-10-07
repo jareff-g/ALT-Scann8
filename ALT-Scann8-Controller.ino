@@ -715,10 +715,15 @@ ScanResult scan(int UI_Command) {
   int steps_to_do = 5;
   static unsigned long TimeToScan = 0;
   unsigned long CurrentTime = micros();
+  static unsigned long PrevCurrentTime = 0;
 
-  if (CurrentTime < TimeToScan)
+  if (CurrentTime < TimeToScan && CurrentTime > PrevCurrentTime) {
+    PrevCurrentTime = CurrentTime;
     return (retvalue);
+  }
   else {
+    PrevCurrentTime = CurrentTime;
+    
     TimeToScan = CurrentTime + ScanSpeed;
 
     Wire.begin(16);
