@@ -670,29 +670,11 @@ boolean IsHoleDetected() {
   int PT_Level;
   
   PT_Level = GetLevelPT();
-  //if (FrameStepsDone < DecreaseSpeedFrameSteps)   // No need to check before MinFramesteps
-  //  return false;
-
-
-/*
-  if (PT_Level >= PerforationThresholdLevel) {  // PerforationThresholdLevel - Minimum level at which we can think a perforation is detected
-    FilteredSignalLevel = PT_Level;
-  }
-  if (PT_Level >= PerforationMaxLevel) {   // Adjust perforation levels based on readings - TBC
-    PerforationThresholdLevel = PerforationMaxLevel;
-  }
-  else if (PT_Level < PerforationMinLevel) {
-    PerforationThresholdLevel = OriginalPerforationThresholdLevel;
-  }
-  if (PT_Level < PerforationThresholdLevel-20) {
-    FilteredSignalLevel = 0;
-  }
-*/
 
   // ------------- Frame detection ----
   if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
     hole_detected = true;
-    GreenLedOn = true; 
+    GreenLedOn = true;
     analogWrite(A1, 255); // Light green led
   }
 
