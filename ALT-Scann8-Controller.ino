@@ -63,7 +63,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
  #define CMD_SINGLE_STEP 40
  #define CMD_SET_PT_LEVEL 50
  #define CMD_SET_MIN_FRAME_STEPS 52
- #define CMD_SET_EXTRA_FRAME_STEPS 54
+ #define CMD_SET_FRAME_FINE_TUNE 54
  #define CMD_REWIND 60
  #define CMD_FAST_FORWARD 61
  #define CMD_INCREASE_WIND_SPEED 62
@@ -119,10 +119,11 @@ int PerforationMinLevel = 50;      // Phototransistor reported value, min level 
 int PerforationThresholdLevelR8 = 180;                          // Default value for R8
 int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
+int PerforationThresholdAutoLevelRatio = 30;  // Percentage between dynamic max/min PT level
 int MinFrameStepsR8 = 257;            // Default value for R8
 int MinFrameStepsS8 = 288;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
-int ExtraFrameSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 20;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
@@ -260,8 +261,10 @@ void loop() {
           DebugPrint(">MinSteps",param);
         }
         break;
-      case CMD_SET_EXTRA_FRAME_STEPS:
-        ExtraFrameSteps = param;
+      case CMD_SET_FRAME_FINE_TUNE:
+        FrameFineTune = param;
+        if (FrameFineTune < 0)
+          PerforationThresholdAutoLevelRatio -= 1;
         break;
     }      
 
@@ -600,7 +603,7 @@ int GetLevelPT() {
   if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
   if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
   if (PT_Level_Auto)
-    PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.3))/10);
+    PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * PerforationThresholdAutoLevelRatio / 100))/10);
   return(PT_SignalLevelRead);
 }
 
@@ -751,8 +754,8 @@ ScanResult scan(int UI_Command) {
 
     if (FrameDetected) {
       DebugPrintStr("Frame!");
-      if (ExtraFrameSteps > 0)
-        capstan_advance(ExtraFrameSteps);
+      if (FrameFineTune > 0)  // If positive, aditional steps after detection
+        capstan_advance(FrameFineTune);
       LastFrameSteps = FrameStepsDone;
       FrameStepsDone = 0; 
       StartPictureSaveTime = micros();

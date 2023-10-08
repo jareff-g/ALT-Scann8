@@ -111,7 +111,7 @@ last_cmd_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
-ExtraFrameSteps = 0     # Extra steps manually added after frame detected for fine adjustment
+FrameFineTune = 0     # Frame fine tune value: Extra steps manually added or PT level retio reduced
 PTLevelS8 = 80
 PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
@@ -162,7 +162,7 @@ CMD_FILM_FORWARD = 30
 CMD_SINGLE_STEP = 40
 CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
-CMD_SET_EXTRA_FRAME_STEPS = 54
+CMD_SET_FRAME_FINE_TUNE = 54
 CMD_REWIND = 60
 CMD_FAST_FORWARD = 61
 CMD_INCREASE_WIND_SPEED = 62
@@ -232,7 +232,7 @@ SessionData = {
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8":  260,
     "MinFrameSteps":  290,
-    "ExtraFrameSteps":  0,
+    "FrameFineTune":  0,
     "PTLevelS8":  80,
     "PTLevelR8":  200,
     "PTLevel":  80,
@@ -764,22 +764,22 @@ def min_frame_steps_spinbox_focus_out(event):
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
-def extra_frame_steps_selection(updown):
-    global extra_frame_steps_spinbox, extra_frame_steps_str
-    global ExtraFrameSteps
-    ExtraFrameSteps = int(extra_frame_steps_spinbox.get())
-    SessionData["ExtraFrameSteps"] = ExtraFrameSteps
-    SessionData["ExtraFrameSteps" + SessionData["FilmType"]] = ExtraFrameSteps
-    send_arduino_command(CMD_SET_EXTRA_FRAME_STEPS, ExtraFrameSteps)
+def frame_fine_tune_selection(updown):
+    global frame_fine_tune_spinbox, frame_fine_tune_str
+    global FrameFineTune
+    FrameFineTune = int(frame_fine_tune_spinbox.get())
+    SessionData["FrameFineTune"] = FrameFineTune
+    SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
-def extra_frame_steps_spinbox_focus_out(event):
-    global extra_frame_steps_spinbox, extra_frame_steps_str
-    global ExtraFrameSteps
-    ExtraFrameSteps = int(extra_frame_steps_spinbox.get())
-    SessionData["ExtraFrameSteps"] = ExtraFrameSteps
-    SessionData["ExtraFrameSteps" + SessionData["FilmType"]] = ExtraFrameSteps
-    send_arduino_command(CMD_SET_EXTRA_FRAME_STEPS, ExtraFrameSteps)
+def frame_fine_tune_spinbox_focus_out(event):
+    global frame_fine_tune_spinbox, frame_fine_tune_str
+    global FrameFineTune
+    FrameFineTune = int(frame_fine_tune_spinbox.get())
+    SessionData["FrameFineTune"] = FrameFineTune
+    SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
 def pt_level_selection(updown):
@@ -2172,8 +2172,8 @@ def load_session_data():
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global exposure_frame_value_label
-    global min_frame_steps_str, extra_frame_steps_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, ExtraFrameSteps
+    global min_frame_steps_str, frame_fine_tune_str, pt_level_str
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
 
     if PersistedDataLoaded:
@@ -2267,11 +2267,11 @@ def load_session_data():
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
                 if 'MinFrameStepsR8' in SessionData:
                     MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
-                if 'ExtraFrameSteps' in SessionData:
-                    ExtraFrameSteps = SessionData["ExtraFrameSteps"]
-                    extra_frame_steps_str.set(str(ExtraFrameSteps))
+                if 'FrameFineTune' in SessionData:
+                    FrameFineTune = SessionData["FrameFineTune"]
+                    frame_fine_tune_str.set(str(FrameFineTune))
                     if not SimulatedRun:
-                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, ExtraFrameSteps)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, FrameFineTune)
                 if 'PTLevel' in SessionData:
                     PTLevel = SessionData["PTLevel"]
                     pt_level_str.set(str(PTLevel))
@@ -2536,11 +2536,11 @@ def build_ui():
     global preview_border_frame
     global draw_capture_label
     global hdr_btn, hq_btn, turbo_btn
-    global min_frame_steps_str, extra_frame_steps_str
+    global min_frame_steps_str, frame_fine_tune_str
     global MinFrameSteps
     global pt_level_spinbox, pt_level_str
     global PTLevel
-    global min_frame_steps_spinbox, extra_frame_steps_spinbox, pt_level_spinbox
+    global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2884,21 +2884,21 @@ def build_ui():
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         min_frame_steps_selection('down')
-        # Spinbox to select ExtraFrameSteps on Arduino
-        extra_frame_steps_label = tk.Label(frame_alignment_frame,
-                                         text='Extra steps:',
+        # Spinbox to select FrameFineTune on Arduino
+        frame_fine_tune_label = tk.Label(frame_alignment_frame,
+                                         text='Fine tune:',
                                          width=10, font=("Arial", 7))
-        extra_frame_steps_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
-        extra_frame_steps_str = tk.StringVar(value=str(ExtraFrameSteps))
-        extra_frame_steps_selection_aux = frame_alignment_frame.register(
-            extra_frame_steps_selection)
-        extra_frame_steps_spinbox = tk.Spinbox(
+        frame_fine_tune_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
+        frame_fine_tune_selection_aux = frame_alignment_frame.register(
+            frame_fine_tune_selection)
+        frame_fine_tune_spinbox = tk.Spinbox(
             frame_alignment_frame,
-            command=(extra_frame_steps_selection_aux, '%d'), width=8,
-            textvariable=extra_frame_steps_str, from_=0, to=20, font=("Arial", 7))
-        extra_frame_steps_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
-        extra_frame_steps_spinbox.bind("<FocusOut>", extra_frame_steps_spinbox_focus_out)
-        extra_frame_steps_selection('down')
+            command=(frame_fine_tune_selection_aux, '%d'), width=8,
+            textvariable=frame_fine_tune_str, from_=-20, to=20, font=("Arial", 7))
+        frame_fine_tune_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
+        frame_fine_tune_selection('down')
         # Spinbox to select PTLevel on Arduino
         pt_level_label = tk.Label(frame_alignment_frame,
                                   text='PT Level:',
