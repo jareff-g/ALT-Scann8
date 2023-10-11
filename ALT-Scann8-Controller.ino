@@ -627,11 +627,12 @@ void ReportPlotterInfo() {
 
 void SlowForward(){
   static unsigned long LastMove = 0;
-  if (micros() > LastMove) {
+  unsigned long CurrentTime = micros();
+  if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
     GetLevelPT();   // No need to know PT level here, but used to update plotter data
     CollectOutgoingFilm(true);
     digitalWrite(MotorB_Stepper, HIGH);
-    LastMove = micros() + 700;
+    LastMove = CurrentTime + 700;
   }
 }
 
@@ -700,15 +701,11 @@ ScanResult scan(int UI_Command) {
   int steps_to_do = 5;
   static unsigned long TimeToScan = 0;
   unsigned long CurrentTime = micros();
-  static unsigned long PrevCurrentTime = 0;
 
-  if (CurrentTime < TimeToScan && CurrentTime > PrevCurrentTime) {
-    PrevCurrentTime = CurrentTime;
+  if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeed) {
     return (retvalue);
   }
   else {
-    PrevCurrentTime = CurrentTime;
-    
     TimeToScan = CurrentTime + ScanSpeed;
 
     Wire.begin(16);
