@@ -24,15 +24,14 @@ More info in README.md file
 #include "hardware/i2c.h"
 
 // ######### Pin definition section ##########
-#define PIN_BACKLIGHT        1
 #define PIN_PT              28  // ADC2
 #define PIN_BUZZER          12
-#define PIN_TRACTION_STOP    4
-#define PIN_UV_LED           5
-#define PIN_GREEN_LED        6
-#define PIN_AUX1             7
-#define PIN_AUX2             8
-#define PIN_AUX3             9
+#define PIN_TRACTION_STOP   4
+#define PIN_UV_LED          5
+#define PIN_GREEN_LED       6
+#define PIN_AUX1            7
+#define PIN_AUX2            8
+#define PIN_AUX3            9
 #define PIN_AUX4            10
 #define PIN_AUX5            11
 #define PIN_MOTOR_A_STEP    22
@@ -47,8 +46,8 @@ More info in README.md file
 // ALT-Scann8 uses I2C0 on GP16/GP17 to talk to RPi, I2C1 on GP2/GP3 to talk to the on-board screen
 #define PIN_I2C0_SDA        16
 #define PIN_I2C0_SCL        17
-#define PIN_I2C1_SDA         2
-#define PIN_I2C1_SCL         3
+#define PIN_I2C1_SDA        2
+#define PIN_I2C1_SCL        3
 
 // ######### Define I2C instances (to use instead of i2c_default in examples
 #define i2c_RPi     i2c0
@@ -251,18 +250,15 @@ void setup() {
     gpio_set_dir(PIN_GREEN_LED, true);
     gpio_set_function(PIN_GREEN_LED, GPIO_FUNC_PWM);
     gpio_init(PIN_AUX1);
-    gpio_set_dir(PIN_AUX1, true);   // Aux1/2 are OUT, 3/4/5 are IN
+    gpio_set_dir(PIN_AUX1, true);   // Odd aux jumpers are OUT, even are IN
     gpio_init(PIN_AUX2);
-    gpio_set_dir(PIN_AUX2, true);
+    gpio_set_dir(PIN_AUX2, false);
     gpio_init(PIN_AUX3);
-    gpio_set_dir(PIN_AUX3, false);
-    gpio_pull_up(PIN_AUX3);
+    gpio_set_dir(PIN_AUX3, true);   // Odd aux jumpers are OUT, even are IN
     gpio_init(PIN_AUX4);
     gpio_set_dir(PIN_AUX4, false);
-    gpio_pull_up(PIN_AUX4);
     gpio_init(PIN_AUX5);
-    gpio_set_dir(PIN_AUX5, false);
-    gpio_pull_up(PIN_AUX5);
+    gpio_set_dir(PIN_AUX5, true);   // Odd aux jumpers are OUT, even are IN
     gpio_init(PIN_MOTOR_A_STEP);
     gpio_set_dir(PIN_MOTOR_A_STEP, true);   // Odd aux jumpers are OUT, even are IN
     gpio_init(PIN_MOTOR_A_NEUTRAL);
@@ -293,7 +289,7 @@ void setup() {
     GreenLedSliceNum = pwm_gpio_to_slice_num(PIN_GREEN_LED);
     pwm_config GreenLedConfig = pwm_get_default_config();
     pwm_init(GreenLedSliceNum, &GreenLedConfig, true);
-    pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Green led off on startup
+    pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Grren led off on startup
 
 
     // neutral position for Motor A
@@ -545,7 +541,9 @@ void loop() {
                     ScanState = Sts_Idle;
                 }
                 else {
-                    SlowForward();
+                    CollectOutgoingFilm(true);
+                    sleep_ms(1);
+                    gpio_put(PIN_MOTOR_B_STEP,1);
                 }
                 break;
         }
@@ -554,6 +552,7 @@ void loop() {
         sleep_us(1);
     }
 }
+
 
 
 // ------ rewind the movie ------
@@ -719,19 +718,6 @@ void ReportPlotterInfo() {
     }
 }
 
-
-void SlowForward(){
-    static unsigned long LastMove = 0;
-    unsigned long CurrentTime = get_absolute_time();    //micros();
-    if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
-        GetLevelPT();   // No need to know PT level here, but used to update plotter data
-        CollectOutgoingFilm(true);
-        gpio_put(PIN_MOTOR_B_STEP,1);
-        LastMove = CurrentTime + 700;
-    }
-}
-
-
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
     int SignalLevel;
@@ -776,7 +762,8 @@ boolean IsHoleDetected() {
     if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
         hole_detected = true;
         GreenLedOn = true;
-        // Green led already handled during scan process (proportional to frame steps)
+        pwm_set_gpio_level (PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led off on startup
+        //gpio_put(PIN_GREEN_LED,1); // Light green led
     }
 
     return(hole_detected);
@@ -799,15 +786,7 @@ ScanResult scan(int UI_Command) {
     static long LastTime = 0;   // Reference used to throttle scanner speed (to limit the number of times entering scan function)
     ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
     int steps_to_do = 5;
-    static unsigned long TimeToScan = 0;
     unsigned long CurrentTime = get_absolute_time();
-
-    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeed) {
-        return (retvalue);
-    }
-    else {
-        TimeToScan = CurrentTime + ScanSpeed;
-
 
     pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
     //analogWrite(11, UVLedBrightness);
@@ -848,8 +827,6 @@ ScanResult scan(int UI_Command) {
             MaxFrameSteps = max(MaxFrameSteps, FrameStepsDone);
         }
     }
-
-    pwm_set_gpio_level (PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led proportional to frame steps done
 
     if (FrameDetected) {
         DebugPrintStr("Frame!");
