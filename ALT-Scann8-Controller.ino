@@ -120,8 +120,8 @@ int PerforationThresholdLevelR8 = 180;                          // Default value
 int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int PerforationThresholdAutoLevelRatio = 30;  // Percentage between dynamic max/min PT level
-int MinFrameStepsR8 = 257;            // Default value for R8
-int MinFrameStepsS8 = 288;            // Default value for S8
+int MinFrameStepsR8 = 240;            // Default value for R8
+int MinFrameStepsS8 = 260;            // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
 int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 20;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
@@ -256,7 +256,6 @@ void loop() {
             MinFrameStepsS8 = param;
           else
             MinFrameStepsR8 = param;
-          MinFrameSteps = param;
           DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
           DebugPrint(">MinSteps",param);
         }
@@ -281,7 +280,7 @@ void loop() {
             ScanSpeed = OriginalScanSpeed; 
             collect_modulo = 10; 
             //MinFrameSteps = 5; 
-            MinFrameSteps = 100; 
+            MinFrameSteps = 100;
             tone(A2, 2000, 50);
             break;
           case CMD_TERMINATE:  //Exit app
@@ -723,7 +722,9 @@ ScanResult scan(int UI_Command) {
     if (FrameStepsDone > DecreaseSpeedFrameSteps) {
       ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
       //ScanSpeed = FetchFrameScanSpeed + 0;
-      steps_to_do = 1;    // Only one step per loop once we are close to frame detection
+      // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
+      // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
+      steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)))
     }
     else     
       steps_to_do = 5;    // 5 steps per loop if not yet there
