@@ -1372,9 +1372,9 @@ def set_r8():
     min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
     FilmHoleY1 = 40
-    FilmHoleY2 = 550
-    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=80)
-    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=120)
+    FilmHoleY2 = 560
+    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=130)
+    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=100)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
