@@ -45,7 +45,7 @@ enum {
   DebugInfo,
   DebugInfoSingle,
   None
-} DebugState = None;
+} DebugState = PlotterInfo;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -109,8 +109,8 @@ int FilteredSignalLevel = 0;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 255;                   // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 250 ;              // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 500;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long ScanSpeed = 2000 ;              // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 2*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
 unsigned long DecreaseScanSpeedStep = 100;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
@@ -148,6 +148,8 @@ int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value t
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
+
+boolean Frame_Steps_Auto = true;
 
 // Collect outgoing film frequency
 int collect_modulo = 10; 
@@ -206,6 +208,7 @@ void setup() {
   CommandQueue.in = 0;
   CommandQueue.out = 0;
 }
+
 void loop() {
   int param;
   while (1) {
@@ -241,7 +244,7 @@ void loop() {
             if (param == 0)
               PT_Level_Auto = true;     // zero means we go in automatic mode
             else{
-              PT_Level_Auto = false;     // zero means we go in automatic mode
+              PT_Level_Auto = false;
               PerforationThresholdLevel = param;
               OriginalPerforationThresholdLevel = param;
             }
@@ -249,15 +252,20 @@ void loop() {
         }
         break;
       case CMD_SET_MIN_FRAME_STEPS:
-        if (param >= 100 && param <= 600) {
-          MinFrameSteps = param;
-          OriginalMinFrameSteps = param;
-          if (IsS8)
-            MinFrameStepsS8 = param;
-          else
-            MinFrameStepsR8 = param;
-          DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-          DebugPrint(">MinSteps",param);
+        if (param == 0 || param >= 100 && param <= 600) {
+          if (param == 0)
+            Frame_Steps_Auto = true;     // zero means we go in automatic mode
+          else{
+            Frame_Steps_Auto = false;
+            MinFrameSteps = param;
+            OriginalMinFrameSteps = param;
+            if (IsS8)
+              MinFrameStepsS8 = param;
+            else
+              MinFrameStepsR8 = param;
+            DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+            DebugPrint(">MinSteps",param);
+          }
         }
         break;
       case CMD_SET_FRAME_FINE_TUNE:
@@ -300,6 +308,11 @@ void loop() {
             if (PT_Level_Auto) {
                 EventForRPi = CMD_SET_PT_LEVEL;
                 ParamForRPi = PerforationThresholdLevel;
+                digitalWrite(13, HIGH);
+            }
+            if (Frame_Steps_Auto) {
+                EventForRPi = CMD_SET_MIN_FRAME_STEPS;
+                ParamForRPi = MinFrameSteps;
                 digitalWrite(13, HIGH);
             }
             break;
@@ -615,7 +628,7 @@ void ReportPlotterInfo() {
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
       NextReport = millis() + 20;
-      sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+      sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i, FrameSteps:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel, MinFrameSteps);
       //sprintf(out,"%i,%i,%i,%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
@@ -664,6 +677,25 @@ boolean FilmInFilmgate() {
 
   return(retvalue);
 }
+
+void adjust_framesteps(int frame_steps) {
+    static int steps_per_frame_list[32];
+    static int idx = 0;
+    static int items_in_list = 0;
+    int total;
+
+    steps_per_frame_list[idx] = frame_steps;
+    idx = (idx + 1) % 32;
+    if (items_in_list < 32)
+        items_in_list++;
+    if (items_in_list == 32) {
+        for (int i = 0; i < 32; i++)
+            total = total + steps_per_frame_list[i];
+        MinFrameSteps = int(total / 32);
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+    }
+}
+
 
 
 // ------------- is the film perforation in position to take picture? ---------------
@@ -724,7 +756,7 @@ ScanResult scan(int UI_Command) {
       //ScanSpeed = FetchFrameScanSpeed + 0;
       // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
       // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
-      steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)))
+      steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
     }
     else     
       steps_to_do = 5;    // 5 steps per loop if not yet there
@@ -755,6 +787,7 @@ ScanResult scan(int UI_Command) {
       if (FrameFineTune > 0)  // If positive, aditional steps after detection
         capstan_advance(FrameFineTune);
       LastFrameSteps = FrameStepsDone;
+      adjust_framesteps(LastFrameSteps);
       FrameStepsDone = 0; 
       StartPictureSaveTime = micros();
       // Tell UI (Raspberry PI) a new frame is available for processing
