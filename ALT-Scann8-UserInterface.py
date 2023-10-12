@@ -111,6 +111,7 @@ last_cmd_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
+FrameSteps_auto = True
 FrameFineTune = 0     # Frame fine tune value: Extra steps manually added or PT level retio reduced
 PTLevelS8 = 80
 PTLevelR8 = 120
@@ -236,7 +237,8 @@ SessionData = {
     "PTLevelS8":  80,
     "PTLevelR8":  200,
     "PTLevel":  80,
-    "PTLevelAuto": True
+    "PTLevelAuto": True,
+    "FrameStepsAuto": True
 }
 
 
@@ -762,6 +764,19 @@ def min_frame_steps_spinbox_focus_out(event):
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+
+
+def min_frame_steps_spinbox_dbl_click(event):
+    global min_frame_steps_spinbox, min_frame_steps_str
+    global MinFrameSteps, FrameSteps_auto
+
+    FrameSteps_auto = not FrameSteps_auto
+    SessionData["FrameStepsAuto"] = FrameSteps_auto
+    if FrameSteps_auto:
+        min_frame_steps_spinbox.config(state=DISABLED)
+    else:
+        min_frame_steps_spinbox.config(state=NORMAL)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 def frame_fine_tune_selection(updown):
@@ -1964,6 +1979,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanOngoing
     global ALT_Scann8_controller_detected
     global last_cmd_time
+    global pt_level_str, min_frame_steps_str
 
     if not SimulatedRun:
         try:
@@ -2007,8 +2023,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == CMD_UNCONDITIONAL_FAST_FORWARD:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
-    elif ArduinoTrigger == 50:  # Set PT level: Arduino tell us autocalculated threshold level
+    elif ArduinoTrigger == CMD_SET_PT_LEVEL:  # Set PT level: Arduino tell us autocalculated threshold level
         pt_level_str.set(str(ArduinoParam1*256+ArduinoParam2))
+    elif ArduinoTrigger == CMD_SET_MIN_FRAME_STEPS:  # Set PT level: Arduino tell us autocalculated threshold level
+        min_frame_steps_str.set(str(ArduinoParam1 * 256 + ArduinoParam2))
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
@@ -2173,7 +2191,7 @@ def load_session_data():
     global PersistedDataLoaded
     global exposure_frame_value_label
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
 
     if PersistedDataLoaded:
@@ -2292,6 +2310,16 @@ def load_session_data():
                         else:
                             pt_level_spinbox.config(fg='black', state=NORMAL)
                             send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+                if 'FrameStepsAuto' in SessionData:
+                    FrameSteps_auto = SessionData["FrameStepsAuto"]
+                    min_frame_steps_str.set(str(MinFrameSteps))
+                    if not SimulatedRun:
+                        if FrameSteps_auto:
+                            min_frame_steps_spinbox.config(state=DISABLED)
+                            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+                        else:
+                            min_frame_steps_spinbox.config(fg='black', state=NORMAL)
+                            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
         display_preview()
 
@@ -2883,6 +2911,7 @@ def build_ui():
             textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", 7))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
+        min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_dbl_click)
         min_frame_steps_selection('down')
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
