@@ -111,6 +111,7 @@ last_cmd_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
+FrameSteps_auto = True
 FrameFineTune = 0     # Frame fine tune value: Extra steps manually added or PT level retio reduced
 PTLevelS8 = 80
 PTLevelR8 = 120
@@ -119,6 +120,7 @@ PTLevel_auto = True
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
 FrameArrivalTime = 0
+ScanSpeed = 5   # Speed of scan process (1-10 controls a variable delay inside the Arduino scan function)
 # Variables to track windows movement and set preview accordingly
 TopWinX = 0
 TopWinY = 0
@@ -170,6 +172,7 @@ CMD_INCREASE_WIND_SPEED = 62
 CMD_DECREASE_WIND_SPEED = 63
 CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
+CMD_SET_SCAN_SPEED = 70
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
@@ -236,7 +239,8 @@ SessionData = {
     "PTLevelS8":  80,
     "PTLevelR8":  200,
     "PTLevel":  80,
-    "PTLevelAuto": True
+    "PTLevelAuto": True,
+    "FrameStepsAuto": True
 }
 
 
@@ -761,7 +765,21 @@ def min_frame_steps_spinbox_focus_out(event):
     MinFrameSteps = int(min_frame_steps_spinbox.get())
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+    if not FrameSteps_auto: # Not sure we can have a focus out event for a disabled control, but just in case
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+
+
+def min_frame_steps_spinbox_dbl_click(event):
+    global min_frame_steps_spinbox, min_frame_steps_str
+    global MinFrameSteps, FrameSteps_auto
+
+    FrameSteps_auto = not FrameSteps_auto
+    SessionData["FrameStepsAuto"] = FrameSteps_auto
+    if FrameSteps_auto:
+        min_frame_steps_spinbox.config(state=DISABLED)
+    else:
+        min_frame_steps_spinbox.config(state=NORMAL)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 def frame_fine_tune_selection(updown):
@@ -797,7 +815,8 @@ def pt_level_spinbox_focus_out(event):
     PTLevel = int(pt_level_spinbox.get())
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+    if not PTLevel_auto: # Not sure we can have a focus out event for a disabled control, but just in case
+        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_dbl_click(event):
@@ -812,6 +831,21 @@ def pt_level_spinbox_dbl_click(event):
         pt_level_spinbox.config(state=NORMAL)
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
 
+
+def scan_speed_selection(updown):
+    global scan_speed_spinbox, scan_speed_label_str
+    global ScanSpeed
+    ScanSpeed = int(scan_speed_spinbox.get())
+    SessionData["ScanSpeed"] = ScanSpeed
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
+
+
+def scan_speed_spinbox_focus_out(event):
+    global scan_speed_spinbox, scan_speed_label_str
+    global ScanSpeed
+    ScanSpeed = int(scan_speed_spinbox.get())
+    SessionData["ScanSpeed"] = ScanSpeed
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 
 def stabilization_delay_down():
@@ -1347,8 +1381,8 @@ def set_s8():
     film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 
@@ -1377,8 +1411,8 @@ def set_r8():
     film_hole_frame_2.place(x=4, y=FilmHoleY2, height=100)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 def match_wait_up():
@@ -1959,6 +1993,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanOngoing
     global ALT_Scann8_controller_detected
     global last_cmd_time
+    global pt_level_str, min_frame_steps_str
 
     if not SimulatedRun:
         try:
@@ -1990,6 +2025,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == 12:  # Error during scan
         logging.warning("Received scan error from Arduino")
         ScanProcessError = True
+    elif ArduinoTrigger == CMD_SET_PT_LEVEL:  # Set PT level: Arduino tell us autocalculated threshold level
+        pt_level_str.set(str(ArduinoParam1 * 256 + ArduinoParam2))
+    elif ArduinoTrigger == CMD_SET_MIN_FRAME_STEPS:  # Set PT level: Arduino tell us autocalculated threshold level
+        min_frame_steps_str.set(str(ArduinoParam1 * 256 + ArduinoParam2))
     elif ArduinoTrigger == 60:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.info("Received rewind end event from Arduino")
@@ -2002,14 +2041,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == CMD_UNCONDITIONAL_FAST_FORWARD:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
-    elif ArduinoTrigger == 50:  # Set PT level: Arduino tell us autocalculated threshold level
-        pt_level_str.set(str(ArduinoParam1*256+ArduinoParam2))
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
     ArduinoTrigger = 0
 
-    win.after(5, arduino_listen_loop)
+    win.after(1, arduino_listen_loop)
 
 
 def on_form_event(dummy):
@@ -2164,8 +2201,9 @@ def load_session_data():
     global PersistedDataLoaded
     global exposure_frame_value_label
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
+    global ScanSpeed, scan_speed_str
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2249,8 +2287,8 @@ def load_session_data():
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = SessionData["MinFrameSteps"]
-                    min_frame_steps_str.set(str(MinFrameSteps))
-                    if not SimulatedRun:
+                    if not FrameSteps_auto:
+                        min_frame_steps_str.set(str(MinFrameSteps))
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
@@ -2259,14 +2297,12 @@ def load_session_data():
                 if 'FrameFineTune' in SessionData:
                     FrameFineTune = SessionData["FrameFineTune"]
                     frame_fine_tune_str.set(str(FrameFineTune))
-                    if not SimulatedRun:
-                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, FrameFineTune)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
                 if 'PTLevel' in SessionData:
                     PTLevel = SessionData["PTLevel"]
-                    pt_level_str.set(str(PTLevel))
-                    if not SimulatedRun:
-                        if (not PTLevel_auto):
-                            send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+                    if not PTLevel_auto:
+                        pt_level_str.set(str(PTLevel))
+                        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevelS8' in SessionData:
                     PTLevelS8 = SessionData["PTLevelS8"]
                 if 'PTLevelR8' in SessionData:
@@ -2274,13 +2310,25 @@ def load_session_data():
                 if 'PTLevelAuto' in SessionData:
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
-                    if not SimulatedRun:
-                        if PTLevel_auto:
-                            pt_level_spinbox.config(state=DISABLED)
-                            send_arduino_command(CMD_SET_PT_LEVEL, 0)
-                        else:
-                            pt_level_spinbox.config(fg='black', state=NORMAL)
-                            send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+                    if PTLevel_auto:
+                        pt_level_spinbox.config(state=DISABLED)
+                        send_arduino_command(CMD_SET_PT_LEVEL, 0)
+                    else:
+                        pt_level_spinbox.config(fg='black', state=NORMAL)
+                        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+                if 'FrameStepsAuto' in SessionData:
+                    FrameSteps_auto = SessionData["FrameStepsAuto"]
+                    min_frame_steps_str.set(str(MinFrameSteps))
+                    if FrameSteps_auto:
+                        min_frame_steps_spinbox.config(state=DISABLED)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+                    else:
+                        min_frame_steps_spinbox.config(fg='black', state=NORMAL)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+                if 'ScanSpeed' in SessionData:
+                    ScanSpeed = SessionData["ScanSpeed"]
+                    scan_speed_str.set(str(ScanSpeed))
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
         display_preview()
 
@@ -2530,6 +2578,7 @@ def build_ui():
     global pt_level_spinbox, pt_level_str
     global PTLevel
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
+    global scan_speed_str, ScanSpeed, scan_speed_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2866,6 +2915,7 @@ def build_ui():
             textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", 7))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
+        min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_dbl_click)
         min_frame_steps_selection('down')
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
@@ -2898,6 +2948,27 @@ def build_ui():
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
         pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
         pt_level_selection('down')
+
+        # Frame to add scan speed control
+        scan_speed_frame = LabelFrame(expert_frame, text="Scan speed", width=16, height=2,
+                                           font=("Arial", 7))
+        scan_speed_frame.pack(side=LEFT, padx=5)
+        # Spinbox to select Speed on Arduino (1-10)
+        scan_speed_label = tk.Label(scan_speed_frame,
+                                         text='Scan speed:',
+                                         width=10, font=("Arial", 7))
+        scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+        scan_speed_str = tk.StringVar(value=str(ScanSpeed))
+        scan_speed_selection_aux = frame_alignment_frame.register(
+            scan_speed_selection)
+        scan_speed_spinbox = tk.Spinbox(
+            scan_speed_frame,
+            command=(scan_speed_selection_aux, '%d'), width=8,
+            textvariable=scan_speed_str, from_=1, to=10, font=("Arial", 7))
+        scan_speed_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+        scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
+        scan_speed_selection('down')
+
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
