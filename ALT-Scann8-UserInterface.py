@@ -148,7 +148,8 @@ simulated_captured_frame_list = [None] * 1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
 simulated_images_in_list = 0
-FilmHoleY = 300
+FilmHoleY1 = 300
+FilmHoleY2 = 300
 SharpnessValue = 1
 
 #Arduino comnmands
@@ -224,7 +225,6 @@ SessionData = {
     "CurrentDir": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
     "CurrentExposure": str(CurrentExposure),
-    "FilmHoleY": str(FilmHoleY),
     "NegativeCaptureActive": str(NegativeCaptureActive),
     "HdrCaptureActive": str(HdrCaptureActive),
     "HqCaptureActive": str(HqCaptureActive),
@@ -1327,6 +1327,7 @@ def set_s8():
     global PTLevel, PTLevelS8
     global MinFrameSteps, MinFrameStepsS8
     global pt_level_str, min_frame_steps_str
+    global FilmHoleY1, FilmHoleY2
 
     film_type_S8_btn.config(relief=SUNKEN)
     film_type_R8_btn.config(relief=RAISED)
@@ -1339,6 +1340,11 @@ def set_s8():
     MinFrameSteps = MinFrameStepsS8
     SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
+    # Set reference film holes
+    FilmHoleY1 = 300
+    FilmHoleY2 = 300
+    film_hole_frame_1.place(x=4, y=FilmHoleY2, height=140)
+    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
@@ -1364,26 +1370,15 @@ def set_r8():
     MinFrameSteps = MinFrameStepsR8
     SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
+    # Set reference film holes
+    FilmHoleY1 = 40
+    FilmHoleY2 = 550
+    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=80)
+    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=120)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
-
-
-def film_hole_up():
-    global film_hole_frame, FilmHoleY
-    if FilmHoleY > 38:
-        FilmHoleY -= 4
-    film_hole_frame.place(x=4, y=FilmHoleY)
-    SessionData["FilmHoleY"] = str(FilmHoleY)
-
-
-def film_hole_down():
-    global film_hole_frame, FilmHoleY
-    if FilmHoleY < 758:
-        FilmHoleY += 3  # Intentionally different from button up, to allow eventual fine tunning
-    film_hole_frame.place(x=4, y=FilmHoleY)
-    SessionData["FilmHoleY"] = str(FilmHoleY)
 
 
 def match_wait_up():
@@ -2120,7 +2115,6 @@ def load_persisted_data_from_disk():
 
 
 def load_config_data():
-    global film_hole_frame, FilmHoleY
     global SessionData
     global PostviewModule
     global PreviewWarnAgain
@@ -2142,9 +2136,6 @@ def load_config_data():
             if TempInFahrenheit:
                 temp_in_fahrenheit_checkbox.select()
         if ExpertMode:
-            if 'FilmHoleY' in SessionData:
-                FilmHoleY = int(SessionData["FilmHoleY"])
-                film_hole_frame.place(x=4, y=FilmHoleY)
             if 'MatchWaitMargin' in SessionData:
                 MatchWaitMargin = int(SessionData["MatchWaitMargin"])
                 match_wait_margin_value.config(text=str(MatchWaitMargin)+'%')
@@ -2194,13 +2185,11 @@ def load_session_data():
                 Scanned_Images_number_label.config(text=SessionData["CurrentFrame"])
             if 'FilmType' in SessionData:
                 if SessionData["FilmType"] == "R8":
-                    if not SimulatedRun:
-                        send_arduino_command(CMD_SET_REGULAR_8)
+                    set_r8()
                     film_type_R8_btn.config(relief=SUNKEN)
                     film_type_S8_btn.config(relief=RAISED)
                 elif SessionData["FilmType"] == "S8":
-                    if not SimulatedRun:
-                        send_arduino_command(CMD_SET_SUPER_8)
+                    set_s8()
                     film_type_R8_btn.config(relief=RAISED)
                     film_type_S8_btn.config(relief=SUNKEN)
             if 'NegativeCaptureActive' in SessionData:
@@ -2525,7 +2514,7 @@ def build_ui():
     global auto_white_balance_change_pause
     global awb_wait_checkbox
     global OpenFolder_btn
-    global film_hole_frame, FilmHoleY
+    global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
     global match_wait_margin_value
@@ -2844,26 +2833,20 @@ def build_ui():
         stabilization_delay_bottom_frame = Frame(stabilization_delay_frame)  # frame just to add space at the bottom
         stabilization_delay_bottom_frame.pack(side=BOTTOM, pady=18)
 
-        # Display marker for film hole
-        film_hole_frame = Frame(win, width=1, height=11, bg='black')
-        film_hole_frame.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame.place(x=4, y=FilmHoleY)
-        film_hole_label = Label(film_hole_frame, justify=LEFT, font=("Arial", 8), width=5, height=11,
+        # Display markers for film hole reference
+        film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
+        film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
+        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=140)
+        film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", 8), width=5, height=11,
                                 bg='white', fg='white')
-        film_hole_label.pack(side=TOP)
+        film_hole_label_1.pack(side=TOP)
 
-        # Up/Down buttons to move marker for film hole
-        film_hole_control_frame = LabelFrame(expert_frame, text="Hole mark pos.", width=8, height=2,
-                                             font=("Arial", 7))
-        film_hole_control_frame.pack(side=LEFT, padx=5)
-        film_hole_control_up = Button(film_hole_control_frame, text="↑", width=5, height=1, command=film_hole_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_up.pack(side=TOP)
-        film_hole_control_down = Button(film_hole_control_frame, text="↓", width=5, height=1, command=film_hole_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 7))
-        film_hole_control_down.pack(side=TOP)
-        film_hole_bottom_frame = Frame(film_hole_control_frame)  # frame just to add space at the bottom
-        film_hole_bottom_frame.pack(side=BOTTOM, pady=1)
+        film_hole_frame_2 = Frame(win, width=1, height=1, bg='black')
+        film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
+        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
+        film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", 8), width=5, height=11,
+                                bg='white', fg='white')
+        film_hole_label_2.pack(side=TOP)
 
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,

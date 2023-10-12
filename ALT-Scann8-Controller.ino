@@ -724,7 +724,7 @@ ScanResult scan(int UI_Command) {
       //ScanSpeed = FetchFrameScanSpeed + 0;
       // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
       // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
-      steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)))
+      steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
     }
     else     
       steps_to_do = 5;    // 5 steps per loop if not yet there
