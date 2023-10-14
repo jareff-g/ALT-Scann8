@@ -705,7 +705,6 @@ void adjust_framesteps(int frame_steps) {
     if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
         MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-        tone(A2, 2000, 100); 
         return; // Do not add invalid steps per frame to list
     }
 
