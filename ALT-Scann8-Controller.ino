@@ -197,15 +197,15 @@ void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
     BufferForRPi[8] = param4%256;
     digitalWrite(13, HIGH);
 }
-void setup() {
 
+
+void setup() {
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
   Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
   
   Wire.begin(16);  // join I2c bus with address #16
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendEvent);
-
 
   //--- set pinMode Stepper motors -----
   pinMode(MotorA_Stepper, OUTPUT);
@@ -222,7 +222,6 @@ void setup() {
   pinMode(A1, OUTPUT); // Green LED
   pinMode(A2, OUTPUT); // beep
   pinMode(11, OUTPUT); // UV Led
-
 
   // neutral position
   digitalWrite(MotorA_Neutral, HIGH);
@@ -304,7 +303,7 @@ void loop() {
           PerforationThresholdAutoLevelRatio -= 1;
         break;
       case CMD_SET_SCAN_SPEED:
-        ScanSpeed = 250 + (10-param) * 500;
+        ScanSpeed = 500 + (10-param) * 1000;
         if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
           collect_modulo--;
         OriginalScanSpeed = ScanSpeed;
@@ -323,8 +322,6 @@ void loop() {
             StartFrameTime = micros();
             ScanSpeed = OriginalScanSpeed; 
             collect_modulo = 10; 
-            //MinFrameSteps = 5; 
-            MinFrameSteps = 100;
             tone(A2, 2000, 50);
             break;
           case CMD_TERMINATE:  //Exit app
@@ -341,17 +338,8 @@ void loop() {
             DebugPrintStr(">Next fr.");
             // Also send, if required, to RPi autocalculated threshold level every frame
             // Alternate reports for each value, otherwise I2C has I/O errors
-            if (PT_Level_Auto && count%2 == 0) {
-                EventForRPi = CMD_SET_PT_LEVEL;
-                ParamForRPi = PerforationThresholdLevel;
-                digitalWrite(13, HIGH);
-            }
-            if (Frame_Steps_Auto && count%2 == 1) {
-                EventForRPi = CMD_SET_MIN_FRAME_STEPS;
-                ParamForRPi = MinFrameSteps;
-                digitalWrite(13, HIGH);
-            }
-            count++;
+            if (PT_Level_Auto || Frame_Steps_Auto)
+                SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
             break;
           case CMD_SET_REGULAR_8:  // Select R8 film
             IsS8 = false;
@@ -383,7 +371,6 @@ void loop() {
           case CMD_SINGLE_STEP:
             DebugPrintStr(">SStep"); 
             ScanState = Sts_SingleStep;
-            MinFrameSteps = 100; // Used to be 100
             delay(50);
             break;
           case CMD_REWIND: // Rewind
@@ -661,8 +648,8 @@ void ReportPlotterInfo() {
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
       NextReport = millis() + 20;
-      sprintf(out,"PT:%i, Th:%i, MAxPT:%i, MinPT:%i, MFS:%i, LFS:%i, Spd:%i", PT_SignalLevelRead, PerforationThresholdLevel, MaxPT_Dynamic/10, MinPT_Dynamic/10, MinFrameSteps, LastFrameSteps, ScanSpeed);
-      //sprintf(out,"%i,%i,%i,%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+      //sprintf(out,"PT:%i, Th:%i, FSD:%i, MFS:%i, LFS:%i, Spd:%lu, MinD:%i, MaxD;%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, MinFrameSteps, LastFrameSteps, ScanSpeed, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+      sprintf(out,"PT:%i", PT_SignalLevelRead);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
       PreviousFrameSteps = LastFrameSteps;
@@ -749,7 +736,13 @@ boolean IsHoleDetected() {
   PT_Level = GetLevelPT();
 
   // ------------- Frame detection ----
-  if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
+  // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
+  // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision 
+  // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
+  // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
+  if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if (FrameStepsDone > int(MinFrameSteps * 1.5) || FrameStepsDone < MinFrameSteps) 
+      tone(A2, 2000, 100);
     hole_detected = true;
     GreenLedOn = true;
     analogWrite(A1, 255); // Light green led

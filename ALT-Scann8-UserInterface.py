@@ -257,9 +257,10 @@ def send_arduino_command(cmd, param=12345):
     global SimulatedRun, ALT_Scann8_controller_detected
 
     if not SimulatedRun:
-        #i2c.write_byte_data(16, cmd, 0)  # Send command to Arduino
+        time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
         i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param/256)])  # Send command to Arduino
         logging.debug("Sending command %i to Arduino", cmd)
+        time.sleep(0.0001)  #wait 100 µs, same
 
 
 def exit_app():  # Exit Application
@@ -2323,7 +2324,7 @@ def load_session_data():
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
                     if PTLevel_auto:
-                        pt_level_spinbox.config(state=DISABLED)
+                        pt_level_spinbox.config(state='readonly')
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
                         pt_level_spinbox.config(fg='black', state=NORMAL)
@@ -2332,7 +2333,7 @@ def load_session_data():
                     FrameSteps_auto = SessionData["FrameStepsAuto"]
                     min_frame_steps_str.set(str(MinFrameSteps))
                     if FrameSteps_auto:
-                        min_frame_steps_spinbox.config(state=DISABLED)
+                        min_frame_steps_spinbox.config(state='readonly')
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
                         min_frame_steps_spinbox.config(fg='black', state=NORMAL)
