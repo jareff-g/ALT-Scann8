@@ -52,7 +52,7 @@ int MaxDebugRepetitions = 3;
 
 boolean GreenLedOn = false;  
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
-// I2C commands: Constant definition
+// I2C commands (RPi to Arduino): Constant definition
  #define CMD_START_SCAN 10
  #define CMD_TERMINATE 11
  #define CMD_GET_NEXT_FRAME 12
@@ -71,6 +71,15 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
  #define CMD_UNCONDITIONAL_REWIND 64
  #define CMD_UNCONDITIONAL_FAST_FORWARD 65
  #define CMD_SET_SCAN_SPEED 70
+// I2C responses (Arduino to RPi): Constant definition
+ #define RSP_FRAME_AVAILABLE 80
+ #define RSP_SCAN_ERROR 81
+ #define RSP_REWIND_ERROR 82
+ #define RSP_FAST_FORWARD_ERROR 83
+ #define RSP_REWIND_ENDED 84
+ #define RSP_FAST_FORWARD_ENDED 85
+ #define RSP_REPORT_AUTO_LEVELS 86
+
 
  // Immutable values
  #define S8_HEIGHT  4.01
@@ -153,8 +162,7 @@ boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in o
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
-int EventForRPi = 0;    // 11-Frame ready for exposure, 12-Error during scan, 60-Rewind end, 61-FF end, 64-Rewind error, 65-FF error
-int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value to RPi for display)
+byte BufferForRPi[9];   // 9 byte array to sedn data to Raspberry Pi over I2C bus
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
@@ -176,6 +184,19 @@ volatile struct {
   int out;
 } CommandQueue;
 
+void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
+{
+    BufferForRPi[0] = cmd;
+    BufferForRPi[1] = param1/256;
+    BufferForRPi[2] = param1%256;
+    BufferForRPi[3] = param2/256;
+    BufferForRPi[4] = param2%256;
+    BufferForRPi[5] = param3/256;
+    BufferForRPi[6] = param3%256;
+    BufferForRPi[7] = param4/256;
+    BufferForRPi[8] = param4%256;
+    digitalWrite(13, HIGH);
+}
 void setup() {
 
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
@@ -221,7 +242,6 @@ void setup() {
 
 void loop() {
   int param;
-  static int count = 0;
   while (1) {
     if (dataInQueue()) {
       UI_Command = pop(&param);   // Get next command from queue if one exists
@@ -370,9 +390,8 @@ void loop() {
           case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
             if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
               DebugPrintStr("Rwnd err"); 
-              EventForRPi = CMD_UNCONDITIONAL_REWIND;
-              digitalWrite(13, HIGH);
-              tone(A2, 2000, 100); 
+              SendToRPi(RSP_REWIND_ERROR, 0, 0, 0, 0);
+              tone(A2, 2000, 100);
               delay (150); 
               tone(A2, 1000, 100); 
             }
@@ -396,9 +415,8 @@ void loop() {
           case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
             if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
               DebugPrintStr("FF err"); 
-              EventForRPi = CMD_UNCONDITIONAL_FAST_FORWARD;
-              digitalWrite(13, HIGH);
-              tone(A2, 2000, 100); 
+              SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0, 0, 0);
+              tone(A2, 2000, 100);
               delay (150); 
               tone(A2, 1000, 100); 
             }
@@ -525,8 +543,7 @@ boolean RewindFilm(int UI_Command) {
       digitalWrite(MotorB_Neutral, LOW);  
       digitalWrite(MotorC_Neutral, LOW); 
       delay (100);
-      EventForRPi = CMD_REWIND;
-      digitalWrite(13, HIGH);
+      SendToRPi(RSP_REWIND_ENDED, 0, 0, 0, 0);
     }
   }
   else {
@@ -564,8 +581,7 @@ boolean FastForwardFilm(int UI_Command) {
       digitalWrite(MotorB_Neutral, LOW);
       digitalWrite(MotorC_Neutral, LOW); 
       delay (100);
-      EventForRPi = CMD_FAST_FORWARD;
-      digitalWrite(13, HIGH);
+      SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0, 0, 0);
     }
   }
   else {
@@ -645,7 +661,7 @@ void ReportPlotterInfo() {
   if (DebugState == PlotterInfo && millis() > NextReport) {
     if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
       NextReport = millis() + 20;
-      sprintf(out,"PT:%i", PT_SignalLevelRead);
+      sprintf(out,"PT:%i, Th:%i, MAxPT:%i, MinPT:%i, MFS:%i, LFS:%i, Spd:%i", PT_SignalLevelRead, PerforationThresholdLevel, MaxPT_Dynamic/10, MinPT_Dynamic/10, MinFrameSteps, LastFrameSteps, ScanSpeed);
       //sprintf(out,"%i,%i,%i,%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
       SerialPrintStr(out);
       Previous_PT_Signal = PT_SignalLevelRead;
@@ -783,11 +799,9 @@ ScanResult scan(int UI_Command) {
       // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
       // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
       steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
-      if (steps_to_do > 5) {  // Should not happen, but just in case
-        // Tell UI (Raspberry PI) an error happened during scanning
-        EventForRPi = 12; 
-        digitalWrite(13, HIGH);
-      }
+      if (steps_to_do > 5)
+          // Tell UI (Raspberry PI) an error happened during scanning
+          SendToRPi(RSP_SCAN_ERROR, steps_to_do, MinFrameSteps, FrameStepsDone, DecreaseSpeedFrameSteps);
     }
     else     
       steps_to_do = 5;    // 5 steps per loop if not yet there
@@ -826,8 +840,7 @@ ScanResult scan(int UI_Command) {
         tone(A2, 2000, 35); 
       }
       else {
-        EventForRPi = 11; 
-        digitalWrite(13, HIGH);
+        SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
       }
       
       FrameDetected = false;
@@ -837,13 +850,11 @@ ScanResult scan(int UI_Command) {
       if (DebugState == FrameSteps)
         SerialPrintInt(LastFrameSteps);
     }
-    else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
+    else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
       retvalue = SCAN_FRAME_DETECTION_ERROR;    
-      FrameStepsDone = 0;
-      DebugPrintStr("Err/scan");
       // Tell UI (Raspberry PI) an error happened during scanning
-      EventForRPi = 12; 
-      digitalWrite(13, HIGH);
+      SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
+      FrameStepsDone = 0;
     }
 
     return (retvalue);
@@ -867,14 +878,7 @@ void receiveEvent(int byteCount) {
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
-  byte cmd_array[3];
-
-  cmd_array[0] = EventForRPi;
-  cmd_array[1] = ParamForRPi/256;
-  cmd_array[2] = ParamForRPi%256;
-  Wire.write(cmd_array,3);
-
-  EventForRPi = 0;
+  Wire.write(BufferForRPi,9);
 }
 
 boolean push(int IncomingIc, int param) {

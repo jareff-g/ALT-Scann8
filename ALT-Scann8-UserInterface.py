@@ -154,7 +154,7 @@ FilmHoleY1 = 300
 FilmHoleY2 = 300
 SharpnessValue = 1
 
-#Arduino comnmands
+# Commands (RPI to Arduino)
 CMD_START_SCAN = 10
 CMD_TERMINATE = 11
 CMD_GET_NEXT_FRAME = 12
@@ -173,6 +173,15 @@ CMD_DECREASE_WIND_SPEED = 63
 CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
+# Responses (Arduino to RPi)
+RSP_FRAME_AVAILABLE = 80
+RSP_SCAN_ERROR = 81
+RSP_REWIND_ERROR = 82
+RSP_FAST_FORWARD_ERROR = 83
+RSP_REWIND_ENDED = 84
+RSP_FAST_FORWARD_ENDED = 85
+RSP_REPORT_AUTO_LEVELS = 86
+
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
@@ -1999,8 +2008,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         try:
             ArduinoData = i2c.read_i2c_block_data(16, 3)
             ArduinoTrigger = ArduinoData[0]
-            ArduinoParam1 =  ArduinoData[1]
-            ArduinoParam2 =  ArduinoData[2]
+            ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
+            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
+            ArduinoParam3 = ArduinoData[5] * 256 + ArduinoData[6]
+            ArduinoParam4 = ArduinoData[7] * 256 + ArduinoData[8]
         except IOError:
             ArduinoTrigger = 0
             # Log error to console
@@ -2020,25 +2031,26 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
-    elif ArduinoTrigger == 11:  # New Frame available
+    elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
         NewFrameAvailable = True
-    elif ArduinoTrigger == 12:  # Error during scan
-        logging.warning("Received scan error from Arduino")
+    elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
+        logging.warning("Received scan error from Arduino (%i, %i, %i, %i)", ArduinoParam1, ArduinoParam2, ArduinoParam3, ArduinoParam4)
         ScanProcessError = True
-    elif ArduinoTrigger == CMD_SET_PT_LEVEL:  # Set PT level: Arduino tell us autocalculated threshold level
-        pt_level_str.set(str(ArduinoParam1 * 256 + ArduinoParam2))
-    elif ArduinoTrigger == CMD_SET_MIN_FRAME_STEPS:  # Set PT level: Arduino tell us autocalculated threshold level
-        min_frame_steps_str.set(str(ArduinoParam1 * 256 + ArduinoParam2))
-    elif ArduinoTrigger == 60:  # Rewind ended, we can re-enable buttons
+    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
+        if (PTLevel_auto):
+            pt_level_str.set(str(ArduinoParam1))
+        if (FrameSteps_auto):
+            min_frame_steps_str.set(str(ArduinoParam2))
+    elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.info("Received rewind end event from Arduino")
-    elif ArduinoTrigger == 61:  # FastForward ended, we can re-enable buttons
+    elif ArduinoTrigger == RSP_FAST_FORWARD_ENDED:  # FastForward ended, we can re-enable buttons
         FastForwardEndOutstanding = True
         logging.info("Received fast forward end event from Arduino")
-    elif ArduinoTrigger == CMD_UNCONDITIONAL_REWIND:  # Error during Rewind
+    elif ArduinoTrigger == RSP_REWIND_ERROR:  # Error during Rewind
         RewindErrorOutstanding = True
         logging.warning("Received rewind error from Arduino")
-    elif ArduinoTrigger == CMD_UNCONDITIONAL_FAST_FORWARD:  # Error during FastForward
+    elif ArduinoTrigger == RSP_FAST_FORWARD_ERROR:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     else:
