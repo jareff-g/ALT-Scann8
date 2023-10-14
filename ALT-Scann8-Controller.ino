@@ -297,7 +297,7 @@ void loop() {
         break;
       case CMD_SET_SCAN_SPEED:
         ScanSpeed = 500 + (10-param) * 500;
-        if (ScanSpeed < OriginalScanSpeed)
+        if (ScanSpeed < OriginalScanSpeed)  // Increase film collection frequency if increasing scan speed
           collect_modulo-=2;
         OriginalScanSpeed = ScanSpeed;
         break;
@@ -700,12 +700,12 @@ void adjust_framesteps(int frame_steps) {
     static int items_in_list = 0;
     int total;
 
+    // Collect stats even if auto not activated
     steps_per_frame_list[idx] = frame_steps;
     idx = (idx + 1) % 32;
     if (items_in_list < 32)
         items_in_list++;
-
-    if (Frame_Steps_Auto && items_in_list == 32) {
+    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
         MinFrameSteps = int(total / 32);
@@ -775,6 +775,7 @@ ScanResult scan(int UI_Command) {
       // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
       steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
       if (steps_to_do > 5)
+          // Tell UI (Raspberry PI) an error happened during scanning
           SendToRPi(RSP_SCAN_ERROR, steps_to_do, MinFrameSteps, FrameStepsDone, DecreaseSpeedFrameSteps);
     }
     else     
