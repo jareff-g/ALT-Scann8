@@ -162,7 +162,7 @@ boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in o
 unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
 unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
 
-byte BufferForRPi[9];   // 9 byte array to sedn data to Raspberry Pi over I2C bus
+byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
 int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
@@ -704,7 +704,7 @@ void adjust_framesteps(int frame_steps) {
     static int items_in_list = 0;
     int total;
 
-    // Check if steps per frame are goign beyond reasonable limits
+    // Check if steps per frame are going beyond reasonable limits
     if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
         MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;

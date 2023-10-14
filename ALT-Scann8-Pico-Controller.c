@@ -81,7 +81,7 @@ int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
 
 int UI_Command; // Stores I2C command from Raspberry PI
-// I2C commands: Constant definition
+// I2C commands (RPi to Arduino): Constant definition
 #define CMD_VERSION_ID_CHECK 1
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
@@ -100,6 +100,20 @@ int UI_Command; // Stores I2C command from Raspberry PI
 #define CMD_DECREASE_WIND_SPEED 63
 #define CMD_UNCONDITIONAL_REWIND 64
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
+// I2C responses (Arduino to RPi): Constant definition
+#define RSP_FRAME_AVAILABLE 80
+#define RSP_SCAN_ERROR 81
+#define RSP_REWIND_ERROR 82
+#define RSP_FAST_FORWARD_ERROR 83
+#define RSP_REWIND_ENDED 84
+#define RSP_FAST_FORWARD_ENDED 85
+#define RSP_REPORT_AUTO_LEVELS 86
+
+// Immutable values
+#define S8_HEIGHT  4.01
+#define R8_HEIGHT  3.3
+#define NEMA_STEP_DEGREES  1.8
+#define NEMA_MICROSTEPS_IN_STEP  16
 
 enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
 
@@ -116,8 +130,8 @@ ScanState=Sts_Idle;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 unsigned int UVLedBrightness = 65535;       // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 250 ;             // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 500;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long ScanSpeed = 500 ;             // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 2*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
 unsigned long DecreaseScanSpeedStep = 100;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
@@ -126,8 +140,10 @@ int PerforationMinLevel = 50;               // Phototransistor reported value, m
 int PerforationThresholdLevelR8 = 180;      // Default value for R8
 int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int MinFrameStepsR8 = 257;                  // Default value for R8
-int MinFrameStepsS8 = 288;                  // Default value for S8
+int PerforationThresholdAutoLevelRatio = 30;  // Percentage between dynamic max/min PT level
+float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
+int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8
+int MinFrameStepsS8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int ExtraFrameSteps = 0;                    // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 20;     // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
@@ -141,6 +157,8 @@ int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 int FrameStepsDone = 0;                     // Count steps
 int MaxFrameSteps = 100;                      // Required to calculate led brightness (init with non-zero value, below potential real max)
+// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// with dynamically calculated values
 unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
@@ -153,11 +171,12 @@ boolean TractionSwitchActive = true;  // When traction micro-switch is closed
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 
-int EventForRPi = 0;    // Used by Pico to pass an event to RPi
-int ParamForRPi = 0;    // Used by CMD_SET_PT_LEVEL (pass autocalculated value to RPi for display)
+byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
 int PT_SignalLevelRead;   // Raw signal level from phototransistor
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
+
+boolean Frame_Steps_Auto = true;
 
 // Flag to detect ALT UI version
 // Need to prevent operation with main version since compatibility cannot be maintained
@@ -174,6 +193,21 @@ volatile struct {
   int in;
   int out;
 } CommandQueue;
+
+void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
+{
+    BufferForRPi[0] = cmd;
+    BufferForRPi[1] = param1/256;
+    BufferForRPi[2] = param1%256;
+    BufferForRPi[3] = param2/256;
+    BufferForRPi[4] = param2%256;
+    BufferForRPi[5] = param3/256;
+    BufferForRPi[6] = param3%256;
+    BufferForRPi[7] = param4/256;
+    BufferForRPi[8] = param4%256;
+    digitalWrite(13, HIGH);
+}
+
 
 void scan_i2c() {
     for (int i2c_instance = 0; i2c_instance <= 1; i2c_instance++) {
@@ -326,7 +360,7 @@ void loop() {
                     if (param == 0)
                       PT_Level_Auto = true;     // zero means we go in automatic mode
                     else{
-                      PT_Level_Auto = false;     // zero means we go in automatic mode
+                      PT_Level_Auto = false;
                       PerforationThresholdLevel = param;
                       OriginalPerforationThresholdLevel = param;
                     }
@@ -334,20 +368,31 @@ void loop() {
                 }
                 break;
             case CMD_SET_MIN_FRAME_STEPS:
-                if (param >= 100 && param <= 600) {
-                  MinFrameSteps = param;
-                  OriginalMinFrameSteps = param;
-                  if (IsS8)
-                    MinFrameStepsS8 = param;
-                  else
-                    MinFrameStepsR8 = param;
-                  MinFrameSteps = param;
-                  DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-                  DebugPrint(">MinSteps",param);
+                if (param == 0 || param >= 100 && param <= 600) {
+                    if (param == 0)
+                        Frame_Steps_Auto = true;     // zero means we go in automatic mode
+                    else {
+                        Frame_Steps_Auto = false;
+                        MinFrameSteps = param;
+                        if (IsS8)
+                            MinFrameStepsS8 = param;
+                        else
+                            MinFrameStepsR8 = param;
+                        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                        DebugPrint(">MinSteps",param);
+                    }
                 }
                 break;
-            case CMD_SET_EXTRA_FRAME_STEPS:
-                ExtraFrameSteps = param;
+            case CMD_SET_FRAME_FINE_TUNE:
+                FrameFineTune = param;
+                if (FrameFineTune < 0)
+                    PerforationThresholdAutoLevelRatio -= 1;
+                break;
+            case CMD_SET_SCAN_SPEED:
+                ScanSpeed = 500 + (10-param) * 1000;
+                if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
+                    collect_modulo--;
+                OriginalScanSpeed = ScanSpeed;
                 break;
         }
 
@@ -374,17 +419,14 @@ void loop() {
                         break;
                     case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
                         ScanState = Sts_Scan;
-                        MinFrameSteps = OriginalMinFrameSteps;
                         StartFrameTime = get_absolute_time();
                         ScanSpeed = OriginalScanSpeed;
                         DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
                         DebugPrintStr(">Next fr.");
                         // Also send, if required, to RPi autocalculated threshold level every frame
-                        if (PT_Level_Auto) {
-                            EventForRPi = CMD_SET_PT_LEVEL;
-                            ParamForRPi = PerforationThresholdLevel;
-                            digitalWrite(13, HIGH);
-                        }
+                        // Alternate reports for each value, otherwise I2C has I/O errors
+                        if (PT_Level_Auto || Frame_Steps_Auto)
+                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
                         break;
                     case CMD_SET_REGULAR_8:  // Select R8 film
                         IsS8 = false;
@@ -426,8 +468,7 @@ void loop() {
                     case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
                         if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
                             DebugPrintStr("Rwnd err");
-                            EventForRPi = CMD_UNCONDITIONAL_REWIND;
-                            i2c_write_byte_raw(i2c0, EventForRPi);
+                            SendToRPi(RSP_REWIND_ERROR, 0, 0, 0, 0);
                             /*
                             tone(A2, 2000, 100);
                             sleep_ms(150);
@@ -456,8 +497,7 @@ void loop() {
                     case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
                         if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
                             DebugPrintStr("FF err");
-                            EventForRPi = CMD_UNCONDITIONAL_FAST_FORWARD;
-                            i2c_write_byte_raw(i2c0, EventForRPi);
+                            SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0, 0, 0);
                             /*
                             tone(A2, 2000, 100);
                             sleep_ms(150);
@@ -580,9 +620,7 @@ boolean RewindFilm(int UI_Command) {
             gpio_put(PIN_MOTOR_B_NEUTRAL,0);
             gpio_put(PIN_MOTOR_C_NEUTRAL,0);
             sleep_ms(100);
-            EventForRPi = CMD_REWIND;
-            i2c_write_byte_raw(i2c0, EventForRPi);
-            //digitalWrite(13, HIGH);
+            SendToRPi(RSP_REWIND_ENDED, 0, 0, 0, 0);
         }
     }
     else {
@@ -621,9 +659,7 @@ boolean FastForwardFilm(int UI_Command) {
             gpio_put(PIN_MOTOR_B_NEUTRAL,0);
             gpio_put(PIN_MOTOR_C_NEUTRAL,0);
             sleep_ms(100);
-            EventForRPi = CMD_FAST_FORWARD;
-            i2c_write_byte_raw(i2c0, EventForRPi);
-            //digitalWrite(13, HIGH);
+            SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0, 0, 0);
         }
     }
     else {
@@ -763,6 +799,33 @@ boolean FilmInFilmgate() {
     return(retvalue);
 }
 
+void adjust_framesteps(int frame_steps) {
+    static int steps_per_frame_list[32];
+    static int idx = 0;
+    static int items_in_list = 0;
+    int total;
+
+    // Check if steps per frame are going beyond reasonable limits
+    if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
+        MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+        return; // Do not add invalid steps per frame to list
+    }
+
+    // We collect statistics even if not in auto mode
+    steps_per_frame_list[idx] = frame_steps;
+    idx = (idx + 1) % 32;
+    if (items_in_list < 32)
+        items_in_list++;
+
+    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
+        for (int i = 0; i < 32; i++)
+            total = total + steps_per_frame_list[i];
+        MinFrameSteps = int(total / 32) - 5;
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+    }
+}
+
 
 // ------------- is the film perforation in position to take picture? ---------------
 // Returns false if status should change to idle
@@ -773,7 +836,11 @@ boolean IsHoleDetected() {
     PT_Level = GetLevelPT();
 
     // ------------- Frame detection ----
-    if (FrameStepsDone >= MinFrameSteps && PT_Level >= PerforationThresholdLevel) {
+    // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
+    // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
+    // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
+    // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
+    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
         hole_detected = true;
         GreenLedOn = true;
         // Green led already handled during scan process (proportional to frame steps)
@@ -822,7 +889,13 @@ ScanResult scan(int UI_Command) {
 
     if (FrameStepsDone > DecreaseSpeedFrameSteps) {
         ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
-        steps_to_do = 1;    // Only one step per loop once we are close to frame detection
+        //ScanSpeed = FetchFrameScanSpeed + 0;
+        // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
+        // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
+        steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
+        if (steps_to_do > 5)
+            // Tell UI (Raspberry PI) an error happened during scanning
+            SendToRPi(RSP_SCAN_ERROR, steps_to_do, MinFrameSteps, FrameStepsDone, DecreaseSpeedFrameSteps);
     }
     else
         steps_to_do = 5;    // 5 steps per loop if not yet there
@@ -863,8 +936,7 @@ ScanResult scan(int UI_Command) {
             //tone(A2, 2000, 35);
         }
         else {
-            EventForRPi = 11;
-            i2c_write_byte_raw(i2c0, EventForRPi);
+            SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
         }
 
         FrameDetected = false;
@@ -874,13 +946,13 @@ ScanResult scan(int UI_Command) {
         if (DebugState == FrameSteps)
           SerialPrintInt(LastFrameSteps);
     }
-    else if (FrameStepsDone > 3*DecreaseSpeedFrameSteps) {
+    else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
         retvalue = SCAN_FRAME_DETECTION_ERROR;
         FrameStepsDone = 0;
         DebugPrintStr("Err/scan");
         // Tell UI (Raspberry PI) an error happened during scanning
-        EventForRPi = 12;
-        i2c_write_byte_raw(i2c0, EventForRPi);
+        SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
+        FrameStepsDone = 0;
     }
 
     return (retvalue);
@@ -906,14 +978,9 @@ void receiveEvent(i2c_inst_t *i2c, i2c_slave_event_t event) {
 
 // To be defined
 // -- Sending I2C command to Raspberry PI, take picture now -------
+// -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
-  byte cmd_array[3];
-
-  cmd_array[0] = EventForRPi;
-  cmd_array[1] = ParamForRPi/256;
-  cmd_array[2] = ParamForRPi%256;
-  Wire.write(cmd_array,3);
-  EventForRPi = 0;
+  Wire.write(BufferForRPi,9);
 }
 
 boolean push(int IncomingIc, int param) {
