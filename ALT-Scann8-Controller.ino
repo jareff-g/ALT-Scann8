@@ -741,8 +741,6 @@ boolean IsHoleDetected() {
   // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
   // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
   if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
-    if (FrameStepsDone > int(MinFrameSteps * 1.5) || FrameStepsDone < MinFrameSteps) 
-      tone(A2, 2000, 100);
     hole_detected = true;
     GreenLedOn = true;
     analogWrite(A1, 255); // Light green led
