@@ -81,6 +81,12 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
  #define RSP_REPORT_AUTO_LEVELS 86
 
 
+ // Immutable values
+ #define S8_HEIGHT  4.01
+ #define R8_HEIGHT  3.3
+ #define NEMA_STEP_DEGREES  1.8
+ #define NEMA_MICROSTEPS_IN_STEP  16
+
 //------------ Stepper motors control ----------------
 const int MotorA_Stepper = 2;     // Stepper motor film feed
 const int MotorA_Neutral = 3;     // neutral position
@@ -130,8 +136,9 @@ int PerforationThresholdLevelR8 = 180;                          // Default value
 int PerforationThresholdLevelS8 = 90;                          // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int PerforationThresholdAutoLevelRatio = 30;  // Percentage between dynamic max/min PT level
-int MinFrameStepsR8 = 240;            // Default value for R8
-int MinFrameStepsS8 = 260;            // Default value for S8
+float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
+int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8
+int MinFrameStepsS8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
 int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 20;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
@@ -141,6 +148,8 @@ int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 // int Paus = LOW;                          // JRE: Unused
 int FrameStepsDone = 0;                     // Count steps
+// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// with dynamically calculated values
 unsigned long OriginalScanSpeed = ScanSpeed;          // restoration original value
 int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
 
@@ -280,7 +289,6 @@ void loop() {
           else{
             Frame_Steps_Auto = false;
             MinFrameSteps = param;
-            OriginalMinFrameSteps = param;
             if (IsS8)
               MinFrameStepsS8 = param;
             else
@@ -296,9 +304,9 @@ void loop() {
           PerforationThresholdAutoLevelRatio -= 1;
         break;
       case CMD_SET_SCAN_SPEED:
-        ScanSpeed = 500 + (10-param) * 500;
-        if (ScanSpeed < OriginalScanSpeed)  // Increase film collection frequency if increasing scan speed
-          collect_modulo-=2;
+        ScanSpeed = 250 + (10-param) * 500;
+        if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
+          collect_modulo--;
         OriginalScanSpeed = ScanSpeed;
         break;
     }      
@@ -333,8 +341,17 @@ void loop() {
             DebugPrintStr(">Next fr.");
             // Also send, if required, to RPi autocalculated threshold level every frame
             // Alternate reports for each value, otherwise I2C has I/O errors
-            if (PT_Level_Auto || Frame_Steps_Auto)
-                SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
+            if (PT_Level_Auto && count%2 == 0) {
+                EventForRPi = CMD_SET_PT_LEVEL;
+                ParamForRPi = PerforationThresholdLevel;
+                digitalWrite(13, HIGH);
+            }
+            if (Frame_Steps_Auto && count%2 == 1) {
+                EventForRPi = CMD_SET_MIN_FRAME_STEPS;
+                ParamForRPi = MinFrameSteps;
+                digitalWrite(13, HIGH);
+            }
+            count++;
             break;
           case CMD_SET_REGULAR_8:  // Select R8 film
             IsS8 = false;
@@ -700,15 +717,23 @@ void adjust_framesteps(int frame_steps) {
     static int items_in_list = 0;
     int total;
 
-    // Collect stats even if auto not activated
+    // Check if steps per frame are goign beyond reasonable limits
+    if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
+        MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+        return; // Do not add invalid steps per frame to list
+    }
+
+    // We collect statistics even if not in auto mode
     steps_per_frame_list[idx] = frame_steps;
     idx = (idx + 1) % 32;
     if (items_in_list < 32)
         items_in_list++;
+
     if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32);
+        MinFrameSteps = int(total / 32)-5;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
