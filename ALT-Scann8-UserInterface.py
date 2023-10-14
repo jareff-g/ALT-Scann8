@@ -776,7 +776,7 @@ def min_frame_steps_spinbox_dbl_click(event):
     FrameSteps_auto = not FrameSteps_auto
     SessionData["FrameStepsAuto"] = FrameSteps_auto
     if FrameSteps_auto:
-        min_frame_steps_spinbox.config(state=DISABLED)
+        min_frame_steps_spinbox.config(state='readonly')
     else:
         min_frame_steps_spinbox.config(state=NORMAL)
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
@@ -826,7 +826,7 @@ def pt_level_spinbox_dbl_click(event):
     PTLevel_auto = not PTLevel_auto
     SessionData["PTLevelAuto"] = PTLevel_auto
     if PTLevel_auto:
-        pt_level_spinbox.config(state=DISABLED)
+        pt_level_spinbox.config(state='readonly')
     else:
         pt_level_spinbox.config(state=NORMAL)
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)

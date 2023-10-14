@@ -276,7 +276,9 @@ void loop() {
           PerforationThresholdAutoLevelRatio -= 1;
         break;
       case CMD_SET_SCAN_SPEED:
-        ScanSpeed = 500 + (10-param) * 500;
+        ScanSpeed = 250 + (10-param) * 500;
+        if (ScanSpeed < OriginalScanSpeed)  // Increase film collection frequency if increasing scan speed
+          collect_modulo-=2;
         OriginalScanSpeed = ScanSpeed;
         break;
     }      
@@ -692,11 +694,12 @@ void adjust_framesteps(int frame_steps) {
     static int items_in_list = 0;
     int total;
 
+    // Collect stats even if auto not activated
     steps_per_frame_list[idx] = frame_steps;
     idx = (idx + 1) % 32;
     if (items_in_list < 32)
         items_in_list++;
-    if (items_in_list == 32) {
+    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
         MinFrameSteps = int(total / 32);
@@ -765,6 +768,11 @@ ScanResult scan(int UI_Command) {
       // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
       // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
       steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
+      if (steps_to_do > 5) {  // Should not happen, but just in case
+        // Tell UI (Raspberry PI) an error happened during scanning
+        EventForRPi = 12; 
+        digitalWrite(13, HIGH);
+      }
     }
     else     
       steps_to_do = 5;    // 5 steps per loop if not yet there
