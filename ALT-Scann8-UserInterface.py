@@ -96,7 +96,6 @@ rwnd_speed_delay = 200   # informational only, should be in sync with Arduino, b
 FastForwardActive = False
 FastForwardErrorOutstanding = False
 FastForwardEndOutstanding = False
-OpenFolderActive = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
 ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
@@ -1306,28 +1305,6 @@ def switch_negative_capture():
             else:
                 camera.image_effect = 'none'
                 camera.awb_gains = (3.5, 1.0)
-
-
-def open_folder():
-    global OpenFolderActive
-    global FolderProcess
-    global save_bg, save_fg
-    global SimulatedRun
-    global OpenFolder_btn
-
-    if not OpenFolderActive:
-        OpenFolder_btn.config(text="Close Folder", bg='red', fg='white')
-        hide_preview()
-        FolderProcess = subprocess.Popen(["pcmanfm", BaseDir])
-    else:
-        OpenFolder_btn.config(text="Open Folder", bg=save_bg, fg=save_fg)
-        FolderProcess.terminate()  # Does not work, needs to be debugged
-
-        time.sleep(.5)
-        display_preview()
-        time.sleep(.5)
-
-    OpenFolderActive = not OpenFolderActive
 
 
 # Function to enable 'real' preview with PiCamera2
@@ -2574,7 +2551,6 @@ def build_ui():
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
     global awb_wait_checkbox
-    global OpenFolder_btn
     global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
@@ -3022,15 +2998,6 @@ def build_ui():
             rwnd_speed_control_up.pack(side=RIGHT)
             rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
             rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
-
-            # Open target folder (to me this is useless. Also, gives problem with closure, not as easy at I imagined)
-            # Leave it in the expert area, disabled, just in case it is reused
-            openfolder_frame = LabelFrame(experimental_frame, text='Open Folder', width=8, height=2, font=("Arial", 7))
-            openfolder_frame.pack(side=LEFT, padx=5)
-            OpenFolder_btn = Button(openfolder_frame, text="Open Folder", width=8, height=3, command=open_folder,
-                                    activebackground='green', activeforeground='white', wraplength=80, state=DISABLED,
-                                    font=("Arial", 7))
-            OpenFolder_btn.pack(side=TOP, padx=5, pady=5)
 
 
 def main(argv):
