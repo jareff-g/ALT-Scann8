@@ -499,61 +499,56 @@ def set_existing_folder():
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
-# we will convert it to a higher level by using a similar algorythm as the one used by torulf in his original code:
+# we will convert it to a higher level by using a similar algorythm as the one used by Torulf in his original code:
 # We take '20000' as the base reference of zero, with chunks of 2000's up and down moving the counter by one unit
 # 'CurrentExposure' = zero wil always be displayed as 'Auto'
 
-def decrease_exp():
+
+def exposure_selection(updown):
+    global exposure_spinbox, exposure_str
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
 
     if not ExpertMode:
         return
 
-    if not SimulatedRun:
-        if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
-            if IsPiCamera2:
-                metadata = camera.capture_metadata()
-                CurrentExposure = metadata["ExposureTime"]
-                # CurrentExposure = camera.controls.ExposureTime # Does not work, need to get all metadata
-            else:
-                CurrentExposure = camera.exposure_speed
+    if CurrentExposure == 0:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        return
 
-    if CurrentExposure >= 2000:
-        CurrentExposure -= 2000
-    else:
+    CurrentExposure = CurrentExposure + 2000 if updown=='up' else -2000
+
+    if CurrentExposure <= 0:
         CurrentExposure = 1  # Do not allow zero or below
+    else:
+        CurrentExposure = CurrentExposure / 2000 * 2000 # in case we are starting from 1
 
     if CurrentExposure == 0:
         CurrentExposureStr = "Auto"
     else:
         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
 
-    if CurrentExposure != "Auto":
-        SessionData["CurrentExposure"] = str(CurrentExposure)
+    SessionData["CurrentExposure"] = str(CurrentExposure)
 
-    exposure_frame_value_label.config(text=CurrentExposureStr)
-    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
+    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
 
     if not SimulatedRun:
         if IsPiCamera2:
             camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
         else:
             camera.shutter_speed = CurrentExposure
-    auto_exp_wait_checkbox.config(state=DISABLED)
+
+    auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
 
 
-def auto_exp():
+def exposure_spinbox_dbl_click(event):
+    global exposure_spinbox, exposure_str
     global CurrentExposure, CurrentExposureStr
+    global SimulatedRun
 
-    if not ExpertMode:
-        return
-
-    if (CurrentExposure != 0):
+    if CurrentExposure != 0:  # Not in automatic mode, activate auto
         CurrentExposure = 0
         CurrentExposureStr = "Auto"
-        SessionData["CurrentExposure"] = CurrentExposureStr
-        exposure_frame_value_label.config(text=CurrentExposureStr)
+        SessionData["CurrentExposure"] = str(CurrentExposure)
         if not SimulatedRun:
             if IsPiCamera2:
                 camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
@@ -565,49 +560,15 @@ def auto_exp():
             if IsPiCamera2:
                 metadata = camera.capture_metadata()
                 CurrentExposure = metadata["ExposureTime"]
-                # CurrentExposure = camera.controls.ExposureTime # Does not work, need to get all metadata
             else:
                 CurrentExposure = camera.exposure_speed
         else:
             CurrentExposure = 3500  # Arbitrary Value for Simulated run
         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
+        SessionData["CurrentExposure"] = str(CurrentExposure)
 
-    exposure_frame_value_label.config(text=CurrentExposureStr)
-    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
-    decrease_exp_btn.config(state=NORMAL if CurrentExposure != 0 else DISABLED)
-    increase_exp_btn.config(state=NORMAL if CurrentExposure != 0 else DISABLED)
-
-
-def increase_exp():
-    global CurrentExposure, CurrentExposureStr
-    global SimulatedRun
-
-    if not ExpertMode:
-        return
-
-    if not SimulatedRun:
-        if CurrentExposure == 0:  # If we are in auto exposure mode, retrieve current value to start from there
-            if IsPiCamera2:
-                metadata = camera.capture_metadata()
-                CurrentExposure = metadata["ExposureTime"]
-                # CurrentExposure = camera.controls.ExposureTime
-            else:
-                CurrentExposure = camera.exposure_speed
-    CurrentExposure += 2000
-    CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-
-    SessionData["CurrentExposure"] = str(CurrentExposure)
-
-    exposure_frame_value_label.config(text=CurrentExposureStr)
-    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
-
-    if not SimulatedRun:
-        if IsPiCamera2:
-            camera.controls.ExposureTime = CurrentExposure
-        else:
-            camera.shutter_speed = CurrentExposure
-    auto_exp_wait_checkbox.config(state=DISABLED)
+    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
 
 
 def auto_exposure_change_pause_selection():
@@ -617,23 +578,22 @@ def auto_exposure_change_pause_selection():
     SessionData["ExposureAdaptPause"] = str(ExposureAdaptPause)
 
 
-def auto_white_balance_change_pause_selection():
-    global auto_white_balance_change_pause
-    global AwbPause
-    AwbPause = auto_white_balance_change_pause.get()
-    SessionData["AwbPause"] = str(AwbPause)
 
-
-def colour_gain_red_plus():
+def wb_red_selection(updown):
     global colour_gains_red_value_label
     global GainBlue, GainRed
+    global wb_red_spinbox, wb_red_str
+    global SimulatedRun
 
     if not ExpertMode:
-        return()
+        return
 
-    GainRed += 0.1
-    SessionData["GainRed"] = str(GainRed)
-    colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
+    if CurrentAwbAuto:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        return
+
+    GainRed = float(wb_red_spinbox.get())
+    SessionData["GainRed"] = GainRed
+
     if not SimulatedRun and not CurrentAwbAuto:
         if IsPiCamera2:
             # camera.set_controls({"AwbEnable": 0})
@@ -643,64 +603,36 @@ def colour_gain_red_plus():
             camera.awb_gains = (GainRed, GainBlue)
 
 
-def colour_gain_red_minus():
+
+def wb_blue_selection(updown):
+    global colour_gains_blue_value_label
+    global GainBlue, GainRed
+    global wb_blue_spinbox, wb_blue_str
+    global SimulatedRun
+
+    if not ExpertMode:
+        return
+
+    if CurrentAwbAuto:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        return
+
+    GainBlue = float(wb_blue_spinbox.get())
+    SessionData["GainBlue"] = GainBlue
+
+    if not SimulatedRun and not CurrentAwbAuto:
+        if IsPiCamera2:
+            # camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
+        else:
+            # camera.awb_mode = 'off'
+            camera.awb_gains = (GainRed, GainBlue)
+
+
+def wb_spinbox_dbl_click(event):
     global colour_gains_red_value_label
-    global GainBlue, GainRed
-
-    if not ExpertMode:
-        return ()
-
-    GainRed -= 0.1
-    SessionData["GainRed"] = str(GainRed)
-    colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
-    if not SimulatedRun and not CurrentAwbAuto:
-        if IsPiCamera2:
-            # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
-        else:
-            # camera.awb_mode = 'off'
-            camera.awb_gains = (GainRed, GainBlue)
-
-
-def colour_gain_blue_plus():
-    global colour_gains_blue_value_label
-    global GainBlue, GainRed
-
-    if not ExpertMode:
-        return ()
-
-    GainBlue += 0.1
-    SessionData["GainBlue"] = str(GainBlue)
-    colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
-    if not SimulatedRun and not CurrentAwbAuto:
-        if IsPiCamera2:
-            # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
-        else:
-            # camera.awb_mode = 'off'
-            camera.awb_gains = (GainRed, GainBlue)
-
-
-def colour_gain_blue_minus():
-    global colour_gains_blue_value_label
-    global GainBlue, GainRed
-
-    if not ExpertMode:
-        return ()
-
-    GainBlue -= 0.1
-    SessionData["GainBlue"] = str(GainBlue)
-    colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
-    if not SimulatedRun and not CurrentAwbAuto:
-        if IsPiCamera2:
-            # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
-        else:
-            # camera.awb_mode = 'off'
-            camera.awb_gains = (GainRed, GainBlue)
-
-
-def colour_gain_auto():
+    global wb_red_spinbox, wb_red_str
+    global wb_blue_spinbox, wb_blue_str
+    global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global CurrentAwbAuto
     global GainBlue, GainRed
     global colour_gains_auto_btn, awb_frame
@@ -717,26 +649,16 @@ def colour_gain_auto():
     SessionData["GainBlue"] = str(GainBlue)
 
     if CurrentAwbAuto:
-        awb_frame.config(text='Automatic White Balance ON')
-        awb_wait_checkbox.config(state=NORMAL)
-        colour_gains_red_btn_plus.config(state=DISABLED)
-        colour_gains_red_btn_minus.config(state=DISABLED)
-        colour_gains_blue_btn_plus.config(state=DISABLED)
-        colour_gains_blue_btn_minus.config(state=DISABLED)
-        colour_gains_red_value_label.config(text="Auto")
-        colour_gains_blue_value_label.config(text="Auto")
+        awb_red_wait_checkbox.config(state=NORMAL)
+        awb_blue_wait_checkbox.config(state=NORMAL)
         if not SimulatedRun:
             if IsPiCamera2:
                 camera.set_controls({"AwbEnable": 1})
             else:
                 camera.awb_mode = 'auto'
     else:
-        awb_frame.config(text='Automatic White Balance OFF')
-        awb_wait_checkbox.config(state=DISABLED)
-        colour_gains_red_btn_plus.config(state=NORMAL)
-        colour_gains_red_btn_minus.config(state=NORMAL)
-        colour_gains_blue_btn_plus.config(state=NORMAL)
-        colour_gains_blue_btn_minus.config(state=NORMAL)
+        awb_red_wait_checkbox.config(state=DISABLED)
+        awb_blue_wait_checkbox.config(state=DISABLED)
         if not SimulatedRun:
             if IsPiCamera2:
                 # Retrieve current gain values from Camera
@@ -754,9 +676,52 @@ def colour_gain_auto():
                 colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
                 camera.awb_mode = 'off'
                 camera.awb_gains = (GainRed, GainBlue)
-        else:  # Add fake values for simulated run
-            colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
-            colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
+
+    wb_blue_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
+    wb_red_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
+
+
+
+def auto_white_balance_change_pause_selection():
+    global auto_white_balance_change_pause
+    global AwbPause
+    AwbPause = auto_white_balance_change_pause.get()
+    SessionData["AwbPause"] = str(AwbPause)
+
+
+def match_wait_margin_selection(updown):
+    global colour_gains_red_value_label
+    global MatchWaitMargin, match_wait_margin_spinbox
+    global wb_red_spinbox, wb_red_str
+    global SimulatedRun
+
+    if not ExpertMode:
+        return
+
+    MatchWaitMargin = int(match_wait_margin_spinbox.get())
+    SessionData["MatchWaitMargin"] = MatchWaitMargin
+
+def stabilization_delay_selection(updown):
+    global stabilization_delay_label
+    global CaptureStabilizationDelay
+    global stabilization_delay_spinbox, stabilization_delay_str
+    global SimulatedRun
+
+    if not ExpertMode:
+        return
+
+    CaptureStabilizationDelay = int(stabilization_delay_spinbox.get())/1000
+    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
+
+
+def stabilization_delay_spinbox_focus_out(event):
+    global stabilization_delay_label
+    global CaptureStabilizationDelay
+    global stabilization_delay_spinbox, stabilization_delay_str
+    global SimulatedRun
+
+    CaptureStabilizationDelay = int(stabilization_delay_spinbox.get())/1000
+    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
 def min_frame_steps_selection(updown):
@@ -856,24 +821,6 @@ def scan_speed_spinbox_focus_out(event):
     SessionData["ScanSpeed"] = ScanSpeed
     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
-
-def stabilization_delay_down():
-    global stabilization_delay, CaptureStabilizationDelay
-
-    if (CaptureStabilizationDelay > 0):
-        CaptureStabilizationDelay -= 0.01
-        CaptureStabilizationDelay = round(CaptureStabilizationDelay, 2)
-    stabilization_delay.config(text=str(round(CaptureStabilizationDelay * 1000))+' ms')
-    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
-
-def stabilization_delay_up():
-    global stabilization_delay, CaptureStabilizationDelay
-
-    if (CaptureStabilizationDelay < 0.5):
-        CaptureStabilizationDelay += 0.01
-        CaptureStabilizationDelay = round(CaptureStabilizationDelay, 2)
-    stabilization_delay.config(text=str(round(CaptureStabilizationDelay * 1000))+' ms')
-    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 def rwnd_speed_down():
     global rwnd_speed_delay
@@ -1349,6 +1296,7 @@ def set_s8():
     global MinFrameSteps, MinFrameStepsS8
     global pt_level_str, min_frame_steps_str
     global FilmHoleY1, FilmHoleY2
+    global ALT_scann_init_done
 
     film_type_S8_btn.config(relief=SUNKEN)
     film_type_R8_btn.config(relief=RAISED)
@@ -1356,10 +1304,11 @@ def set_s8():
     time.sleep(0.2)
 
     PTLevel = PTLevelS8
-    SessionData["PTLevel"] = PTLevel
+    if ALT_scann_init_done:
+        SessionData["PTLevel"] = PTLevel
+        SessionData["MinFrameSteps"] = MinFrameSteps
     pt_level_str.set(str(PTLevel))
     MinFrameSteps = MinFrameStepsS8
-    SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
     FilmHoleY1 = 300
@@ -1400,28 +1349,6 @@ def set_r8():
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
-
-
-def match_wait_up():
-    global match_wait_margin_value, MatchWaitMargin
-    if MatchWaitMargin < 100:
-        if MatchWaitMargin >= 10 and MatchWaitMargin < 90:
-            MatchWaitMargin += 5
-        else:
-            MatchWaitMargin += 1
-    match_wait_margin_value.config(text=str(MatchWaitMargin)+'%')
-    SessionData["MatchWaitMargin"] = str(MatchWaitMargin)
-
-
-def match_wait_down():
-    global match_wait_margin_value, MatchWaitMargin
-    if MatchWaitMargin > 0:
-        if MatchWaitMargin > 10 and MatchWaitMargin <= 90:
-            MatchWaitMargin -= 5
-        else:
-            MatchWaitMargin -= 1
-    match_wait_margin_value.config(text=str(MatchWaitMargin)+'%')
-    SessionData["MatchWaitMargin"] = str(MatchWaitMargin)
 
 
 def sharpness_up():
@@ -1906,10 +1833,7 @@ def capture_loop():
             SessionData["CurrentDate"] = str(datetime.now())
             SessionData["CurrentDir"] = CurrentDir
             SessionData["CurrentFrame"] = str(CurrentFrame)
-            if CurrentExposureStr == "Auto":
-                SessionData["CurrentExposure"] = CurrentExposureStr
-            else:
-                SessionData["CurrentExposure"] = str(CurrentExposure)
+            SessionData["CurrentExposure"] = str(CurrentExposure)
             # with open(PersistedDataFilename, 'w') as f:
             #     json.dump(SessionData, f)
 
@@ -2148,9 +2072,9 @@ def load_config_data():
     global TempInFahrenheit
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
-    global MatchWaitMargin, match_wait_margin_value
+    global MatchWaitMargin, match_wait_margin_str
     global SharpnessValue
-    global CaptureStabilizationDelay
+    global CaptureStabilizationDelay, stabilization_delay_str
 
     for item in SessionData:
         logging.info("%s=%s", item, str(SessionData[item]))
@@ -2165,10 +2089,10 @@ def load_config_data():
         if ExpertMode:
             if 'MatchWaitMargin' in SessionData:
                 MatchWaitMargin = int(SessionData["MatchWaitMargin"])
-                match_wait_margin_value.config(text=str(MatchWaitMargin)+'%')
+                match_wait_margin_str.set(str(MatchWaitMargin))
             if 'CaptureStabilizationDelay' in SessionData:
                 CaptureStabilizationDelay = float(SessionData["CaptureStabilizationDelay"])
-                stabilization_delay.config(text=str(round(CaptureStabilizationDelay*1000)) + ' ms')
+                stabilization_delay_str.set(str(round(CaptureStabilizationDelay * 1000)))
 
         if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
@@ -2185,7 +2109,7 @@ def load_session_data():
     global HdrCaptureActive, HqCaptureActive
     global hq_btn, hdr_btn, turbo_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
-    global awb_wait_checkbox
+    global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
@@ -2194,6 +2118,8 @@ def load_session_data():
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
     global ScanSpeed, scan_speed_str
+    global exposure_spinbox, exposure_str
+    global wb_red_str, wb_blue_str
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2245,35 +2171,36 @@ def load_session_data():
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
-                    if CurrentExposureStr == "Auto":
+                    if CurrentExposureStr == "Auto" or CurrentExposureStr == "0":
                         CurrentExposure = 0
+                        CurrentExposureStr == "Auto"
                     else:
                         CurrentExposure = int(CurrentExposureStr)
                         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-                    exposure_frame_value_label.config(text=CurrentExposureStr)
-                    exposure_frame.config(text="Auto Exposure " + ('ON' if CurrentExposure == 0 else 'OFF'))
-                    decrease_exp_btn.config(state=DISABLED if CurrentExposure == 0 else NORMAL)
-                    increase_exp_btn.config(state=DISABLED if CurrentExposure == 0 else NORMAL)
+                    exposure_str = CurrentExposureStr
+                    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
+                    auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
                     if ExposureAdaptPause:
                         auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
                     CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
                     #if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
-                    CurrentAwbAuto = not CurrentAwbAuto  # Invert value, as button action will invert the value again
-                    colour_gain_auto()
-                    #awb_frame.config(text='Automatic White Balance ON' if CurrentAwbAuto else 'Automatic White Balance OFF')
+                    wb_blue_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
+                    wb_red_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
+                    awb_red_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
+                    awb_blue_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
                         awb_wait_checkbox.select()
                 if 'GainRed' in SessionData:
                     GainRed = float(SessionData["GainRed"])
-                    colour_gains_red_value_label.config(text="Auto" if CurrentAwbAuto else str(round(GainRed, 1)))
+                    wb_red_str.set(GainRed)
                 if 'GainBlue' in SessionData:
                     GainBlue = float(SessionData["GainBlue"])
-                    colour_gains_blue_value_label.config(text="Auto" if CurrentAwbAuto else str(round(GainBlue, 1)))
+                    wb_blue_str.set(GainBlue)
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = SessionData["MinFrameSteps"]
@@ -2550,14 +2477,13 @@ def build_ui():
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
-    global awb_wait_checkbox
+    global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
     global match_wait_margin_value
     global sharpness_control_value
     global PiCam2_preview_btn
-    global stabilization_delay
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global preview_border_frame
     global draw_capture_label
@@ -2568,6 +2494,11 @@ def build_ui():
     global PTLevel
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
+    global exposure_spinbox, exposure_str
+    global wb_red_spinbox, wb_red_str
+    global wb_blue_spinbox, wb_blue_str
+    global match_wait_margin_spinbox, match_wait_margin_str
+    global stabilization_delay_spinbox, stabilization_delay_str
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2736,95 +2667,96 @@ def build_ui():
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", 7))
         expert_frame.pack(side=LEFT, ipadx=5)
+        # info_label = tk.Label(expert_frame,
+        #                                  text='Grey background means automatic. Double click to disable it. ' +
+        #                                       'Catch up delay waits for AE/AWB to adjust (proportional to \'match margin\').\r' +
+        #                                       'Stabilization delay is the wait time before a snapshot is taken.',
+        #                                  width=120, font=("Arial", 7))
+        # info_label.pack(side=TOP, anchor='w')
 
-        # Exposure
-        exposure_frame = LabelFrame(expert_frame, text='Auto Exposure ' + ('ON' if CurrentExposure == 0 else 'OFF'),
+        # Exposure / white balance
+        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
                                     width=16, height=2, font=("Arial", 7))
-        exposure_frame.pack(side=LEFT, padx=5, pady=5)
+        exp_wb_frame.pack(side=LEFT, padx=5, pady=5)
 
-        exposure_frame_value_label = Label(exposure_frame, text=CurrentExposureStr, width=8, height=1,
-                                           font=("Arial", 7))
-        exposure_frame_value_label.pack(side=TOP, padx=18)
+        catch_up_delay_label = tk.Label(exp_wb_frame,
+                                         text='Catch-up\ndelay',
+                                         width=10, font=("Arial", 7))
+        catch_up_delay_label.grid(row=0, column=2, padx=2, pady=1)
+        exposure_label = tk.Label(exp_wb_frame,
+                                         text='Exposure:',
+                                         width=12, font=("Arial", 7))
+        exposure_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        exposure_str = tk.StringVar(value=str(CurrentExposure))
 
-        exposure_frame_buttons = Frame(exposure_frame, width=8, height=1)
-        exposure_frame_buttons.pack(side=TOP)
-        decrease_exp_btn = Button(exposure_frame_buttons, text='-', width=1, height=1, font=("Arial", 7),
-                                  command=decrease_exp, activebackground='green', activeforeground='white',
-                                  state=DISABLED if CurrentExposure == 0 else NORMAL)
-        decrease_exp_btn.pack(side=LEFT)
-        auto_exp_btn = Button(exposure_frame_buttons, text='AE', width=2, height=1, font=("Arial", 7),
-                              command=auto_exp, activebackground='green', activeforeground='white')
-        auto_exp_btn.pack(side=LEFT)
-        increase_exp_btn = Button(exposure_frame_buttons, text='+', width=1, height=1, font=("Arial", 7),
-                                  command=increase_exp, activebackground='green', activeforeground='white',
-                                  state=DISABLED if CurrentExposure == 0 else NORMAL)
-        increase_exp_btn.pack(side=LEFT)
+        exposure_selection_aux = exp_wb_frame.register(exposure_selection)
+        exposure_spinbox = tk.Spinbox(
+            exp_wb_frame,
+            command=(exposure_selection_aux, '%d'), width=8,
+            textvariable=exposure_str, from_=-100, to=100, font=("Arial", 7))
+        exposure_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        exposure_spinbox.bind("<Double - Button - 1>", exposure_spinbox_dbl_click)
+        #exposure_selection('down')
 
         auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
-        auto_exp_wait_checkbox = tk.Checkbutton(exposure_frame, text='Match wait', height=1,
+        auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
                                                 variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_exposure_change_pause_selection, font=("Arial", 7))
-        auto_exp_wait_checkbox.pack(side=TOP)
+        auto_exp_wait_checkbox.grid(row=1, column=2, padx=2, pady=1)
 
         # Automatic White Balance
-        awb_frame = LabelFrame(expert_frame, text='Automatic White Balance ' + ('ON' if CurrentAwbAuto else 'OFF'), width=8, height=1,
-                               font=("Arial", 7))
-        awb_frame.pack(side=LEFT, padx=5, pady=5)
+        wb_red_label = tk.Label(exp_wb_frame,
+                                         text='AWB Red:',
+                                         width=12, font=("Arial", 7))
+        wb_red_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        wb_red_str = tk.StringVar(value=str(GainRed))
 
-        awb_buttons_frame = Frame(awb_frame, width=10, height=1)
-        awb_buttons_frame.pack(side=TOP, pady=2)
+        wb_red_selection_aux = exp_wb_frame.register(wb_red_selection)
+        wb_red_spinbox = tk.Spinbox(
+            exp_wb_frame,
+            command=(wb_red_selection_aux, '%d'), width=8,
+            textvariable=wb_red_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", 7))
+        wb_red_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        wb_red_spinbox.bind("<Double - Button - 1>", wb_spinbox_dbl_click)
 
-        colour_gains_red_btn_plus = Button(awb_buttons_frame, text="Red-", command=colour_gain_red_minus,
-                                           activebackground='green', activeforeground='white', font=("Arial", 7),
-                                           state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_red_btn_plus.grid(row=0, column=0, pady=2)
-        colour_gains_auto_btn1 = Button(awb_buttons_frame, text='AWB', width=2, height=1, command=colour_gain_auto,
-                                       activebackground='green', activeforeground='white', font=("Arial", 7))
-        colour_gains_auto_btn1.grid(row=0, column=1, pady=2)
-        colour_gains_red_btn_minus = Button(awb_buttons_frame, text="Red+", command=colour_gain_red_plus,
-                                            activebackground='green', activeforeground='white', font=("Arial", 7),
-                                            state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_red_btn_minus.grid(row=0, column=2, pady=2)
-        colour_gains_red_value_label = Label(awb_buttons_frame, text='Auto' if CurrentAwbAuto else str(GainRed), width=5, height=1, font=("Arial", 7))
-        colour_gains_red_value_label.grid(row=0, column=3, pady=2)
-        colour_gains_blue_btn_plus = Button(awb_buttons_frame, text="Blue-", command=colour_gain_blue_minus,
-                                            activebackground='green', activeforeground='white', font=("Arial", 7),
-                                            state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_blue_btn_plus.grid(row=1, column=0, pady=2)
-        colour_gains_auto_btn2 = Button(awb_buttons_frame, text='AWB', width=2, height=1, command=colour_gain_auto,
-                                       activebackground='green', activeforeground='white', font=("Arial", 7))
-        colour_gains_auto_btn2.grid(row=1, column=1, pady=2)
-        colour_gains_blue_btn_minus = Button(awb_buttons_frame, text="Blue+", command=colour_gain_blue_plus,
-                                             activebackground='green', activeforeground='white', font=("Arial", 7),
-                                             state=DISABLED if CurrentAwbAuto else NORMAL)
-        colour_gains_blue_btn_minus.grid(row=1, column=2, pady=2)
-        colour_gains_blue_value_label = Label(awb_buttons_frame, text='Auto' if CurrentAwbAuto else str(GainBlue), width=5, height=1, font=("Arial", 7))
-        colour_gains_blue_value_label.grid(row=1, column=3, pady=2)
+        wb_blue_label = tk.Label(exp_wb_frame,
+                                         text='AWB Blue:',
+                                         width=12, font=("Arial", 7))
+        wb_blue_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        wb_blue_str = tk.StringVar(value=str(GainBlue))
 
+        wb_blue_selection_aux = exp_wb_frame.register(wb_blue_selection)
+        wb_blue_spinbox = tk.Spinbox(
+            exp_wb_frame,
+            command=(wb_blue_selection_aux, '%d'), width=8,
+            textvariable=wb_blue_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", 7))
+        wb_blue_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        wb_blue_spinbox.bind("<Double - Button - 1>", wb_spinbox_dbl_click)
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
-        awb_wait_checkbox = tk.Checkbutton(awb_frame, text='Match wait', height=1,
-                                           variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
-                                           command=auto_white_balance_change_pause_selection, font=("Arial", 7),
-                                           state=NORMAL if CurrentAwbAuto else DISABLED)
-        awb_wait_checkbox.pack(side=TOP, pady=2)
+        awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
+                                                variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
+                                                command=auto_white_balance_change_pause_selection, font=("Arial", 7))
+        awb_red_wait_checkbox.grid(row=2, column=2, padx=2, pady=1)
+        awb_blue_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
+                                                variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
+                                                command=auto_white_balance_change_pause_selection, font=("Arial", 7))
+        awb_blue_wait_checkbox.grid(row=3, column=2, padx=2, pady=1)
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
-        match_wait_margin_frame = LabelFrame(expert_frame, text="Match margin", width=8, height=2,
-                                             font=("Arial", 7))
-        match_wait_margin_frame.pack(side=LEFT, padx=2)
+        match_wait_margin_label = tk.Label(exp_wb_frame,
+                                         text='Match margin (%):',
+                                         width=14, font=("Arial", 7))
+        match_wait_margin_label.grid(row=4, column=0, padx=2, pady=1, sticky=E)
 
-        match_wait_margin_value = Label(match_wait_margin_frame, text=str(MatchWaitMargin)+'%',
-                                         width=4, height=1, font=("Arial", 7))
-        match_wait_margin_value.pack(side=TOP)
-        match_wait_margin_down = Button(match_wait_margin_frame, text="-", width=1, height=1, command=match_wait_down,
-                                        activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_down.pack(side=LEFT)
-        match_wait_margin_up = Button(match_wait_margin_frame, text="+", width=1, height=1, command=match_wait_up,
-                                      activebackground='green', activeforeground='white', font=("Arial", 8))
-        match_wait_margin_up.pack(side=RIGHT)
-        match_wait_margin_bottom_frame = Frame(match_wait_margin_frame, height=10)   # frame just to add space at the bottom
-        match_wait_margin_bottom_frame.pack(side=TOP, pady=14)
+        match_wait_margin_str = tk.StringVar(value=str(MatchWaitMargin))
+
+        match_wait_margin_selection_aux = exp_wb_frame.register(match_wait_margin_selection)
+        match_wait_margin_spinbox = tk.Spinbox(
+            exp_wb_frame,
+            command=(match_wait_margin_selection_aux, '%d'), width=8,
+            textvariable=match_wait_margin_str, from_=0, to=100, increment=5, font=("Arial", 7))
+        match_wait_margin_spinbox.grid(row=4, column=1, padx=2, pady=1, sticky=W)
 
         # Focus zoom control (in out, up, down, left, right)
         Focus_frame = LabelFrame(expert_frame, text='Focus control', width=12, height=3, font=("Arial", 7))
@@ -2852,24 +2784,6 @@ def build_ui():
         focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
                               activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
         focus_rt_btn.grid(row=1, column=2)
-
-        # Display entry to adjust capture stabilization delay (100 ms by default)
-        stabilization_delay_frame = LabelFrame(expert_frame, text="Stabilization", width=8, height=1,
-                                              font=("Arial", 7))
-        stabilization_delay_frame.pack(side=LEFT, padx=2)
-
-        stabilization_delay = Label(stabilization_delay_frame,
-                                         text=str(round(CaptureStabilizationDelay*1000)) + ' ms',
-                                         width=8, height=1, font=("Arial", 7))
-        stabilization_delay.pack(side=TOP)
-        stabilization_delay_down_btn = Button(stabilization_delay_frame, text="-", width=1, height=1, command=stabilization_delay_down,
-                                         activebackground='green', activeforeground='white', font=("Arial", 8))
-        stabilization_delay_down_btn.pack(side=LEFT)
-        stabilization_delay_up_btn = Button(stabilization_delay_frame, text="+", width=1, height=1, command=stabilization_delay_up,
-                                       activebackground='green', activeforeground='white', font=("Arial", 8))
-        stabilization_delay_up_btn.pack(side=RIGHT)
-        stabilization_delay_bottom_frame = Frame(stabilization_delay_frame)  # frame just to add space at the bottom
-        stabilization_delay_bottom_frame.pack(side=BOTTOM, pady=18)
 
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
@@ -2905,7 +2819,6 @@ def build_ui():
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_dbl_click)
-        min_frame_steps_selection('down')
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
@@ -2920,7 +2833,6 @@ def build_ui():
             textvariable=frame_fine_tune_str, from_=-20, to=20, font=("Arial", 7))
         frame_fine_tune_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
         frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
-        frame_fine_tune_selection('down')
         # Spinbox to select PTLevel on Arduino
         pt_level_label = tk.Label(frame_alignment_frame,
                                   text='PT Level:',
@@ -2936,14 +2848,13 @@ def build_ui():
         pt_level_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
         pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
-        pt_level_selection('down')
 
         # Frame to add scan speed control
-        scan_speed_frame = LabelFrame(expert_frame, text="Scan speed", width=16, height=2,
+        speed_quality_frame = LabelFrame(expert_frame, text="Speed / Quality", width=18, height=2,
                                            font=("Arial", 7))
-        scan_speed_frame.pack(side=LEFT, padx=5)
+        speed_quality_frame.pack(side=LEFT, padx=5)
         # Spinbox to select Speed on Arduino (1-10)
-        scan_speed_label = tk.Label(scan_speed_frame,
+        scan_speed_label = tk.Label(speed_quality_frame,
                                          text='Scan speed:',
                                          width=10, font=("Arial", 7))
         scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
@@ -2951,13 +2862,28 @@ def build_ui():
         scan_speed_selection_aux = frame_alignment_frame.register(
             scan_speed_selection)
         scan_speed_spinbox = tk.Spinbox(
-            scan_speed_frame,
+            speed_quality_frame,
             command=(scan_speed_selection_aux, '%d'), width=8,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", 7))
         scan_speed_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
 
+        # Display entry to adjust capture stabilization delay (100 ms by default)
+        stabilization_delay_label = tk.Label(speed_quality_frame,
+                                         text='Stabilization delay (ms):',
+                                         width=20, font=("Arial", 7))
+        stabilization_delay_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
+        stabilization_delay_selection_aux = frame_alignment_frame.register(
+            stabilization_delay_selection)
+        stabilization_delay_spinbox = tk.Spinbox(
+            speed_quality_frame,
+            command=(stabilization_delay_selection_aux, '%d'), width=8,
+            textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", 7))
+        stabilization_delay_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
+        #stabilization_delay_selection('down')
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
@@ -3006,6 +2932,7 @@ def main(argv):
     global LogLevel, LoggingMode
     global capture_display_event, capture_save_event
     global capture_display_queue, capture_save_queue
+    global ALT_scann_init_done
 
     opts, args = getopt.getopt(argv, "sexl:h")
 
@@ -3020,15 +2947,17 @@ def main(argv):
             LoggingMode = arg
         elif opt == '-h':
             print("ALT-Scann 8 Command line parameters")
-            print("  -s             Start Simulated session (for developers only)")
+            print("  -s             Start Simulated session")
             print("  -e             Activate expert mode")
-            print("  -x             Activate experimental mode (for developers only)")
+            print("  -x             Activate experimental mode")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
 
     LogLevel = getattr(logging, LoggingMode.upper(), None)
     if not isinstance(LogLevel, int):
         raise ValueError('Invalid log level: %s' % LogLevel)
+
+    ALT_scann_init_done = False
 
     tscann8_init()
 
@@ -3047,6 +2976,8 @@ def main(argv):
             display_preview_warning()
 
     load_session_data()
+
+    ALT_scann_init_done = True
 
     temperature_loop()
 
