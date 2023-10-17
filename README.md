@@ -26,8 +26,8 @@ Added features
 - Fast forward
 - Protection against FF/Rwnd when film is in film gate
 - Improved FF/Rwnd function (progressive stop)
-- Improved outgoing film collection algorithm
+- Improved outgoing film winding algorithm
 
 __Important notes:__ 
 - Always use both ALT-Scann8 modules (UI + Arduino) toghether, do not mix with T-Scann8 original software. Even if it might work, code has been included to prevent such mixed usage in order to prevent possible issues.
-- ALT-Scann8 uses a modified algorithm to collect outgoing film in order to maintain the tension on the film, so that the grip of the capstan of good. It might a bit more agressive than the original algorithm, therefore I reccomend to use a microswitch in the traction switch of T-Scann8, as described [here](https://www.thingiverse.com/thing:5541340)
+- ALT-Scann8 uses a modified algorithm to collect outgoing film in order to maintain the tension on the film, so that the grip of the capstan is correct. It might a bit more agressive than the original algorithm, therefore I reccomend to use a microswitch in the traction switch of T-Scann8, as described [here](https://www.thingiverse.com/thing:5541340)
