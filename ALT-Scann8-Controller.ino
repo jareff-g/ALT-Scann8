@@ -37,6 +37,7 @@ int MinPT = 200;
 // part of the film (clear/dark around the holes) dynamically.
 int MaxPT_Dynamic = 0;
 int MinPT_Dynamic = 10000;
+int PT_Boost = 0;  // to pull frames down in fine tune
 
 
 enum {
@@ -139,8 +140,8 @@ int PerforationThresholdLevelS8 = 90;                          // Default value 
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int PerforationThresholdAutoLevelRatio = 20;  // 30 - Percentage between dynamic max/min PT level
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
-int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8
-int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8
+int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
+int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
 int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
@@ -301,7 +302,7 @@ void loop() {
         break;
       case CMD_SET_FRAME_FINE_TUNE:
         if (FrameFineTune < 0)
-          PerforationThresholdAutoLevelRatio -= 1;
+          PT_Boost = abs(FrameFineTune) * 30;
         else
           FrameFineTune = param;
         break;
@@ -708,7 +709,7 @@ void adjust_framesteps(int frame_steps) {
     int total;
 
     // Check if steps per frame are going beyond reasonable limits
-    if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
+    if (frame_steps > int(OriginalMinFrameSteps*1.05) || frame_steps < int(OriginalMinFrameSteps*0.95)) {   // Allow 5% deviation
         MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
         return; // Do not add invalid steps per frame to list
@@ -723,7 +724,7 @@ void adjust_framesteps(int frame_steps) {
     if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32)-5;
+        MinFrameSteps = int(total / 32)-10;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
@@ -736,7 +737,7 @@ boolean IsHoleDetected() {
   boolean hole_detected = false;
   int PT_Level;
   
-  PT_Level = GetLevelPT();
+  PT_Level = GetLevelPT() + PT_Boost;
 
   // ------------- Frame detection ----
   // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
