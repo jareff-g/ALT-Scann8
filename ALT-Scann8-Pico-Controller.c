@@ -66,6 +66,7 @@ int MinPT = 200;
 // part of the film (clear/dark around the holes) dynamically.
 int MaxPT_Dynamic = 0;
 int MinPT_Dynamic = 10000;
+int PT_Boost = 0;  // to pull frames down in fine tune
 
 boolean GreenLedOn = false;
 
@@ -130,9 +131,11 @@ ScanState=Sts_Idle;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 unsigned int UVLedBrightness = 65535;       // Brightness UV led, may need to be changed depending on LED type
-unsigned long ScanSpeed = 500 ;             // 250 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 2*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 100;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
+unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
+unsigned long ScanSpeed = BaseScanSpeed;               // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long DecreaseScanSpeedStep = 50;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
@@ -140,13 +143,13 @@ int PerforationMinLevel = 50;               // Phototransistor reported value, m
 int PerforationThresholdLevelR8 = 180;      // Default value for R8
 int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int PerforationThresholdAutoLevelRatio = 30;  // Percentage between dynamic max/min PT level
+int PerforationThresholdAutoLevelRatio = 20;  // Percentage between dynamic max/min PT level
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
-int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8
-int MinFrameStepsS8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8
+int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
+int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int ExtraFrameSteps = 0;                    // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
-int DecreaseSpeedFrameStepsBefore = 20;     // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 0;     // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -384,12 +387,13 @@ void loop() {
                 }
                 break;
             case CMD_SET_FRAME_FINE_TUNE:
-                FrameFineTune = param;
                 if (FrameFineTune < 0)
-                    PerforationThresholdAutoLevelRatio -= 1;
+                    PT_Boost = abs(FrameFineTune) * 30;
+                else
+                    FrameFineTune = param;
                 break;
             case CMD_SET_SCAN_SPEED:
-                ScanSpeed = 500 + (10-param) * 1000;
+                ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
@@ -806,7 +810,7 @@ void adjust_framesteps(int frame_steps) {
     int total;
 
     // Check if steps per frame are going beyond reasonable limits
-    if (frame_steps > int(OriginalMinFrameSteps*1.2)) {   // Allow 20% deviation
+    if (frame_steps > int(OriginalMinFrameSteps*1.05) || frame_steps < int(OriginalMinFrameSteps*0.95)) {   // Allow 5% deviation
         MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
         return; // Do not add invalid steps per frame to list
@@ -821,7 +825,7 @@ void adjust_framesteps(int frame_steps) {
     if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32) - 5;
+        MinFrameSteps = int(total / 32) - 10;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
@@ -833,7 +837,7 @@ boolean IsHoleDetected() {
     boolean hole_detected = false;
     int PT_Level;
 
-    PT_Level = GetLevelPT();
+    PT_Level = GetLevelPT() + PT_Boost;
 
     // ------------- Frame detection ----
     // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
@@ -865,7 +869,6 @@ void capstan_advance(int steps)
 ScanResult scan(int UI_Command) {
     static long LastTime = 0;   // Reference used to throttle scanner speed (to limit the number of times entering scan function)
     ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
-    int steps_to_do = 5;
     static unsigned long TimeToScan = 0;
     unsigned long CurrentTime = get_absolute_time();
 
@@ -887,19 +890,10 @@ ScanResult scan(int UI_Command) {
 
     TractionSwitchActive = !gpio_get(PIN_TRACTION_STOP);    // 0 means traction switch active
 
-    if (FrameStepsDone > DecreaseSpeedFrameSteps) {
+    if (FrameStepsDone > DecreaseSpeedFrameSteps)
         ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
-        //ScanSpeed = FetchFrameScanSpeed + 0;
-        // Progressively reduce number of steps from 5 to 1 once we are close to frame detection
-        // Originally not progressive, directly set to 1 (safe option in case progressive does not work)
-        steps_to_do = max (1, int(5 * (MinFrameSteps-FrameStepsDone) / (MinFrameSteps-DecreaseSpeedFrameSteps)));
-        if (steps_to_do > 5)
-            // Tell UI (Raspberry PI) an error happened during scanning
-            SendToRPi(RSP_SCAN_ERROR, steps_to_do, MinFrameSteps, FrameStepsDone, DecreaseSpeedFrameSteps);
-    }
-    else
-        steps_to_do = 5;    // 5 steps per loop if not yet there
 
+    FrameDetected = false;
 
     //-------------ScanFilm-----------
     if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
@@ -916,9 +910,8 @@ ScanResult scan(int UI_Command) {
     else {
         FrameDetected = IsHoleDetected();
         if (!FrameDetected) {
-            capstan_advance(steps_to_do);
-            FrameStepsDone += steps_to_do;
-            MaxFrameSteps = max(MaxFrameSteps, FrameStepsDone);
+            capstan_advance(1);
+            FrameStepsDone ++;
         }
     }
 
