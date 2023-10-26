@@ -23,6 +23,71 @@ More info in README.md file
 #include "pico/binary_info.h"
 #include "hardware/i2c.h"
 
+
+// ######### Variable section ##########
+// Handling of PT values dynamically
+int MaxPT = 0;
+int MinPT = 200;
+// These two vars are to keep max/min pt values for the recent past
+// Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
+// are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
+// (avoid decreasing/increasing too fast).
+// The idea is to see if we can make the PT level value automatically set by the software, so that it adapts to different 
+// part of the film (clear/dark around the holes) dynamically.
+int MaxPT_Dynamic = 0;
+int MinPT_Dynamic = 10000;
+int PT_Boost = 0;  // to pull frames down in fine tune
+
+
+enum {
+    PlotterInfo,
+    FrameSteps,
+    DebugInfo,
+    DebugInfoSingle,
+    None
+} DebugState = PlotterInfo;
+
+int MaxDebugRepetitions = 3;
+#define MAX_DEBUG_REPETITIONS_COUNT 30000
+
+boolean GreenLedOn = false;  
+int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
+// I2C commands (RPi to Arduino): Constant definition
+#define CMD_VERSION_ID_CHECK 1
+#define CMD_START_SCAN 10
+#define CMD_TERMINATE 11
+#define CMD_GET_NEXT_FRAME 12
+#define CMD_SET_REGULAR_8 18
+#define CMD_SET_SUPER_8 19
+#define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_FILM_FORWARD 30
+#define CMD_SINGLE_STEP 40
+#define CMD_SET_PT_LEVEL 50
+#define CMD_SET_MIN_FRAME_STEPS 52
+#define CMD_SET_FRAME_FINE_TUNE 54
+#define CMD_REWIND 60
+#define CMD_FAST_FORWARD 61
+#define CMD_INCREASE_WIND_SPEED 62
+#define CMD_DECREASE_WIND_SPEED 63
+#define CMD_UNCONDITIONAL_REWIND 64
+#define CMD_UNCONDITIONAL_FAST_FORWARD 65
+#define CMD_SET_SCAN_SPEED 70
+// I2C responses (Arduino to RPi): Constant definition
+#define RSP_FRAME_AVAILABLE 80
+#define RSP_SCAN_ERROR 81
+#define RSP_REWIND_ERROR 82
+#define RSP_FAST_FORWARD_ERROR 83
+#define RSP_REWIND_ENDED 84
+#define RSP_FAST_FORWARD_ENDED 85
+#define RSP_REPORT_AUTO_LEVELS 86
+
+
+// Immutable values
+#define S8_HEIGHT  4.01
+#define R8_HEIGHT  3.3
+#define NEMA_STEP_DEGREES  1.8
+#define NEMA_MICROSTEPS_IN_STEP  16
+
 // ######### Pin definition section ##########
 #define PIN_BACKLIGHT        1
 #define PIN_PT              28  // ADC2
@@ -54,78 +119,16 @@ More info in README.md file
 #define i2c_RPi     i2c0
 #define I2C_Screen  i2c1
 
-// ######### Variable section ##########
-// Handling of PT values dynamically
-int MaxPT = 0;
-int MinPT = 200;
-// These two vars are to keep max/min pt values for the recent past
-// Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
-// are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
-// (avoid decreasing/increasing too fast).
-// The idea is to see if we can mak ethe PT level value automatically set by the software, so that it adapt sto different
-// part of the film (clear/dark around the holes) dynamically.
-int MaxPT_Dynamic = 0;
-int MinPT_Dynamic = 10000;
-int PT_Boost = 0;  // to pull frames down in fine tune
-
-boolean GreenLedOn = false;
-
-enum {
-  PT_Level,
-  FrameSteps,
-  DebugInfo,
-  DebugInfoSingle,
-  None
-} DebugState = PT_Level;
-
-int MaxDebugRepetitions = 3;
-#define MAX_DEBUG_REPETITIONS_COUNT 30000
-
-int UI_Command; // Stores I2C command from Raspberry PI
-// I2C commands (RPi to Arduino): Constant definition
-#define CMD_VERSION_ID_CHECK 1
-#define CMD_START_SCAN 10
-#define CMD_TERMINATE 11
-#define CMD_GET_NEXT_FRAME 12
-#define CMD_SET_REGULAR_8 18
-#define CMD_SET_SUPER_8 19
-#define CMD_SWITCH_REEL_LOCK_STATUS 20
-#define CMD_FILM_FORWARD 30
-#define CMD_SINGLE_STEP 40
-#define CMD_SET_PT_LEVEL 50
-#define CMD_SET_MIN_FRAME_STEPS 52
-#define CMD_SET_EXTRA_FRAME_STEPS 54
-#define CMD_REWIND 60
-#define CMD_FAST_FORWARD 61
-#define CMD_INCREASE_WIND_SPEED 62
-#define CMD_DECREASE_WIND_SPEED 63
-#define CMD_UNCONDITIONAL_REWIND 64
-#define CMD_UNCONDITIONAL_FAST_FORWARD 65
-// I2C responses (Arduino to RPi): Constant definition
-#define RSP_FRAME_AVAILABLE 80
-#define RSP_SCAN_ERROR 81
-#define RSP_REWIND_ERROR 82
-#define RSP_FAST_FORWARD_ERROR 83
-#define RSP_REWIND_ENDED 84
-#define RSP_FAST_FORWARD_ENDED 85
-#define RSP_REPORT_AUTO_LEVELS 86
-
-// Immutable values
-#define S8_HEIGHT  4.01
-#define R8_HEIGHT  3.3
-#define NEMA_STEP_DEGREES  1.8
-#define NEMA_MICROSTEPS_IN_STEP  16
-
 enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
 
 enum ScanState{
-  Sts_Idle,
-  Sts_Scan,
-  Sts_UnlockReels,
-  Sts_Rewind,
-  Sts_FastForward,
-  Sts_SlowForward,
-  Sts_SingleStep
+    Sts_Idle,
+    Sts_Scan,
+    Sts_UnlockReels,
+    Sts_Rewind,
+    Sts_FastForward,
+    Sts_SlowForward,
+    Sts_SingleStep
 }
 ScanState=Sts_Idle;
 
@@ -133,9 +136,9 @@ ScanState=Sts_Idle;
 unsigned int UVLedBrightness = 65535;       // Brightness UV led, may need to be changed depending on LED type
 unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
 unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
-unsigned long ScanSpeed = BaseScanSpeed;               // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
 unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 50;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
@@ -148,8 +151,8 @@ float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual n
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
-int ExtraFrameSteps = 0;                    // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
-int DecreaseSpeedFrameStepsBefore = 0;     // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
+int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -181,9 +184,8 @@ boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 boolean Frame_Steps_Auto = true;
 
-// Flag to detect ALT UI version
-// Need to prevent operation with main version since compatibility cannot be maintained
-boolean ALT_Scann8_UI_detected = false;
+// Collect outgoing film frequency
+int collect_modulo = 10; 
 
 // Forward definition
 void CollectOutgoingFilm(bool);
@@ -191,10 +193,10 @@ void CollectOutgoingFilm(bool);
 // JRE - Support data variables
 #define QUEUE_SIZE 20
 volatile struct {
-  int Data[QUEUE_SIZE];
-  int Param[QUEUE_SIZE];
-  int in;
-  int out;
+    int Data[QUEUE_SIZE];
+    int Param[QUEUE_SIZE];
+    int in;
+    int out;
 } CommandQueue;
 
 void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
@@ -212,35 +214,6 @@ void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
 }
 
 
-void scan_i2c() {
-    for (int i2c_instance = 0; i2c_instance <= 1; i2c_instance++) {
-        printf("\nI2C%i Bus Scan\n", i2c_instance);
-        printf("   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
-
-        for (int addr = 0; addr < (1 << 7); ++addr) {
-            if (addr % 16 == 0) {
-                printf("%02x ", addr);
-            }
-
-            // Perform a 1-byte dummy read from the probe address. If a slave
-            // acknowledges this address, the function returns the number of bytes
-            // transferred. If the address byte is ignored, the function returns
-            // -1.
-
-            // Skip over any reserved addresses.
-            int ret;
-            uint8_t rxdata;
-            if (reserved_addr(addr))
-                ret = PICO_ERROR_GENERIC;
-            else
-                ret = i2c_read_blocking(i2c_instance, addr, &rxdata, 1, false);
-
-            printf(ret < 0 ? "." : "@");
-            printf(addr % 16 == 15 ? "\n" : "  ");
-        }
-    }
-    printf("Done.\n");
-}
 
 void setup() {
     uint BuzzerSliceNum;
@@ -361,11 +334,11 @@ void loop() {
             case CMD_SET_PT_LEVEL:
                 if (param >= 0 && param <= 900) {
                     if (param == 0)
-                      PT_Level_Auto = true;     // zero means we go in automatic mode
-                    else{
-                      PT_Level_Auto = false;
-                      PerforationThresholdLevel = param;
-                      OriginalPerforationThresholdLevel = param;
+                        PT_Level_Auto = true;     // zero means we go in automatic mode
+                    else {
+                        PT_Level_Auto = false;
+                        PerforationThresholdLevel = param;
+                        OriginalPerforationThresholdLevel = param;
                     }
                     DebugPrint(">PTLevel",param);
                 }
@@ -412,7 +385,7 @@ void loop() {
                         sleep_ms(500);
                         StartFrameTime = get_absolute_time();
                         ScanSpeed = OriginalScanSpeed;
-                        MinFrameSteps = 100;
+                        collect_modulo = 10;
                         //tone(A2, 2000, 50);   // No tone in pico, to be checked
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -436,9 +409,7 @@ void loop() {
                         IsS8 = false;
                         MinFrameSteps = MinFrameStepsR8;
                         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-                        PerforationThresholdLevel = PerforationThresholdLevelR8;
                         OriginalMinFrameSteps = MinFrameSteps;
-                        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
                         if (!PT_Level_Auto)
                             PerforationThresholdLevel = PerforationThresholdLevelR8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
@@ -447,9 +418,7 @@ void loop() {
                         IsS8 = true;
                         MinFrameSteps = MinFrameStepsS8;
                         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
-                        PerforationThresholdLevel = PerforationThresholdLevelS8;
                         OriginalMinFrameSteps = MinFrameSteps;
-                        OriginalPerforationThresholdLevel = PerforationThresholdLevel;
                         if (!PT_Level_Auto)
                             PerforationThresholdLevel = PerforationThresholdLevelS8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
@@ -459,13 +428,13 @@ void loop() {
                         sleep_ms(50);
                         break;
                     case CMD_FILM_FORWARD:
+                        collect_modulo = 4;
                         ScanState = Sts_SlowForward;
                         sleep_ms(50);
                         break;
                     case CMD_SINGLE_STEP:
                         DebugPrintStr(">SStep");
                         ScanState = Sts_SingleStep;
-                        MinFrameSteps = 100; // Used to be 100
                         sleep_ms(50);
                         break;
                     case CMD_REWIND: // Rewind
@@ -569,6 +538,7 @@ void loop() {
                         // analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                     }
+                    GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
                 break;
             case Sts_Rewind:
@@ -638,7 +608,6 @@ boolean RewindFilm(int UI_Command) {
     return(retvalue);
 }
 
-
 // ------ fast forward the movie ------
 boolean FastForwardFilm(int UI_Command) {
     boolean retvalue = true;
@@ -671,7 +640,7 @@ boolean FastForwardFilm(int UI_Command) {
         sleep_us(RewindSpeed);
         gpio_put(PIN_MOTOR_C_STEP,0);
         if (RewindSpeed >= TargetRewindSpeedLoop) {
-          RewindSpeed -= round(max(1,RewindSpeed/400));
+            RewindSpeed -= round(max(1,RewindSpeed/400));
         }
     }
     return(retvalue);
@@ -684,7 +653,6 @@ boolean FastForwardFilm(int UI_Command) {
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(bool ff_collect = false) {
-    static int collect_modulo = 10;
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
@@ -711,9 +679,9 @@ void CollectOutgoingFilm(bool ff_collect = false) {
             }
             CollectOngoing = false;
         }
-        else if (collect_modulo > 1 && CurrentTime > delayed_by_ms(LastSwitchActivationTime, 1000)) {  // Not collecting enough : Decrease modulo
+        else if (collect_modulo > 2 && CurrentTime > delayed_by_ms(LastSwitchActivationTime, 1000)) {  // Not collecting enough : Decrease modulo
             LastSwitchActivationTime = CurrentTime;
-            collect_modulo--;
+            collect_modulo-=2;
             DebugPrint("Collect Mod", collect_modulo);
         }
     }
@@ -722,17 +690,14 @@ void CollectOutgoingFilm(bool ff_collect = false) {
 
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
-    static int count = 0;
-    int SignalLevel;
-
     // Select ADC input 2 (GPIO28)
     adc_select_input(2);
-    SignalLevel =  adc_read();
+    PT_SignalLevelRead =  adc_read();
 
-    MaxPT = max(SignalLevel, MaxPT);
-    MinPT = min(SignalLevel, MinPT);
-    MaxPT_Dynamic = max(SignalLevel*10, MaxPT_Dynamic);
-    MinPT_Dynamic = min(SignalLevel*10, MinPT_Dynamic);
+    MaxPT = max(PT_SignalLevelRead, MaxPT);
+    MinPT = min(PT_SignalLevelRead, MinPT);
+    MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
+    MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
     if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto)
@@ -759,10 +724,9 @@ void ReportPlotterInfo() {
     }
 }
 
-
 void SlowForward(){
     static unsigned long LastMove = 0;
-    unsigned long CurrentTime = get_absolute_time();    //micros();
+    unsigned long CurrentTime = get_absolute_time();
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
         GetLevelPT();   // No need to know PT level here, but used to update plotter data
         CollectOutgoingFilm(true);
@@ -771,12 +735,11 @@ void SlowForward(){
     }
 }
 
-
 // ------------- is there film loaded in filmgate? ---------------
 boolean FilmInFilmgate() {
     int SignalLevel;
     boolean retvalue = false;
-    int mini=300, maxi=0;
+    int mini=800, maxi=0;
 
     pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
     // analogWrite(11, UVLedBrightness); // Turn on UV LED
@@ -836,7 +799,7 @@ void adjust_framesteps(int frame_steps) {
 boolean IsHoleDetected() {
     boolean hole_detected = false;
     int PT_Level;
-
+  
     PT_Level = GetLevelPT() + PT_Boost;
 
     // ------------- Frame detection ----
@@ -853,8 +816,7 @@ boolean IsHoleDetected() {
     return(hole_detected);
 }
 
-void capstan_advance(int steps)
-{
+void capstan_advance(int steps) {
     for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
         gpio_put(PIN_MOTOR_B_STEP,0);
         gpio_put(PIN_MOTOR_B_STEP,1);
@@ -862,12 +824,9 @@ void capstan_advance(int steps)
     gpio_put(PIN_MOTOR_B_STEP,0);
 }
 
-
-
 // ----- This is the function to "ScanFilm" -----
 // Returns false when done
 ScanResult scan(int UI_Command) {
-    static long LastTime = 0;   // Reference used to throttle scanner speed (to limit the number of times entering scan function)
     ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
     static unsigned long TimeToScan = 0;
     unsigned long CurrentTime = get_absolute_time();
@@ -879,78 +838,77 @@ ScanResult scan(int UI_Command) {
         TimeToScan = CurrentTime + ScanSpeed;
 
 
-    pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
-    //analogWrite(11, UVLedBrightness);
-    UVLedOn = true;
+        pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
+        //analogWrite(11, UVLedBrightness);
+        UVLedOn = true;
 
-    if (GreenLedOn) {  // If last time frame was detected ...
-        GreenLedOn = false;
-        pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Turn off green led
-    }
+        if (GreenLedOn) {  // If last time frame was detected ...
+            GreenLedOn = false;
+            pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Turn off green led
+        }
 
-    TractionSwitchActive = !gpio_get(PIN_TRACTION_STOP);    // 0 means traction switch active
+        TractionSwitchActive = !gpio_get(PIN_TRACTION_STOP);    // 0 means traction switch active
 
-    if (FrameStepsDone > DecreaseSpeedFrameSteps)
-        ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+        if (FrameStepsDone > DecreaseSpeedFrameSteps)
+            ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
-    FrameDetected = false;
-
-    //-------------ScanFilm-----------
-    if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
-        retvalue = SCAN_TERMINATION_REQUESTED;
         FrameDetected = false;
-        //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
-        LastFrameSteps = 0;
-        if (UVLedOn) {
-            pwm_set_gpio_level (PIN_UV_LED, 0);   // Need to check if this maps to Arduino (see next commented line)
-            //analogWrite(11, 0); // Turn off UV LED
-            UVLedOn = false;
-        }
-    }
-    else {
-        FrameDetected = IsHoleDetected();
-        if (!FrameDetected) {
-            capstan_advance(1);
-            FrameStepsDone ++;
-        }
-    }
 
-    pwm_set_gpio_level (PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led proportional to frame steps done
-
-    if (FrameDetected) {
-        DebugPrintStr("Frame!");
-        if (ExtraFrameSteps > 0)
-            capstan_advance(ExtraFrameSteps);
-        LastFrameSteps = FrameStepsDone;
-        FrameStepsDone = 0;
-        StartPictureSaveTime = get_absolute_time();
-        // Tell UI (Raspberry PI) a new frame is available for processing
-        if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
-            //tone(A2, 2000, 35);
+        //-------------ScanFilm-----------
+        if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
+            retvalue = SCAN_TERMINATION_REQUESTED;
+            FrameDetected = false;
+            //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
+            LastFrameSteps = 0;
+            if (UVLedOn) {
+                pwm_set_gpio_level (PIN_UV_LED, 0);   // Need to check if this maps to Arduino (see next commented line)
+                //analogWrite(11, 0); // Turn off UV LED
+                UVLedOn = false;
+            }
         }
         else {
-            SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
+            FrameDetected = IsHoleDetected();
+            if (!FrameDetected) {
+                capstan_advance(1);
+                FrameStepsDone++;
+            }
         }
 
-        FrameDetected = false;
-        retvalue = SCAN_FRAME_DETECTED;
-        DebugPrint("FrmS",LastFrameSteps);
-        DebugPrint("FrmT",CurrentTime-StartFrameTime);
-        if (DebugState == FrameSteps)
-          SerialPrintInt(LastFrameSteps);
-    }
-    else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
-        retvalue = SCAN_FRAME_DETECTION_ERROR;
-        FrameStepsDone = 0;
-        DebugPrintStr("Err/scan");
-        // Tell UI (Raspberry PI) an error happened during scanning
-        SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
-        FrameStepsDone = 0;
-    }
+        pwm_set_gpio_level (PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led proportional to frame steps done
 
-    return (retvalue);
+        if (FrameDetected) {
+            DebugPrintStr("Frame!");
+            if (FrameFineTune > 0)  // If positive, aditional steps after detection
+                capstan_advance(FrameFineTune);
+            LastFrameSteps = FrameStepsDone;
+            adjust_framesteps(LastFrameSteps);
+            FrameStepsDone = 0;
+
+            StartPictureSaveTime = get_absolute_time();
+            // Tell UI (Raspberry PI) a new frame is available for processing
+            if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
+                //tone(A2, 2000, 35);
+            }
+            else {
+                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
+            }
+      
+            FrameDetected = false;
+            retvalue = SCAN_FRAME_DETECTED;
+            DebugPrint("FrmS",LastFrameSteps);
+            DebugPrint("FrmT",CurrentTime-StartFrameTime);
+            if (DebugState == FrameSteps)
+                SerialPrintInt(LastFrameSteps);
+        }
+        else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
+            retvalue = SCAN_FRAME_DETECTION_ERROR;
+            // Tell UI (Raspberry PI) an error happened during scanning
+            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
+            FrameStepsDone = 0;
+        }
+        return (retvalue);
+    }
 }
-
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
 void receiveEvent(i2c_inst_t *i2c, i2c_slave_event_t event) {
@@ -1007,60 +965,91 @@ boolean dataInQueue(void) {
 }
 
 void DebugPrintAux(const char * str, unsigned long i) {
-  static char PreviousDebug[64];
-  static char AuxLine[64];
-  static char PrintLine[64];
-  static int CurrentRepetitions = 0;
-  boolean GoPrint = true;
+    static char PreviousDebug[64];
+    static char AuxLine[64];
+    static char PrintLine[64];
+    static int CurrentRepetitions = 0;
+    boolean GoPrint = true;
   
-  if (DebugState != DebugInfo && DebugState != DebugInfoSingle) return;
+    if (DebugState != DebugInfo && DebugState != DebugInfoSingle) return;
 
-  if (strlen(str) >= 50) {
-    printf("Cannot print debug line, too long");
-    return;
-  }
-
-  if (i != -1)
-    sprintf(PrintLine,"%s=%u",str,i);
-  else
-    strcpy(PrintLine,str);
-  
-  if (strcmp(PrintLine,PreviousDebug) == 0) {
-    if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
-      CurrentRepetitions++;
-    if (CurrentRepetitions > MaxDebugRepetitions) GoPrint = false;
-  }
-  else {
-    if (CurrentRepetitions > MaxDebugRepetitions) {
-      if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
-        sprintf(AuxLine,"Previous line repeated %u times",CurrentRepetitions-MaxDebugRepetitions);
-      else
-        strcpy(AuxLine,"Previous line repeated more than 30,000 times");
-      printf(AuxLine);
+    if (strlen(str) >= 50) {
+        printf("Cannot print debug line, too long");
+        return;
     }
-    CurrentRepetitions = 0;
-  }
-  strcpy(PreviousDebug, PrintLine);
 
-  if (GoPrint) printf(PrintLine);
+    if (i != -1)
+        sprintf(PrintLine,"%s=%u",str,i);
+    else
+        strcpy(PrintLine,str);
+  
+    if (strcmp(PrintLine,PreviousDebug) == 0) {
+        if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+            CurrentRepetitions++;
+        if (CurrentRepetitions > MaxDebugRepetitions) GoPrint = false;
+    }
+    else {
+        if (CurrentRepetitions > MaxDebugRepetitions) {
+            if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+                sprintf(AuxLine,"Previous line repeated %u times",CurrentRepetitions-MaxDebugRepetitions);
+            else
+                strcpy(AuxLine,"Previous line repeated more than 30,000 times");
+            printf(AuxLine);
+        }
+        CurrentRepetitions = 0;
+    }
+    strcpy(PreviousDebug, PrintLine);
+
+    if (GoPrint) printf(PrintLine);
 }
 
 void DebugPrintStr(const char * str) {
-  if (DebugState != DebugInfo) return;
-  DebugPrintAux(str,-1);
+    if (DebugState != DebugInfo) return;
+    DebugPrintAux(str,-1);
 }
 
 // Differentiated debug print function to debug specifics without printing all debug lines
 void DebugPrint(const char * str, unsigned long i) {
-  if (DebugState != DebugInfo) return;
-  DebugPrintAux(str,i);
+    if (DebugState != DebugInfo) return;
+    DebugPrintAux(str,i);
 }
 
 
 void SerialPrintStr(const char * str) {
-  if (DebugState != DebugInfo) printf(str);
+    if (DebugState != DebugInfo) printf(str);
 }
 
 void SerialPrintInt(int i) {
-  if (DebugState != DebugInfo) printf(i);
+    if (DebugState != DebugInfo) printf(i);
 }
+
+void scan_i2c() {
+    for (int i2c_instance = 0; i2c_instance <= 1; i2c_instance++) {
+        printf("\nI2C%i Bus Scan\n", i2c_instance);
+        printf("   0  1  2  3  4  5  6  7  8  9  A  B  C  D  E  F\n");
+
+        for (int addr = 0; addr < (1 << 7); ++addr) {
+            if (addr % 16 == 0) {
+                printf("%02x ", addr);
+            }
+
+            // Perform a 1-byte dummy read from the probe address. If a slave
+            // acknowledges this address, the function returns the number of bytes
+            // transferred. If the address byte is ignored, the function returns
+            // -1.
+
+            // Skip over any reserved addresses.
+            int ret;
+            uint8_t rxdata;
+            if (reserved_addr(addr))
+                ret = PICO_ERROR_GENERIC;
+            else
+                ret = i2c_read_blocking(i2c_instance, addr, &rxdata, 1, false);
+
+            printf(ret < 0 ? "." : "@");
+            printf(addr % 16 == 15 ? "\n" : "  ");
+        }
+    }
+    printf("Done.\n");
+}
+
