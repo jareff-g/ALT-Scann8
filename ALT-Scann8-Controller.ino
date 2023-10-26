@@ -15,7 +15,7 @@ More info in README.md file
 */
 
 #define __author__      "Juan Remirez de Esparza"
-#define __copyright__   "Copyright 2022, Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
 #define __version__     "1.0"
@@ -33,7 +33,7 @@ int MinPT = 200;
 // Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
 // are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
 // (avoid decreasing/increasing too fast).
-// The idea is to see if we can mak ethe PT level value automatically set by the software, so that it adapt sto different 
+// The idea is to see if we can make the PT level value automatically set by the software, so that it adapts to different 
 // part of the film (clear/dark around the holes) dynamically.
 int MaxPT_Dynamic = 0;
 int MinPT_Dynamic = 10000;
@@ -98,13 +98,10 @@ const int MotorC_Neutral = 7;     // neutral position
 const int MotorA_Direction = 8;   // direction
 const int MotorB_Direction = 9;   // direction
 const int MotorC_Direction = 10;  // direction
-
-
 const int TractionStopPin = 12; // Traction stop
 
 enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
 
-boolean ReelsUnlocked = false;
 enum ScanState{
     Sts_Idle,
     Sts_Scan,
@@ -116,58 +113,53 @@ enum ScanState{
 }
 ScanState=Sts_Idle;
 
-boolean FrameDetected = false;  // Used for frame detection, in play ond single step modes
-
-boolean UVLedOn = false;
-int FilteredSignalLevel = 0;
-// int waveC = 0;  // Not used
-// int waveCS = 0;  // Not used
-
-
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 255;                  // Brightness UV led, may need to be changed depending on LED type
 unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
 unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
-unsigned long ScanSpeed = BaseScanSpeed;               // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
 unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 50;  // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
-int RewindSpeed = 4000;                      // Initial delay in microseconds used to determine speed of rewind/FF movie
-int TargetRewindSpeedLoop = 200;             // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
-int PerforationMaxLevel = 550;     // Phototransistor reported value, max level
-int PerforationMinLevel = 50;      // Phototransistor reported value, min level (originalyl hardcoded)
-int PerforationThresholdLevelR8 = 180;                          // Default value for R8
-int PerforationThresholdLevelS8 = 90;                          // Default value for S8
+unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
+int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
+int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
+int PerforationMinLevel = 50;               // Phototransistor reported value, min level (originalyl hardcoded)
+int PerforationThresholdLevelR8 = 180;      // Default value for R8
+int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int PerforationThresholdAutoLevelRatio = 20;  // 30 - Percentage between dynamic max/min PT level
+int PerforationThresholdAutoLevelRatio = 20;  // Percentage between dynamic max/min PT level
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
-int MinFrameSteps = MinFrameStepsS8;  // Minimum number of steps to allow frame detection
+int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
+boolean ReelsUnlocked = false;
+boolean FrameDetected = false;  // Used for frame detection, in play ond single step modes
+boolean UVLedOn = false;
+int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
-// int Paus = LOW;                          // JRE: Unused
 int FrameStepsDone = 0;                     // Count steps
 // OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
 // with dynamically calculated values
-unsigned long OriginalScanSpeed = ScanSpeed;          // restoration original value
-int OriginalMinFrameSteps = MinFrameSteps;  // restoration original value
+unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
+int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
-int LastFrameSteps = 0;                     // stores number of steps
+int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
 
 boolean IsS8 = true;
 
-boolean TractionSwitchActive = true;  //used to be "int inDraState = HIGH;" in original Torulf code
+boolean TractionSwitchActive = true;  // When traction micro-switch is closed
 
-unsigned long StartFrameTime = 0;   // Time at which we get RPi command to get next frame
-unsigned long StartPictureSaveTime = 0;   // Time at which we tell RPi to save current frame
+unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
+unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
-int PT_SignalLevelRead;   // Phototransistor signal level detected (global to allow reporting plotter info)
+int PT_SignalLevelRead;   // Raw signal level from phototransistor
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 boolean Frame_Steps_Auto = true;
@@ -245,9 +237,8 @@ void setup() {
 void loop() {
     int param;
     while (1) {
-        if (dataInQueue()) {
+        if (dataInQueue())
             UI_Command = pop(&param);   // Get next command from queue if one exists
-        }
         else
             UI_Command = 0;
 
@@ -310,8 +301,8 @@ void loop() {
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
-               OriginalScanSpeed = ScanSpeed;
-               break;
+                OriginalScanSpeed = ScanSpeed;
+                break;
         }
 
         switch (ScanState) {
@@ -468,6 +459,7 @@ void loop() {
                     digitalWrite(MotorC_Neutral, LOW);
                     ScanState = Sts_Idle;
                     analogWrite(11, 0); // Turn off UV LED
+                    UVLedOn = false;
                 }
                 else {
                     if (not ReelsUnlocked){
@@ -475,6 +467,7 @@ void loop() {
                         digitalWrite(MotorB_Neutral, HIGH);
                         digitalWrite(MotorC_Neutral, HIGH);
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
+                        UVLedOn = true;
                     }
                     GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
@@ -652,7 +645,7 @@ void ReportPlotterInfo() {
     if (DebugState == PlotterInfo && millis() > NextReport) {
         if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
             NextReport = millis() + 20;
-            //sprintf(out,"PT:%i, Th:%i, FSD:%i, MFS:%i, LFS:%i, Spd:%lu, MinD:%i, MaxD;%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, MinFrameSteps, LastFrameSteps, ScanSpeed, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+            //sprintf(out,"PT:%i, Th:%i, FSD:%i, MFS:%i, LFS:%i, Spd:%lu, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, MinFrameSteps, LastFrameSteps, ScanSpeed, MinPT_Dynamic/10, MaxPT_Dynamic/10);
             sprintf(out,"PT:%i", PT_SignalLevelRead);
             SerialPrintStr(out);
             Previous_PT_Signal = PT_SignalLevelRead;
@@ -724,11 +717,10 @@ void adjust_framesteps(int frame_steps) {
     if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32)-10;
+        MinFrameSteps = int(total / 32) - 10;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
-
 
 
 // ------------- is the film perforation in position to take picture? ---------------
@@ -812,26 +804,26 @@ ScanResult scan(int UI_Command) {
 
         if (FrameDetected) {
             DebugPrintStr("Frame!");
-        if (FrameFineTune > 0)  // If positive, aditional steps after detection
-            capstan_advance(FrameFineTune);
-        LastFrameSteps = FrameStepsDone;
-        adjust_framesteps(LastFrameSteps);
-        FrameStepsDone = 0;
-        StartPictureSaveTime = micros();
-        // Tell UI (Raspberry PI) a new frame is available for processing
-        if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
-            tone(A2, 2000, 35);
-        }
-        else {
-            SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
-        }
+            if (FrameFineTune > 0)  // If positive, aditional steps after detection
+                capstan_advance(FrameFineTune);
+            LastFrameSteps = FrameStepsDone;
+            adjust_framesteps(LastFrameSteps);
+            FrameStepsDone = 0;
+            StartPictureSaveTime = micros();
+            // Tell UI (Raspberry PI) a new frame is available for processing
+            if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
+                tone(A2, 2000, 35);
+            }
+            else {
+                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
+            }
       
-        FrameDetected = false;
-        retvalue = SCAN_FRAME_DETECTED;
-        DebugPrint("FrmS",LastFrameSteps);
-        DebugPrint("FrmT",CurrentTime-StartFrameTime);
-        if (DebugState == FrameSteps)
-            SerialPrintInt(LastFrameSteps);
+            FrameDetected = false;
+            retvalue = SCAN_FRAME_DETECTED;
+            DebugPrint("FrmS",LastFrameSteps);
+            DebugPrint("FrmT",CurrentTime-StartFrameTime);
+            if (DebugState == FrameSteps)
+                SerialPrintInt(LastFrameSteps);
         }
         else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
             retvalue = SCAN_FRAME_DETECTION_ERROR;
@@ -839,7 +831,6 @@ ScanResult scan(int UI_Command) {
             SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
             FrameStepsDone = 0;
         }
-
         return (retvalue);
     }
 }
@@ -935,7 +926,7 @@ void DebugPrintAux(const char * str, unsigned long i) {
 
 void DebugPrintStr(const char * str) {
     if (DebugState != DebugInfo) return;
-        DebugPrintAux(str,-1);
+    DebugPrintAux(str,-1);
 }
 
 // Differentiated debug print function to debug specifics without printing all debug lines
@@ -952,3 +943,4 @@ void SerialPrintStr(const char * str) {
 void SerialPrintInt(int i) {
     if (DebugState != DebugInfo) Serial.println(i);
 }
+
