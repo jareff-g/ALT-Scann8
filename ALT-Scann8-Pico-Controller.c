@@ -916,7 +916,7 @@ void receiveEvent(i2c_inst_t *i2c, i2c_slave_event_t event) {
 
     if (gpio == i2c0 && event == I2C_SLAVE_RECEIVE) {
         BytesToRead = i2c_get_read_available();
-        while (BytesToRead >= 3) {   // Read at least three, otherwise wait for next
+        if (BytesToRead >= 3) {   // Read at least three, otherwise wait for next
             IncomingIc = i2c_read_byte_raw();
             param = i2c_read_byte_raw();
             param +=  256*i2c_read_byte_raw();
