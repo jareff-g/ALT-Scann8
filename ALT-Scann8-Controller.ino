@@ -54,6 +54,7 @@ int MaxDebugRepetitions = 3;
 boolean GreenLedOn = false;  
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
 // I2C commands (RPi to Arduino): Constant definition
+#define CMD_VERSION_ID 1
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
 #define CMD_GET_NEXT_FRAME 12
@@ -73,6 +74,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
 // I2C responses (Arduino to RPi): Constant definition
+#define RSP_VERSION_ID 1
 #define RSP_FRAME_AVAILABLE 80
 #define RSP_SCAN_ERROR 81
 #define RSP_REWIND_ERROR 82
@@ -308,6 +310,10 @@ void loop() {
         switch (ScanState) {
             case Sts_Idle:
                 switch (UI_Command) {
+                    case CMD_VERSION_ID:
+                        DebugPrintStr(">V_ID");
+                        SendToRPi(RSP_VERSION_ID, 1, 0, 0, 0);  // 1 - Arduino, 2 - RPi Pico
+                        break;
                     case CMD_START_SCAN:
                         DebugPrintStr(">Scan");
                         ScanState = Sts_Scan;
