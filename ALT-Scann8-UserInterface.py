@@ -71,6 +71,7 @@ import queue
 
 
 #  ######### Global variable definition (I know, too many. Need to go back to school) ##########
+Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
 FocusZoomActive = False
@@ -154,6 +155,7 @@ FilmHoleY2 = 300
 SharpnessValue = 1
 
 # Commands (RPI to Arduino)
+CMD_VERSION_ID = 1
 CMD_START_SCAN = 10
 CMD_TERMINATE = 11
 CMD_GET_NEXT_FRAME = 12
@@ -173,6 +175,7 @@ CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
 # Responses (Arduino to RPi)
+RSP_VERSION_ID = 1
 RSP_FRAME_AVAILABLE = 80
 RSP_SCAN_ERROR = 81
 RSP_REWIND_ERROR = 82
@@ -1905,10 +1908,11 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ALT_Scann8_controller_detected
     global last_cmd_time
     global pt_level_str, min_frame_steps_str
+    global Controller_Id
 
     if not SimulatedRun:
         try:
-            ArduinoData = i2c.read_i2c_block_data(16, 3)
+            ArduinoData = i2c.read_i2c_block_data(16, 9)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
             ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
@@ -1933,6 +1937,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
+    elif ArduinoTrigger == RSP_VERSION_ID:  # New Frame available
+        Controller_Id = ArduinoParam1
+        if Controller_Id == 1:
+            logging.info("Arduino controller detected")
+        elif Controller_Id == 2:
+            logging.info("Raspberry Pi Pico controller detected")
     elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
         NewFrameAvailable = True
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
@@ -2375,6 +2385,8 @@ def tscann8_init():
 
     if SimulatedRun:
         win.wm_title(string='*** ALT-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
+
+    get_controller_version()
 
     win.update_idletasks()
 
@@ -2924,6 +2936,13 @@ def build_ui():
             rwnd_speed_control_up.pack(side=RIGHT)
             rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
             rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
+
+
+
+def get_controller_version():
+    if Controller_Id == 0:
+        logging.debug("Requesting controller version")
+        send_arduino_command(CMD_VERSION_ID)
 
 
 def main(argv):
