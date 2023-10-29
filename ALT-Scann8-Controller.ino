@@ -35,8 +35,8 @@ int MinPT = 200;
 // (avoid decreasing/increasing too fast).
 // The idea is to see if we can make the PT level value automatically set by the software, so that it adapts to different 
 // part of the film (clear/dark around the holes) dynamically.
-int MaxPT_Dynamic = 0;
-int MinPT_Dynamic = 10000;
+unsigned int MaxPT_Dynamic = 0;
+unsigned int MinPT_Dynamic = 10000;
 int PT_Boost = 0;  // to pull frames down in fine tune
 
 
@@ -636,9 +636,10 @@ int GetLevelPT() {
     MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
     MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
     if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
-    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto)
-        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * PerforationThresholdAutoLevelRatio / 100))/10);
+        PerforationThresholdLevel = int((MinPT_Dynamic + ((MaxPT_Dynamic-MinPT_Dynamic) /100 * PerforationThresholdAutoLevelRatio))/10);
     return(PT_SignalLevelRead);
 }
 
