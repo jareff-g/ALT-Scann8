@@ -174,6 +174,7 @@ CMD_DECREASE_WIND_SPEED = 63
 CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
+CMD_ASYNC_ACK = 255
 # Responses (Arduino to RPi)
 RSP_VERSION_ID = 1
 RSP_FRAME_AVAILABLE = 80
@@ -1912,7 +1913,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if not SimulatedRun:
         try:
-            ArduinoData = i2c.read_i2c_block_data(16, 9)
+            ArduinoData = i2c.read_i2c_block_data(16, 0, 9)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
             ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
@@ -1968,7 +1969,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
-    ArduinoTrigger = 0
+    if ArduinoTrigger != 0:
+        ArduinoTrigger = 0
+        send_arduino_command(CMD_ASYNC_ACK, 0)  # Ask arduino to send empty buffer to clear previous async report
 
     win.after(1, arduino_listen_loop)
 
