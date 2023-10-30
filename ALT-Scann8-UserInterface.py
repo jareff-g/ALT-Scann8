@@ -1971,7 +1971,11 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger != 0:
         ArduinoTrigger = 0
-        send_arduino_command(CMD_ASYNC_ACK, 0)  # Ask arduino to send empty buffer to clear previous async report
+        try:
+            send_arduino_command(CMD_ASYNC_ACK, 0)  # Ask arduino to send empty buffer to clear previous async report
+        except IOError:
+            # Log error to console
+            logging.debug("Non-critical IOError while clearing async event from Arduino. Will check again.")
 
     win.after(1, arduino_listen_loop)
 
