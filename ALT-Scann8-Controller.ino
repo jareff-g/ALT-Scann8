@@ -73,6 +73,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_REWIND 64
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
+#define CMD_ASYNC_ACK 255
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
 #define RSP_FRAME_AVAILABLE 80
@@ -304,6 +305,9 @@ void loop() {
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
+                break;
+            case CMD_ASYNC_ACK:
+                SendToRPi(0, 0, 0, 0, 0);  // Clear previous callback on RPi
                 break;
         }
 
@@ -849,8 +853,12 @@ void receiveEvent(int byteCount) {
 
     if (Wire.available())
         IncomingIc = Wire.read();
-    param =  Wire.read();
-    param +=  256*Wire.read();
+    if (Wire.available())
+        param =  Wire.read();
+    if (Wire.available())
+        param +=  256*Wire.read();
+    while (Wire.available())
+        Wire.read();
 
     if (IncomingIc > 0) {
         push(IncomingIc, param); // No error treatment for now
