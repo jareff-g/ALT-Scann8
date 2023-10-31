@@ -37,7 +37,6 @@ int MinPT = 200;
 // part of the film (clear/dark around the holes) dynamically.
 unsigned int MaxPT_Dynamic = 0;
 unsigned int MinPT_Dynamic = 10000;
-int PT_Boost = 0;  // to pull frames down in fine tune
 
 
 enum {
@@ -130,7 +129,7 @@ int PerforationMinLevel = 50;               // Phototransistor reported value, m
 int PerforationThresholdLevelR8 = 180;      // Default value for R8
 int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int PerforationThresholdAutoLevelRatio = 20;  // Percentage between dynamic max/min PT level
+int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changes from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
@@ -295,9 +294,8 @@ void loop() {
                 }
                 break;
             case CMD_SET_FRAME_FINE_TUNE:
-                if (FrameFineTune < 0)
-                    PT_Boost = abs(FrameFineTune) * 30;
-                else
+                PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
+                if (param > 0)  // Also to move up we add extra steps
                     FrameFineTune = param;
                 break;
             case CMD_SET_SCAN_SPEED:
@@ -656,7 +654,7 @@ void ReportPlotterInfo() {
     if (DebugState == PlotterInfo && millis() > NextReport) {
         if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
             NextReport = millis() + 20;
-            //sprintf(out,"PT:%i, Th:%i, FSD:%i, MFS:%i, LFS:%i, Spd:%lu, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, MinFrameSteps, LastFrameSteps, ScanSpeed, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+            //sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
             sprintf(out,"PT:%i", PT_SignalLevelRead);
             SerialPrintStr(out);
             Previous_PT_Signal = PT_SignalLevelRead;
@@ -740,7 +738,7 @@ boolean IsHoleDetected() {
     boolean hole_detected = false;
     int PT_Level;
   
-    PT_Level = GetLevelPT() + PT_Boost;
+    PT_Level = GetLevelPT();
 
     // ------------- Frame detection ----
     // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'

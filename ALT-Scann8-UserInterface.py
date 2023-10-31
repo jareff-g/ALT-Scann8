@@ -261,8 +261,7 @@ def send_arduino_command(cmd, param=12345):
 
     if not SimulatedRun:
         time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
-        i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param/256)])  # Send command to Arduino
-        logging.debug("Sending command %i to Arduino", cmd)
+        i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
         time.sleep(0.0001)  #wait 100 µs, same
 
 
