@@ -53,35 +53,36 @@ int MaxDebugRepetitions = 3;
 boolean GreenLedOn = false;  
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
 // I2C commands (RPi to Arduino): Constant definition
-#define CMD_VERSION_ID 1
-#define CMD_START_SCAN 10
-#define CMD_TERMINATE 11
-#define CMD_GET_NEXT_FRAME 12
-#define CMD_SET_REGULAR_8 18
-#define CMD_SET_SUPER_8 19
-#define CMD_SWITCH_REEL_LOCK_STATUS 20
-#define CMD_FILM_FORWARD 30
-#define CMD_SINGLE_STEP 40
-#define CMD_SET_PT_LEVEL 50
-#define CMD_SET_MIN_FRAME_STEPS 52
-#define CMD_SET_FRAME_FINE_TUNE 54
-#define CMD_REWIND 60
-#define CMD_FAST_FORWARD 61
-#define CMD_INCREASE_WIND_SPEED 62
-#define CMD_DECREASE_WIND_SPEED 63
-#define CMD_UNCONDITIONAL_REWIND 64
-#define CMD_UNCONDITIONAL_FAST_FORWARD 65
-#define CMD_SET_SCAN_SPEED 70
-#define CMD_ASYNC_ACK 255
+#define CMD_UI_VERSION_ID 1
+#define CMD_UI_START_SCAN 10
+#define CMD_UI_TERMINATE 11
+#define CMD_UI_GET_NEXT_FRAME 12
+#define CMD_UI_SET_REGULAR_8 18
+#define CMD_UI_SET_SUPER_8 19
+#define CMD_UI_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_UI_FILM_FORWARD 30
+#define CMD_UI_SINGLE_STEP 40
+#define CMD_UI_SET_PT_LEVEL 50
+#define CMD_UI_SET_MIN_FRAME_STEPS 52
+#define CMD_UI_SET_FRAME_FINE_TUNE 54
+#define CMD_UI_REWIND 60
+#define CMD_UI_FAST_FORWARD 61
+#define CMD_UI_INCREASE_WIND_SPEED 62
+#define CMD_UI_DECREASE_WIND_SPEED 63
+#define CMD_UI_UNCONDITIONAL_REWIND 64
+#define CMD_UI_UNCONDITIONAL_FAST_FORWARD 65
+#define CMD_UI_SET_SCAN_SPEED 70
+#define CMD_UI_ASYNC_ACK 255
 // I2C responses (Arduino to RPi): Constant definition
-#define RSP_VERSION_ID 1
-#define RSP_FRAME_AVAILABLE 80
-#define RSP_SCAN_ERROR 81
-#define RSP_REWIND_ERROR 82
-#define RSP_FAST_FORWARD_ERROR 83
-#define RSP_REWIND_ENDED 84
-#define RSP_FAST_FORWARD_ENDED 85
-#define RSP_REPORT_AUTO_LEVELS 86
+#define CMD_CNT_VERSION_ID 1
+#define CMD_CNT_FORCE_INIT 2
+#define CMD_CNT_FRAME_AVAILABLE 80
+#define CMD_CNT_SCAN_ERROR 81
+#define CMD_CNT_REWIND_ERROR 82
+#define CMD_CNT_FAST_FORWARD_ERROR 83
+#define CMD_CNT_REWIND_ENDED 84
+#define CMD_CNT_FAST_FORWARD_ENDED 85
+#define CMD_CNT_REPORT_AUTO_LEVELS 86
 
 
 // Immutable values
@@ -321,6 +322,9 @@ void setup() {
 
 void loop() {
     int param;
+
+    SendToRPi(CMD_CNT_FORCE_INIT, 0, 0, 0, 0);  // Request UI to resend init sequence, in case controller reloaded while UI active
+
     while (1) {
         if (dataInQueue())
             UI_Command = pop(&param);   // Get next command from queue if one exists
@@ -332,7 +336,8 @@ void loop() {
         ReportPlotterInfo();    // Regular report of plotter info
 
         switch (UI_Command) {
-            case CMD_SET_PT_LEVEL:
+            case CMD_UI_SET_PT_LEVEL:
+                DebugPrint(">PTLevel", param);
                 if (param >= 0 && param <= 900) {
                     if (param == 0)
                         PT_Level_Auto = true;     // zero means we go in automatic mode
@@ -344,7 +349,8 @@ void loop() {
                     DebugPrint(">PTLevel",param);
                 }
                 break;
-            case CMD_SET_MIN_FRAME_STEPS:
+            case CMD_UI_SET_MIN_FRAME_STEPS:
+                DebugPrint(">MinFSteps", param);
                 if (param == 0 || param >= 100 && param <= 600) {
                     if (param == 0)
                         Frame_Steps_Auto = true;     // zero means we go in automatic mode
@@ -360,19 +366,21 @@ void loop() {
                     }
                 }
                 break;
-            case CMD_SET_FRAME_FINE_TUNE:
+            case CMD_UI_SET_FRAME_FINE_TUNE:
+                DebugPrint(">FineT", param);
                 if (FrameFineTune < 0)
                     PT_Boost = abs(FrameFineTune) * 30;
                 else
                     FrameFineTune = param;
                 break;
-            case CMD_SET_SCAN_SPEED:
+            case CMD_UI_SET_SCAN_SPEED:
+                DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
                 break;
-            case CMD_ASYNC_ACK:
+            case CMD_UI_ASYNC_ACK:
                 SendToRPi(0, 0, 0, 0, 0);  // Clear previous callback on RPi
                 break;
         }
@@ -380,11 +388,11 @@ void loop() {
         switch (ScanState) {
             case Sts_Idle:
                 switch (UI_Command) {
-                    case CMD_VERSION_ID:
+                    case CMD_UI_VERSION_ID:
                         DebugPrintStr(">V_ID");
-                        SendToRPi(RSP_VERSION_ID, 2, 0, 0, 0);  // 1 - Arduino, 2 - RPi Pico
+                        SendToRPi(CMD_CNT_VERSION_ID, 2, 0, 0, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
-                    case CMD_START_SCAN:
+                    case CMD_UI_START_SCAN:
                         DebugPrintStr(">Scan");
                         ScanState = Sts_Scan;
                         pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
@@ -396,13 +404,13 @@ void loop() {
                         collect_modulo = 10;
                         //tone(A2, 2000, 50);   // No tone in pico, to be checked
                         break;
-                    case CMD_TERMINATE:  //Exit app
+                    case CMD_UI_TERMINATE:  //Exit app
                         if (UVLedOn) {
                             pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
                             UVLedOn = false;
                         }
                         break;
-                    case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
+                    case CMD_UI_GET_NEXT_FRAME:  // Continue scan to next frame
                         ScanState = Sts_Scan;
                         StartFrameTime = get_absolute_time();
                         ScanSpeed = OriginalScanSpeed;
@@ -411,9 +419,10 @@ void loop() {
                         // Also send, if required, to RPi autocalculated threshold level every frame
                         // Alternate reports for each value, otherwise I2C has I/O errors
                         if (PT_Level_Auto || Frame_Steps_Auto)
-                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
+                            SendToRPi(CMD_CNT_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
                         break;
-                    case CMD_SET_REGULAR_8:  // Select R8 film
+                    case CMD_UI_SET_REGULAR_8:  // Select R8 film
+                        DebugPrintStr(">R8");
                         IsS8 = false;
                         MinFrameSteps = MinFrameStepsR8;
                         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -422,7 +431,8 @@ void loop() {
                             PerforationThresholdLevel = PerforationThresholdLevelR8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
                         break;
-                    case CMD_SET_SUPER_8:  // Select S8 film
+                    case CMD_UI_SET_SUPER_8:  // Select S8 film
+                        DebugPrintStr(">S8");
                         IsS8 = true;
                         MinFrameSteps = MinFrameStepsS8;
                         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -431,25 +441,25 @@ void loop() {
                             PerforationThresholdLevel = PerforationThresholdLevelS8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
                         break;
-                    case CMD_SWITCH_REEL_LOCK_STATUS:
+                    case CMD_UI_SWITCH_REEL_LOCK_STATUS:
                         ScanState = Sts_UnlockReels;
                         sleep_ms(50);
                         break;
-                    case CMD_FILM_FORWARD:
+                    case CMD_UI_FILM_FORWARD:
                         collect_modulo = 4;
                         ScanState = Sts_SlowForward;
                         sleep_ms(50);
                         break;
-                    case CMD_SINGLE_STEP:
+                    case CMD_UI_SINGLE_STEP:
                         DebugPrintStr(">SStep");
                         ScanState = Sts_SingleStep;
                         sleep_ms(50);
                         break;
-                    case CMD_REWIND: // Rewind
-                    case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
-                        if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+                    case CMD_UI_REWIND: // Rewind
+                    case CMD_UI_UNCONDITIONAL_REWIND: // Rewind unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_UI_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
                             DebugPrintStr("Rwnd err");
-                            SendToRPi(RSP_REWIND_ERROR, 0, 0, 0, 0);
+                            SendToRPi(CMD_CNT_REWIND_ERROR, 0, 0, 0, 0);
                             /*
                             tone(A2, 2000, 100);
                             sleep_ms(150);
@@ -474,11 +484,11 @@ void loop() {
                         }
                         sleep_ms(50);
                         break;
-                    case CMD_FAST_FORWARD:  // Fast Forward
-                    case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
-                        if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+                    case CMD_UI_FAST_FORWARD:  // Fast Forward
+                    case CMD_UI_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_UI_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
                             DebugPrintStr("FF err");
-                            SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0, 0, 0);
+                            SendToRPi(CMD_CNT_FAST_FORWARD_ERROR, 0, 0, 0, 0);
                             /*
                             tone(A2, 2000, 100);
                             sleep_ms(150);
@@ -502,11 +512,11 @@ void loop() {
                             RewindSpeed = 4000;
                         }
                         break;
-                    case CMD_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
+                    case CMD_UI_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
                         if (TargetRewindSpeedLoop < 4000)
                             TargetRewindSpeedLoop += 20;
                         break;
-                    case CMD_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
+                    case CMD_UI_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
                         if (TargetRewindSpeedLoop > 200)
                             TargetRewindSpeedLoop -= 20;
                         break;
@@ -514,7 +524,7 @@ void loop() {
                 break;
             case Sts_Scan:
                 CollectOutgoingFilm(false);
-                if (UI_Command == CMD_START_SCAN) {
+                if (UI_Command == CMD_UI_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
                 }
@@ -528,7 +538,7 @@ void loop() {
                 }
                 break;
             case Sts_UnlockReels:
-                if (UI_Command == CMD_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
+                if (UI_Command == CMD_UI_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
                     ReelsUnlocked = false;
                     gpio_put(PIN_MOTOR_B_NEUTRAL,0);
                     gpio_put(PIN_MOTOR_C_NEUTRAL,0);
@@ -562,7 +572,7 @@ void loop() {
                 }
                 break;
             case Sts_SlowForward:
-                if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
+                if (UI_Command == CMD_UI_FILM_FORWARD) { // Stop slow forward
                     sleep_ms(50);
                     ScanState = Sts_Idle;
                 }
@@ -585,7 +595,7 @@ boolean RewindFilm(int UI_Command) {
   
     //Wire.begin(16);
 
-    if (UI_Command == CMD_REWIND) {
+    if (UI_Command == CMD_UI_REWIND) {
         stopping = true;
     }
     else if (stopping) {
@@ -602,7 +612,7 @@ boolean RewindFilm(int UI_Command) {
             gpio_put(PIN_MOTOR_B_NEUTRAL,0);
             gpio_put(PIN_MOTOR_C_NEUTRAL,0);
             sleep_ms(100);
-            SendToRPi(RSP_REWIND_ENDED, 0, 0, 0, 0);
+            SendToRPi(CMD_CNT_REWIND_ENDED, 0, 0, 0, 0);
         }
     }
     else {
@@ -623,7 +633,7 @@ boolean FastForwardFilm(int UI_Command) {
 
   //Wire.begin(16);  // join I2c bus with address #16
 
-    if (UI_Command == CMD_FAST_FORWARD) {
+    if (UI_Command == CMD_UI_FAST_FORWARD) {
         stopping = true;
     }
     else if (stopping) {
@@ -640,7 +650,7 @@ boolean FastForwardFilm(int UI_Command) {
             gpio_put(PIN_MOTOR_B_NEUTRAL,0);
             gpio_put(PIN_MOTOR_C_NEUTRAL,0);
             sleep_ms(100);
-            SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0, 0, 0);
+            SendToRPi(CMD_CNT_FAST_FORWARD_ENDED, 0, 0, 0, 0);
         }
     }
     else {
@@ -862,7 +872,7 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         //-------------ScanFilm-----------
-        if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
+        if (UI_Command == CMD_UI_START_SCAN) {   // UI Requesting to end current scan
             retvalue = SCAN_TERMINATION_REQUESTED;
             FrameDetected = false;
             //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
@@ -897,7 +907,7 @@ ScanResult scan(int UI_Command) {
                 //tone(A2, 2000, 35);
             }
             else {
-                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0, 0, 0);
+                SendToRPi(CMD_CNT_FRAME_AVAILABLE, 0, 0, 0, 0);
             }
       
             FrameDetected = false;
@@ -910,7 +920,7 @@ ScanResult scan(int UI_Command) {
         else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
             retvalue = SCAN_FRAME_DETECTION_ERROR;
             // Tell UI (Raspberry PI) an error happened during scanning
-            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
+            SendToRPi(CMD_CNT_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
             FrameStepsDone = 0;
         }
         return (retvalue);
