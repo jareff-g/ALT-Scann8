@@ -34,9 +34,8 @@ int MinPT = 200;
 // (avoid decreasing/increasing too fast).
 // The idea is to see if we can make the PT level value automatically set by the software, so that it adapts to different 
 // part of the film (clear/dark around the holes) dynamically.
-int MaxPT_Dynamic = 0;
-int MinPT_Dynamic = 10000;
-int PT_Boost = 0;  // to pull frames down in fine tune
+unsigned int MaxPT_Dynamic = 0;
+unsigned int MinPT_Dynamic = 10000;
 
 
 enum {
@@ -62,6 +61,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UI_SWITCH_REEL_LOCK_STATUS 20
 #define CMD_UI_FILM_FORWARD 30
 #define CMD_UI_SINGLE_STEP 40
+#define CMD_UI_ADVANCE_FRAME 41
+#define CMD_UI_ADVANCE_FRAME_FRACTION 42
 #define CMD_UI_SET_PT_LEVEL 50
 #define CMD_UI_SET_MIN_FRAME_STEPS 52
 #define CMD_UI_SET_FRAME_FINE_TUNE 54
@@ -149,7 +150,7 @@ int PerforationMinLevel = 50;               // Phototransistor reported value, m
 int PerforationThresholdLevelR8 = 180;      // Default value for R8
 int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int PerforationThresholdAutoLevelRatio = 20;  // Percentage between dynamic max/min PT level
+int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
@@ -368,9 +369,8 @@ void loop() {
                 break;
             case CMD_UI_SET_FRAME_FINE_TUNE:
                 DebugPrint(">FineT", param);
-                if (FrameFineTune < 0)
-                    PT_Boost = abs(FrameFineTune) * 30;
-                else
+                PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
+                if (param > 0)  // Also to move up we add extra steps
                     FrameFineTune = param;
                 break;
             case CMD_UI_SET_SCAN_SPEED:
@@ -518,7 +518,18 @@ void loop() {
                         break;
                     case CMD_UI_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
                         if (TargetRewindSpeedLoop > 200)
-                            TargetRewindSpeedLoop -= 20;
+                          TargetRewindSpeedLoop -= 20;
+                        break;
+                    case CMD_UI_ADVANCE_FRAME:
+                        DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
+                        if (IsS8)
+                            capstan_advance(MinFrameStepsS8);
+                        else
+                            capstan_advance(MinFrameStepsR8);
+                        break;
+                    case CMD_UI_ADVANCE_FRAME_FRACTION:
+                        DebugPrint(">Advance frame", 5);
+                        capstan_advance(5);
                         break;
                 }
                 break;
@@ -670,7 +681,7 @@ boolean FastForwardFilm(int UI_Command) {
 // Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
-void CollectOutgoingFilm(bool ff_collect = false) {
+void CollectOutgoingFilm(bool force = false) {
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
@@ -717,11 +728,12 @@ int GetLevelPT() {
     MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
     MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
     if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
-    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto)
         PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
 
-    return(SignalLevel);
+    return(PT_SignalLevelRead);
 }
 
 // ------------ Reports info (PT level, steps/frame, etc) to Serial Plotter 10 times/sec ----------
@@ -817,7 +829,7 @@ boolean IsHoleDetected() {
     boolean hole_detected = false;
     int PT_Level;
   
-    PT_Level = GetLevelPT() + PT_Boost;
+    PT_Level = GetLevelPT();
 
     // ------------- Frame detection ----
     // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
@@ -837,6 +849,8 @@ void capstan_advance(int steps) {
     for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
         gpio_put(PIN_MOTOR_B_STEP,0);
         gpio_put(PIN_MOTOR_B_STEP,1);
+        if (steps > 1)
+            delayMicroseconds(1000);
     }
     gpio_put(PIN_MOTOR_B_STEP,0);
 }
