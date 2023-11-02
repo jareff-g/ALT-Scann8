@@ -728,6 +728,68 @@ def stabilization_delay_spinbox_focus_out(event):
     SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
+def sharpness_control_selection(updown):
+    global sharpness_control_label
+    global SharpnessValue
+    global sharpness_control_spinbox, sharpness_control_str
+    global SimulatedRun
+
+    if not ExpertMode:
+        return
+
+    SharpnessValue = int(sharpness_control_spinbox.get())
+    SessionData["SharpnessValue"] = str(SharpnessValue)
+
+
+def sharpness_control_spinbox_focus_out(event):
+    global sharpness_control_label
+    global SharpnessValue
+    global sharpness_control_spinbox, sharpness_control_str
+    global SimulatedRun
+
+    SharpnessValue = int(sharpness_control_spinbox.get())
+    SessionData["SharpnessValue"] = str(SharpnessValue)
+
+
+def rwnd_speed_control_selection(updown):
+    global rwnd_speed_control_label
+    global rwnd_speed_delay
+    global rwnd_speed_control_spinbox, rwnd_speed_control_str
+    global SimulatedRun
+
+    if not ExpertMode:
+        return
+
+    if updown == 'up':
+        rwnd_speed_up()
+    else:
+        rwnd_speed_down()
+
+def rwnd_speed_down():
+    global rwnd_speed_delay
+    global rwnd_speed_control_delay
+
+    if not SimulatedRun:
+        send_arduino_command(CMD_UI_INCREASE_WIND_SPEED)
+    if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
+        rwnd_speed_delay += rwnd_speed_delay*0.1
+    else:
+        rwnd_speed_delay = 4000
+    rwnd_speed_control_spinbox.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
+
+def rwnd_speed_up():
+    global rwnd_speed_delay
+    global rwnd_speed_control_delay
+
+    if not SimulatedRun:
+        send_arduino_command(CMD_UI_DECREASE_WIND_SPEED)
+    if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
+        rwnd_speed_delay -= rwnd_speed_delay*0.1
+    else:
+        rwnd_speed_delay = 200
+    rwnd_speed_control_spinbox.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
+
+
 def min_frame_steps_selection(updown):
     global min_frame_steps_spinbox, min_frame_steps_str
     global MinFrameSteps
@@ -824,33 +886,6 @@ def scan_speed_spinbox_focus_out(event):
     ScanSpeed = int(scan_speed_spinbox.get())
     SessionData["ScanSpeed"] = ScanSpeed
     send_arduino_command(CMD_UI_SET_SCAN_SPEED, ScanSpeed)
-
-
-def rwnd_speed_down():
-    global rwnd_speed_delay
-    global rwnd_speed_control_delay
-
-    if not SimulatedRun:
-        send_arduino_command(CMD_UI_INCREASE_WIND_SPEED)
-    if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
-        rwnd_speed_delay += rwnd_speed_delay*0.1
-    else:
-        rwnd_speed_delay = 4000
-    #rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
-    rwnd_speed_control_delay.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
-
-def rwnd_speed_up():
-    global rwnd_speed_delay
-    global rwnd_speed_control_delay
-
-    if not SimulatedRun:
-        send_arduino_command(CMD_UI_DECREASE_WIND_SPEED)
-    if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
-        rwnd_speed_delay -= rwnd_speed_delay*0.1
-    else:
-        rwnd_speed_delay = 200
-    #rwnd_speed_control_delay.config(text=str(round((2000-rwnd_speed_delay)*100/1800))+'%')
-    rwnd_speed_control_delay.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
 
 
 def button_status_change_except(except_button, active):
@@ -2117,7 +2152,7 @@ def load_config_data():
         if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
                 SharpnessValue = int(SessionData["SharpnessValue"])
-                sharpness_control_value.config(text=str(SharpnessValue))
+                sharpness_control_spinbox.config(text=str(SharpnessValue))
 
 def load_session_data():
     global SessionData
@@ -2545,6 +2580,8 @@ def build_ui():
     global wb_blue_spinbox, wb_blue_str
     global match_wait_margin_spinbox, match_wait_margin_str
     global stabilization_delay_spinbox, stabilization_delay_str
+    global sharpness_control_spinbox, sharpness_control_str
+    global rwnd_speed_control_spinbox, rwnd_speed_control_str
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2705,7 +2742,7 @@ def build_ui():
     Exit_btn.pack(side=BOTTOM, padx=(5, 0), pady=(5, 0))
 
 
-    # Create extended frame for expert adn experimental areas
+    # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
         #extended_frame.place(x=30, y=790)
@@ -2905,7 +2942,7 @@ def build_ui():
                                          width=10, font=("Arial", 7))
         scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
-        scan_speed_selection_aux = frame_alignment_frame.register(
+        scan_speed_selection_aux = speed_quality_frame.register(
             scan_speed_selection)
         scan_speed_spinbox = tk.Spinbox(
             speed_quality_frame,
@@ -2921,7 +2958,7 @@ def build_ui():
                                          width=20, font=("Arial", 7))
         stabilization_delay_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
-        stabilization_delay_selection_aux = frame_alignment_frame.register(
+        stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
         stabilization_delay_spinbox = tk.Spinbox(
             speed_quality_frame,
@@ -2936,41 +2973,35 @@ def build_ui():
             experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
             #experimental_frame.place(x=900, y=790)
 
-            # Sharpness, control to allow playign with the values and see the results
-            sharpness_control_frame = LabelFrame(experimental_frame, text="Sharpness", width=8, height=2,
-                                                 font=("Arial", 7))
-            sharpness_control_frame.pack(side=LEFT, padx=2)
-
-            sharpness_control_value = Label(sharpness_control_frame, text=str(SharpnessValue),
-                                             width=4, height=1, font=("Arial", 7))
-            sharpness_control_value.pack(side=TOP)
-            sharpness_control_value_down = Button(sharpness_control_frame, text="-", width=1, height=1, command=sharpness_down,
-                                            activebackground='green', activeforeground='white', font=("Arial", 8))
-            sharpness_control_value_down.pack(side=LEFT)
-            sharpness_control_value_up = Button(sharpness_control_frame, text="+", width=1, height=1, command=sharpness_up,
-                                          activebackground='green', activeforeground='white', font=("Arial", 8))
-            sharpness_control_value_up.pack(side=RIGHT)
-            sharpness_control_bottom_frame = Frame(sharpness_control_frame, height=10)   # frame just to add space at the bottom
-            sharpness_control_bottom_frame.pack(side=TOP, pady=13)
+            # Sharpness, control to allow playing with the values and see the results
+            sharpness_control_label = tk.Label(experimental_frame,
+                                                 text='Sharpness:',
+                                                 width=20, font=("Arial", 7))
+            sharpness_control_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+            sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
+            sharpness_control_selection_aux = experimental_frame.register(
+                sharpness_control_selection)
+            sharpness_control_spinbox = tk.Spinbox(
+                experimental_frame,
+                command=(sharpness_control_selection_aux, '%d'), width=8,
+                textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", 7))
+            sharpness_control_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+            sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
 
             # Display entry to throttle Rwnd/FF speed
-            rwnd_speed_control_frame = LabelFrame(experimental_frame, text="RW/FF speed", width=8, height=2,
-                                                  font=("Arial", 7))
-            rwnd_speed_control_frame.pack(side=LEFT, padx=2)
+            rwnd_speed_control_label = tk.Label(experimental_frame,
+                                                 text='RW/FF speed rpm):',
+                                                 width=20, font=("Arial", 7))
+            rwnd_speed_control_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+            rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
 
-            rwnd_speed_control_delay = Label(rwnd_speed_control_frame,
-                                             text=str(round(60 / (rwnd_speed_delay * 375 / 1000000))) + ' rpm',
-                                             width=8, height=1, font=("Arial", 7))
-            rwnd_speed_control_delay.pack(side=TOP)
-            rwnd_speed_control_down = Button(rwnd_speed_control_frame, text="-", width=1, height=1, command=rwnd_speed_down,
-                                             activebackground='green', activeforeground='white', font=("Arial", 8))
-            rwnd_speed_control_down.pack(side=LEFT)
-            rwnd_speed_control_up = Button(rwnd_speed_control_frame, text="+", width=1, height=1, command=rwnd_speed_up,
-                                           activebackground='green', activeforeground='white', font=("Arial", 8))
-            rwnd_speed_control_up.pack(side=RIGHT)
-            rwnd_speed_bottom_frame = Frame(rwnd_speed_control_frame)  # frame just to add space at the bottom
-            rwnd_speed_bottom_frame.pack(side=BOTTOM, pady=18)
-
+            rwnd_speed_control_selection_aux = experimental_frame.register(
+                rwnd_speed_control_selection)
+            rwnd_speed_control_spinbox = tk.Spinbox(
+                experimental_frame, state='readonly',
+                command=(rwnd_speed_control_selection_aux, '%d'), width=8,
+                textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", 7))
+            rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
 
 
 def get_controller_version():
