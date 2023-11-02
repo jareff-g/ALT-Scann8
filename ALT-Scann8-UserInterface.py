@@ -164,6 +164,8 @@ CMD_UI_SET_SUPER_8 = 19
 CMD_UI_SWITCH_REEL_LOCK_STATUS = 20
 CMD_UI_FILM_FORWARD = 30
 CMD_UI_SINGLE_STEP = 40
+CMD_UI_ADVANCE_FRAME = 41
+CMD_UI_ADVANCE_FRAME_FRACTION = 42
 CMD_UI_SET_PT_LEVEL = 50
 CMD_UI_SET_MIN_FRAME_STEPS = 52
 CMD_UI_SET_FRAME_FINE_TUNE = 54
@@ -206,6 +208,7 @@ GainRed = 2.2  # 2.4
 GainBlue = 2.2  # 2.8
 PreviousGainRed = 1
 PreviousGainBlue = 1
+ManualScanEnabled = False
 
 # Statistical information about where time is spent (expert mode only)
 total_wait_time_preview_display = 0
@@ -262,7 +265,13 @@ def send_arduino_command(cmd, param=12345):
 
     if not SimulatedRun:
         time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
-        i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
+        try:
+            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
+        except IOError:
+            logging.warning("Error while sending command %i, param %i to Arduino. Retrying...", cmd, param)
+            time.sleep(0.2)  #wait 100 µs, to avoid I/O errors
+            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
+
         time.sleep(0.0001)  #wait 100 µs, same
 
 
@@ -519,7 +528,7 @@ def exposure_selection(updown):
     if CurrentExposure == 0:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    CurrentExposure = CurrentExposure + 2000 if updown=='up' else -2000
+    CurrentExposure = CurrentExposure + 2000 if updown=='up' else CurrentExposure - 2000
 
     if CurrentExposure <= 0:
         CurrentExposure = 1  # Do not allow zero or below
@@ -537,11 +546,12 @@ def exposure_selection(updown):
 
     if not SimulatedRun:
         if IsPiCamera2:
-            camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
+            camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
         else:
-            camera.shutter_speed = CurrentExposure
+            camera.shutter_speed = int(CurrentExposure)
 
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
+    exposure_spinbox.config(value=CurrentExposureStr)
 
 
 def exposure_spinbox_dbl_click(event):
@@ -555,9 +565,9 @@ def exposure_spinbox_dbl_click(event):
         SessionData["CurrentExposure"] = str(CurrentExposure)
         if not SimulatedRun:
             if IsPiCamera2:
-                camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
+                camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
             else:
-                camera.shutter_speed = CurrentExposure
+                camera.shutter_speed = int(CurrentExposure)
     else:
         if not SimulatedRun:
             # Since we are in auto exposure mode, retrieve current value to start from there
@@ -573,6 +583,7 @@ def exposure_spinbox_dbl_click(event):
 
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
     exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
+    exposure_spinbox.config(value=CurrentExposureStr)
 
 
 def auto_exposure_change_pause_selection():
@@ -691,6 +702,37 @@ def auto_white_balance_change_pause_selection():
     global AwbPause
     AwbPause = auto_white_balance_change_pause.get()
     SessionData["AwbPause"] = str(AwbPause)
+
+
+def Manual_scan_activated_selection():
+    global ManualScanEnabled, Manual_scan_activated
+    global manual_scan_advance_fraction_btn, manual_scan_take_snap_btn
+    ManualScanEnabled = Manual_scan_activated.get()
+    manual_scan_advance_fraction_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    manual_scan_take_snap_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+
+
+def manual_scan_advance_frame_fraction():
+    if not ExpertMode:
+        return
+    if not SimulatedRun:
+        send_arduino_command(CMD_UI_ADVANCE_FRAME_FRACTION)
+        time.sleep(0.2)
+        capture('preview')
+        time.sleep(0.2)
+
+
+
+def manual_scan_take_snap():
+    if not ExpertMode:
+        return
+    if not SimulatedRun:
+        capture('manual')
+        time.sleep(0.2)
+        send_arduino_command(CMD_UI_ADVANCE_FRAME)
+        time.sleep(0.2)
+        capture('preview')
+        time.sleep(0.2)
 
 
 def match_wait_margin_selection(updown):
@@ -1186,7 +1228,7 @@ def draw_preview_image(preview_image):
 
 def capture_single_step():
     if not SimulatedRun:
-        capture(True)
+        capture('still')
 
 
 def single_step_movie():
@@ -1374,10 +1416,11 @@ def set_r8():
     time.sleep(0.2)
 
     PTLevel = PTLevelR8
-    SessionData["PTLevel"] = PTLevel
+    if ALT_scann_init_done:
+        SessionData["PTLevel"] = PTLevel
+        SessionData["MinFrameSteps"] = MinFrameSteps
     pt_level_str.set(str(PTLevel))
     MinFrameSteps = MinFrameStepsR8
-    SessionData["MinFrameSteps"] = MinFrameSteps
     min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
     FilmHoleY1 = 40
@@ -1389,21 +1432,6 @@ def set_r8():
         send_arduino_command(CMD_UI_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
         send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
-
-def sharpness_up():
-    global sharpness_control_value, SharpnessValue
-    if SharpnessValue < 16:
-        SharpnessValue += 1
-    sharpness_control_value.config(text=str(SharpnessValue))
-    SessionData["SharpnessValue"] = str(SharpnessValue)
-
-
-def sharpness_down():
-    global sharpness_control_value, SharpnessValue
-    if SharpnessValue > 0:
-        SharpnessValue -= 1
-    sharpness_control_value.config(text=str(SharpnessValue))
-    SessionData["SharpnessValue"] = str(SharpnessValue)
 
 
 def register_frame():
@@ -1470,8 +1498,12 @@ def capture_hdr():
             camera.capture('hdrpic-%05d.%i.jpg' % (CurrentFrame, idx), quality=100)
         idx += 1
 
-
-def capture(still):
+# 4 possible modes:
+# 'normal': Standard capture during automated scan (display and save)
+# 'manual': Manual capture during manual scan (display and save)
+# 'still': Button to capture still (specific filename)
+# 'preview': Manual scan, display only, do not save
+def capture(mode):
     global CurrentDir, CurrentFrame, CurrentExposure
     global exposure_frame_value_label
     global SessionData
@@ -1569,7 +1601,7 @@ def capture(still):
     if not SimulatedRun:
         if IsPiCamera2:
             if PiCam2PreviewEnabled:
-                if still:
+                if mode == 'still':
                     camera.switch_mode_and_capture_file(capture_config, 'still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
@@ -1589,7 +1621,7 @@ def capture(still):
                 else:
                     print(CaptureStabilizationDelay, time.time(), FrameArrivalTime)
                 """
-                if still:
+                if mode == 'still':
                     captured_snapshot = camera.capture_image("main")
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
@@ -1608,9 +1640,18 @@ def capture(still):
                         # For PiCamera2, preview and save to file are handled in asynchronous threads
                         queue_item = tuple((captured_snapshot, CurrentFrame, 0))
                         capture_display_queue.put(queue_item)
-                        capture_save_queue.put(queue_item)
+                        logging.info("Displaying frame %i", CurrentFrame)
+                        if mode == 'normal' or mode == 'manual':    # Do not save in preview mode, only display
+                            capture_save_queue.put(queue_item)
+                            logging.info("Saving frame %i", CurrentFrame)
+                            if mode == 'manual':  # In manual mode, increase CurrentFrame
+                                CurrentFrame += 1
+                                # Update number of captured frames
+                                Scanned_Images_number_label.config(text=str(CurrentFrame))
+
+
         else:
-            if still:
+            if mode == 'still':
                 camera.capture('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill), quality=100)
                 CurrentStill += 1
             else:
@@ -1853,7 +1894,7 @@ def capture_loop():
             session_frames += 1
             register_frame()
             CurrentStill = 1
-            capture(False)
+            capture('normal')
             if not SimulatedRun:
                 try:
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
@@ -2230,7 +2271,7 @@ def load_session_data():
                         CurrentExposure = 0
                         CurrentExposureStr == "Auto"
                     else:
-                        CurrentExposure = int(CurrentExposureStr)
+                        CurrentExposure = int(float(CurrentExposureStr))
                         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                     exposure_str = CurrentExposureStr
                     exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
@@ -2259,35 +2300,8 @@ def load_session_data():
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = SessionData["MinFrameSteps"]
-                    if not FrameSteps_auto:
-                        min_frame_steps_str.set(str(MinFrameSteps))
-                        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
-                if 'MinFrameStepsS8' in SessionData:
-                    MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
-                if 'MinFrameStepsR8' in SessionData:
-                    MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
-                if 'FrameFineTune' in SessionData:
-                    FrameFineTune = SessionData["FrameFineTune"]
-                    frame_fine_tune_str.set(str(FrameFineTune))
-                    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
-                if 'PTLevel' in SessionData:
-                    PTLevel = SessionData["PTLevel"]
-                    if not PTLevel_auto:
-                        pt_level_str.set(str(PTLevel))
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
-                if 'PTLevelS8' in SessionData:
-                    PTLevelS8 = SessionData["PTLevelS8"]
-                if 'PTLevelR8' in SessionData:
-                    PTLevelR8 = SessionData["PTLevelR8"]
-                if 'PTLevelAuto' in SessionData:
-                    PTLevel_auto = SessionData["PTLevelAuto"]
-                    pt_level_str.set(str(PTLevel))
-                    if PTLevel_auto:
-                        pt_level_spinbox.config(state='readonly')
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0)
-                    else:
-                        pt_level_spinbox.config(fg='black', state=NORMAL)
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+                    min_frame_steps_str.set(str(MinFrameSteps))
+                    send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
                     FrameSteps_auto = SessionData["FrameStepsAuto"]
                     min_frame_steps_str.set(str(MinFrameSteps))
@@ -2297,6 +2311,32 @@ def load_session_data():
                     else:
                         min_frame_steps_spinbox.config(fg='black', state=NORMAL)
                         send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+                if 'MinFrameStepsS8' in SessionData:
+                    MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
+                if 'MinFrameStepsR8' in SessionData:
+                    MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
+                if 'FrameFineTune' in SessionData:
+                    FrameFineTune = SessionData["FrameFineTune"]
+                    frame_fine_tune_str.set(str(FrameFineTune))
+                    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
+                if 'PTLevelAuto' in SessionData:
+                    PTLevel_auto = SessionData["PTLevelAuto"]
+                    pt_level_str.set(str(PTLevel))
+                    if PTLevel_auto:
+                        pt_level_spinbox.config(state='readonly')
+                        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0)
+                    else:
+                        pt_level_spinbox.config(fg='black', state=NORMAL)
+                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+                if 'PTLevel' in SessionData:
+                    PTLevel = SessionData["PTLevel"]
+                    if not PTLevel_auto:
+                        pt_level_str.set(str(PTLevel))
+                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+                if 'PTLevelS8' in SessionData:
+                    PTLevelS8 = SessionData["PTLevelS8"]
+                if 'PTLevelR8' in SessionData:
+                    PTLevelR8 = SessionData["PTLevelR8"]
                 if 'ScanSpeed' in SessionData:
                     ScanSpeed = SessionData["ScanSpeed"]
                     scan_speed_str.set(str(ScanSpeed))
@@ -2582,6 +2622,7 @@ def build_ui():
     global stabilization_delay_spinbox, stabilization_delay_str
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
+    global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_btn, manual_scan_take_snap_btn
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3002,6 +3043,29 @@ def build_ui():
                 command=(rwnd_speed_control_selection_aux, '%d'), width=8,
                 textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", 7))
             rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+
+            # Manual scan control, to handle damaged film (broken perforations)
+            Manual_scan_frame = LabelFrame(experimental_frame, text='Manual scan', width=18, height=3, font=("Arial", 7))
+            Manual_scan_frame.grid(row=2, column=0, columnspan=2, padx=2, pady=1, sticky='')
+            # Checkbox to enable/disable manual scan
+            Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
+            Manual_scan_checkbox = tk.Checkbutton(Manual_scan_frame, text='Enable manual scan', width=20, height=1,
+                                                   variable=Manual_scan_activated, onvalue=True,
+                                                   offvalue=False,
+                                                   command=Manual_scan_activated_selection, font=("Arial", 7))
+            Manual_scan_checkbox.pack(side=TOP)
+
+            # Common area for buttons
+            Manual_scan_btn_frame = Frame(Manual_scan_frame, width=18, height=2)
+            Manual_scan_btn_frame.pack(side=TOP)
+
+            # Manual scan buttons
+            manual_scan_advance_fraction_btn = Button(Manual_scan_btn_frame, text="Advance", width=1, height=1, command=manual_scan_advance_frame_fraction,
+                                    state=DISABLED, font=("Arial", 7))
+            manual_scan_advance_fraction_btn.pack(side=LEFT, ipadx=5, fill=Y)
+            manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
+                                     state=DISABLED, font=("Arial", 7))
+            manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
 
 
 def get_controller_version():

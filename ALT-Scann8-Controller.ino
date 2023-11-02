@@ -62,6 +62,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UI_SWITCH_REEL_LOCK_STATUS 20
 #define CMD_UI_FILM_FORWARD 30
 #define CMD_UI_SINGLE_STEP 40
+#define CMD_UI_ADVANCE_FRAME 41
+#define CMD_UI_ADVANCE_FRAME_FRACTION 42
 #define CMD_UI_SET_PT_LEVEL 50
 #define CMD_UI_SET_MIN_FRAME_STEPS 52
 #define CMD_UI_SET_FRAME_FINE_TUNE 54
@@ -130,7 +132,7 @@ int PerforationMinLevel = 50;               // Phototransistor reported value, m
 int PerforationThresholdLevelR8 = 180;      // Default value for R8
 int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
-int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changes from 20 to 60
+int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
@@ -443,6 +445,17 @@ void loop() {
                         if (TargetRewindSpeedLoop > 200)
                           TargetRewindSpeedLoop -= 20;
                         break;
+                    case CMD_UI_ADVANCE_FRAME:
+                        DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
+                        if (IsS8)
+                            capstan_advance(MinFrameStepsS8);
+                        else
+                            capstan_advance(MinFrameStepsR8);
+                        break;
+                    case CMD_UI_ADVANCE_FRAME_FRACTION:
+                        DebugPrint(">Advance frame", 5);
+                        capstan_advance(5);
+                        break;
                 }
                 break;
             case Sts_Scan:
@@ -603,7 +616,7 @@ boolean FastForwardFilm(int UI_Command) {
 // Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
-void CollectOutgoingFilm(bool ff_collect = false) {
+void CollectOutgoingFilm(bool force = false) {
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
@@ -651,7 +664,8 @@ int GetLevelPT() {
     //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto)
-        PerforationThresholdLevel = int((MinPT_Dynamic + ((MaxPT_Dynamic-MinPT_Dynamic) /100 * PerforationThresholdAutoLevelRatio))/10);
+        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
+
     return(PT_SignalLevelRead);
 }
 
@@ -678,7 +692,7 @@ void SlowForward(){
     unsigned long CurrentTime = micros();
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
         GetLevelPT();   // No need to know PT level here, but used to update plotter data
-        CollectOutgoingFilm(true);
+        CollectOutgoingFilm(false);
         digitalWrite(MotorB_Stepper, HIGH);
         LastMove = CurrentTime + 700;
     }
@@ -768,6 +782,8 @@ void capstan_advance(int steps) {
     for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
+        if (steps > 1)
+            delayMicroseconds(1000);
     }
     digitalWrite(MotorB_Stepper, LOW);
 }
