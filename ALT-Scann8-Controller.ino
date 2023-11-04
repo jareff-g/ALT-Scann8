@@ -53,38 +53,38 @@ int MaxDebugRepetitions = 3;
 boolean GreenLedOn = false;  
 int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
 // I2C commands (RPi to Arduino): Constant definition
-#define CMD_UI_VERSION_ID 1
-#define CMD_UI_START_SCAN 10
-#define CMD_UI_TERMINATE 11
-#define CMD_UI_GET_NEXT_FRAME 12
-#define CMD_UI_SET_REGULAR_8 18
-#define CMD_UI_SET_SUPER_8 19
-#define CMD_UI_SWITCH_REEL_LOCK_STATUS 20
-#define CMD_UI_FILM_FORWARD 30
-#define CMD_UI_SINGLE_STEP 40
-#define CMD_UI_ADVANCE_FRAME 41
-#define CMD_UI_ADVANCE_FRAME_FRACTION 42
-#define CMD_UI_SET_PT_LEVEL 50
-#define CMD_UI_SET_MIN_FRAME_STEPS 52
-#define CMD_UI_SET_FRAME_FINE_TUNE 54
-#define CMD_UI_REWIND 60
-#define CMD_UI_FAST_FORWARD 61
-#define CMD_UI_INCREASE_WIND_SPEED 62
-#define CMD_UI_DECREASE_WIND_SPEED 63
-#define CMD_UI_UNCONDITIONAL_REWIND 64
-#define CMD_UI_UNCONDITIONAL_FAST_FORWARD 65
-#define CMD_UI_SET_SCAN_SPEED 70
-#define CMD_UI_ASYNC_ACK 255
+#define CMD_VERSION_ID 1
+#define CMD_GET_CNT_STATUS 2
+#define CMD_START_SCAN 10
+#define CMD_TERMINATE 11
+#define CMD_GET_NEXT_FRAME 12
+#define CMD_SET_REGULAR_8 18
+#define CMD_SET_SUPER_8 19
+#define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_FILM_FORWARD 30
+#define CMD_SINGLE_STEP 40
+#define CMD_ADVANCE_FRAME 41
+#define CMD_ADVANCE_FRAME_FRACTION 42
+#define CMD_SET_PT_LEVEL 50
+#define CMD_SET_MIN_FRAME_STEPS 52
+#define CMD_SET_FRAME_FINE_TUNE 54
+#define CMD_REWIND 60
+#define CMD_FAST_FORWARD 61
+#define CMD_INCREASE_WIND_SPEED 62
+#define CMD_DECREASE_WIND_SPEED 63
+#define CMD_UNCONDITIONAL_REWIND 64
+#define CMD_UNCONDITIONAL_FAST_FORWARD 65
+#define CMD_SET_SCAN_SPEED 70
 // I2C responses (Arduino to RPi): Constant definition
-#define CMD_CNT_VERSION_ID 1
-#define CMD_CNT_FORCE_INIT 2
-#define CMD_CNT_FRAME_AVAILABLE 80
-#define CMD_CNT_SCAN_ERROR 81
-#define CMD_CNT_REWIND_ERROR 82
-#define CMD_CNT_FAST_FORWARD_ERROR 83
-#define CMD_CNT_REWIND_ENDED 84
-#define CMD_CNT_FAST_FORWARD_ENDED 85
-#define CMD_CNT_REPORT_AUTO_LEVELS 86
+#define RSP_VERSION_ID 1
+#define RSP_FORCE_INIT 2
+#define RSP_FRAME_AVAILABLE 80
+#define RSP_SCAN_ERROR 81
+#define RSP_REWIND_ERROR 82
+#define RSP_FAST_FORWARD_ERROR 83
+#define RSP_REWIND_ENDED 84
+#define RSP_FAST_FORWARD_ENDED 85
+#define RSP_REPORT_AUTO_LEVELS 86
 
 
 // Immutable values
@@ -177,25 +177,20 @@ void CollectOutgoingFilm(bool);
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
-volatile struct {
+typedef struct Queue {
     int Data[QUEUE_SIZE];
     int Param[QUEUE_SIZE];
+    int Param2[QUEUE_SIZE];
     int in;
     int out;
-} CommandQueue;
+};
 
-void SendToRPi(byte cmd, int param1, int param2, int param3, int param4)
+volatile Queue CommandQueue;
+volatile Queue ResponseQueue;
+
+void SendToRPi(byte rsp, int param1, int param2)
 {
-    BufferForRPi[0] = cmd;
-    BufferForRPi[1] = param1/256;
-    BufferForRPi[2] = param1%256;
-    BufferForRPi[3] = param2/256;
-    BufferForRPi[4] = param2%256;
-    BufferForRPi[5] = param3/256;
-    BufferForRPi[6] = param3%256;
-    BufferForRPi[7] = param4/256;
-    BufferForRPi[8] = param4%256;
-    digitalWrite(13, HIGH);
+    push_rsp(rsp, param1, param2);
 }
 
 
@@ -237,20 +232,21 @@ void setup() {
     // JRE 04/08/2022
     CommandQueue.in = 0;
     CommandQueue.out = 0;
+    ResponseQueue.in = 0;
+    ResponseQueue.out = 0;
 }
 
 void loop() {
     int param;
 
-    SendToRPi(CMD_CNT_FORCE_INIT, 0, 0, 0, 0);  // Request UI to resend init sequence, in case controller reloaded while UI active
+    SendToRPi(RSP_FORCE_INIT, 0, 0);  // Request UI to resend init sequence, in case controller reloaded while UI active
 
     while (1) {
-        if (dataInQueue())
-            UI_Command = pop(&param);   // Get next command from queue if one exists
+        if (dataInCmdQueue())
+            UI_Command = pop_cmd(&param);   // Get next command from queue if one exists
         else
             UI_Command = 0;
 
-        // First do some common stuff (set port, push phototransistor level)
         Wire.begin(16);
 
         TractionSwitchActive = digitalRead(TractionStopPin);
@@ -262,7 +258,7 @@ void loop() {
             // In the original main loop this was done when UI_Command was NOT Single Step (49). Why???
             // JRE 23-08-2022: Explanation: THis is done mainly for the slow forward function, so that
             //    setting to high both the motors B and C they will move one step forward
-            if (UI_Command != CMD_UI_SINGLE_STEP){  // In case we need the exact behavior of original code
+            if (UI_Command != CMD_SINGLE_STEP){  // In case we need the exact behavior of original code
                 digitalWrite(MotorB_Stepper, LOW);
                 digitalWrite(MotorC_Stepper, LOW);
                 digitalWrite(MotorC_Direction, HIGH);
@@ -270,8 +266,8 @@ void loop() {
             }
         }
 
-        switch (UI_Command) {
-            case CMD_UI_SET_PT_LEVEL:
+        switch (UI_Command) {   // Stateless commands
+            case CMD_SET_PT_LEVEL:
                 DebugPrint(">PTLevel", param);
                 if (param >= 0 && param <= 900) {
                     if (param == 0)
@@ -284,7 +280,7 @@ void loop() {
                     DebugPrint(">PTLevel",param);
                 }
                 break;
-            case CMD_UI_SET_MIN_FRAME_STEPS:
+            case CMD_SET_MIN_FRAME_STEPS:
                 DebugPrint(">MinFSteps", param);
                 if (param == 0 || param >= 100 && param <= 600) {
                     if (param == 0)
@@ -301,32 +297,29 @@ void loop() {
                     }
                 }
                 break;
-            case CMD_UI_SET_FRAME_FINE_TUNE:
+            case CMD_SET_FRAME_FINE_TUNE:
                 DebugPrint(">FineT", param);
                 PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
                 if (param > 0)  // Also to move up we add extra steps
                     FrameFineTune = param;
                 break;
-            case CMD_UI_SET_SCAN_SPEED:
+            case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
                 break;
-            case CMD_UI_ASYNC_ACK:
-                SendToRPi(0, 0, 0, 0, 0);  // Clear previous callback on RPi
-                break;
         }
 
         switch (ScanState) {
             case Sts_Idle:
                 switch (UI_Command) {
-                    case CMD_UI_VERSION_ID:
+                    case CMD_VERSION_ID:
                         DebugPrintStr(">V_ID");
-                        SendToRPi(CMD_CNT_VERSION_ID, 1, 0, 0, 0);  // 1 - Arduino, 2 - RPi Pico
+                        SendToRPi(RSP_VERSION_ID, 1, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
-                    case CMD_UI_START_SCAN:
+                    case CMD_START_SCAN:
                         DebugPrintStr(">Scan");
                         ScanState = Sts_Scan;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
@@ -337,13 +330,13 @@ void loop() {
                         collect_modulo = 10;
                         tone(A2, 2000, 50);
                         break;
-                    case CMD_UI_TERMINATE:  //Exit app
+                    case CMD_TERMINATE:  //Exit app
                         if (UVLedOn) {
                             analogWrite(11, 0); // Turn off UV LED
                             UVLedOn = false;
                         }
                         break;
-                    case CMD_UI_GET_NEXT_FRAME:  // Continue scan to next frame
+                    case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
@@ -352,9 +345,9 @@ void loop() {
                         // Also send, if required, to RPi autocalculated threshold level every frame
                         // Alternate reports for each value, otherwise I2C has I/O errors
                         if (PT_Level_Auto || Frame_Steps_Auto)
-                            SendToRPi(CMD_CNT_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps, 0, 0);
+                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps);
                         break;
-                    case CMD_UI_SET_REGULAR_8:  // Select R8 film
+                    case CMD_SET_REGULAR_8:  // Select R8 film
                         DebugPrintStr(">R8");
                         IsS8 = false;
                         MinFrameSteps = MinFrameStepsR8;
@@ -364,7 +357,7 @@ void loop() {
                             PerforationThresholdLevel = PerforationThresholdLevelR8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
                         break;
-                    case CMD_UI_SET_SUPER_8:  // Select S8 film
+                    case CMD_SET_SUPER_8:  // Select S8 film
                         DebugPrintStr(">S8");
                         IsS8 = true;
                         MinFrameSteps = MinFrameStepsS8;
@@ -374,25 +367,25 @@ void loop() {
                             PerforationThresholdLevel = PerforationThresholdLevelS8;
                         OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
                         break;
-                    case CMD_UI_SWITCH_REEL_LOCK_STATUS:
+                    case CMD_SWITCH_REEL_LOCK_STATUS:
                         ScanState = Sts_UnlockReels;
                         delay(50);
                         break;
-                    case CMD_UI_FILM_FORWARD:
+                    case CMD_FILM_FORWARD:
                         collect_modulo = 4;
                         ScanState = Sts_SlowForward;
                         delay(50);
                         break;
-                    case CMD_UI_SINGLE_STEP:
+                    case CMD_SINGLE_STEP:
                         DebugPrintStr(">SStep");
                         ScanState = Sts_SingleStep;
                         delay(50);
                         break;
-                    case CMD_UI_REWIND: // Rewind
-                    case CMD_UI_UNCONDITIONAL_REWIND: // Rewind unconditional
-                        if (FilmInFilmgate() and UI_Command == CMD_UI_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+                    case CMD_REWIND: // Rewind
+                    case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
                             DebugPrintStr("Rwnd err");
-                            SendToRPi(CMD_CNT_REWIND_ERROR, 0, 0, 0, 0);
+                            SendToRPi(RSP_REWIND_ERROR, 0, 0);
                             tone(A2, 2000, 100);
                             delay (150);
                             tone(A2, 1000, 100);
@@ -413,11 +406,11 @@ void loop() {
                         }
                         delay(50);
                         break;
-                    case CMD_UI_FAST_FORWARD:  // Fast Forward
-                    case CMD_UI_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
-                        if (FilmInFilmgate() and UI_Command == CMD_UI_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+                    case CMD_FAST_FORWARD:  // Fast Forward
+                    case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
                             DebugPrintStr("FF err");
-                            SendToRPi(CMD_CNT_FAST_FORWARD_ERROR, 0, 0, 0, 0);
+                            SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0);
                             tone(A2, 2000, 100);
                             delay (150);
                             tone(A2, 1000, 100);
@@ -437,22 +430,22 @@ void loop() {
                             RewindSpeed = 4000;
                         }
                         break;
-                    case CMD_UI_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
+                    case CMD_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
                         if (TargetRewindSpeedLoop < 4000)
                             TargetRewindSpeedLoop += 20;
                         break;
-                    case CMD_UI_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
+                    case CMD_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
                         if (TargetRewindSpeedLoop > 200)
                           TargetRewindSpeedLoop -= 20;
                         break;
-                    case CMD_UI_ADVANCE_FRAME:
+                    case CMD_ADVANCE_FRAME:
                         DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
                         if (IsS8)
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
                         break;
-                    case CMD_UI_ADVANCE_FRAME_FRACTION:
+                    case CMD_ADVANCE_FRAME_FRACTION:
                         DebugPrint(">Advance frame", 5);
                         capstan_advance(5);
                         break;
@@ -460,7 +453,7 @@ void loop() {
                 break;
             case Sts_Scan:
                 CollectOutgoingFilm(false);
-                if (UI_Command == CMD_UI_START_SCAN) {
+                if (UI_Command == CMD_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
                 }
@@ -484,7 +477,7 @@ void loop() {
                 }
                 break;
             case Sts_UnlockReels:
-                if (UI_Command == CMD_UI_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
+                if (UI_Command == CMD_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
                     ReelsUnlocked = false;
                     digitalWrite(MotorB_Neutral, LOW);
                     digitalWrite(MotorC_Neutral, LOW);
@@ -516,7 +509,7 @@ void loop() {
                 }
                 break;
             case Sts_SlowForward:
-                if (UI_Command == CMD_UI_FILM_FORWARD) { // Stop slow forward
+                if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
                     delay(50);
                     ScanState = Sts_Idle;
                 }
@@ -541,7 +534,7 @@ boolean RewindFilm(int UI_Command) {
 
     Wire.begin(16);
 
-    if (UI_Command == CMD_UI_REWIND) {
+    if (UI_Command == CMD_REWIND) {
       stopping = true;
     }
     else if (stopping) {
@@ -558,7 +551,7 @@ boolean RewindFilm(int UI_Command) {
             digitalWrite(MotorB_Neutral, LOW);
             digitalWrite(MotorC_Neutral, LOW);
             delay (100);
-            SendToRPi(CMD_CNT_REWIND_ENDED, 0, 0, 0, 0);
+            SendToRPi(RSP_REWIND_ENDED, 0, 0);
         }
     }
     else {
@@ -579,7 +572,7 @@ boolean FastForwardFilm(int UI_Command) {
 
     Wire.begin(16);  // join I2c bus with address #16
 
-    if (UI_Command == CMD_UI_FAST_FORWARD) {
+    if (UI_Command == CMD_FAST_FORWARD) {
         stopping = true;
     }
     else if (stopping) {
@@ -596,7 +589,7 @@ boolean FastForwardFilm(int UI_Command) {
             digitalWrite(MotorB_Neutral, LOW);
             digitalWrite(MotorC_Neutral, LOW);
             delay (100);
-            SendToRPi(CMD_CNT_FAST_FORWARD_ENDED, 0, 0, 0, 0);
+            SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
         }
     }
     else {
@@ -655,6 +648,7 @@ void CollectOutgoingFilm(bool force = false) {
 
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
+  float ratio;
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
     MinPT = min(PT_SignalLevelRead, MinPT);
@@ -663,8 +657,10 @@ int GetLevelPT() {
     if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
     //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
-    if (PT_Level_Auto)
-        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
+    if (PT_Level_Auto) {
+        ratio = (float)PerforationThresholdAutoLevelRatio/100;
+        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+    }
 
     return(PT_SignalLevelRead);
 }
@@ -678,8 +674,8 @@ void ReportPlotterInfo() {
     if (DebugState == PlotterInfo && millis() > NextReport) {
         if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
             NextReport = millis() + 20;
-            //sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
-            sprintf(out,"PT:%i", PT_SignalLevelRead);
+            sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+            //sprintf(out,"PT:%i", PT_SignalLevelRead);
             SerialPrintStr(out);
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
@@ -819,7 +815,7 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         //-------------ScanFilm-----------
-        if (UI_Command == CMD_UI_START_SCAN) {   // UI Requesting to end current scan
+        if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
             retvalue = SCAN_TERMINATION_REQUESTED;
             FrameDetected = false;
             //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
@@ -850,7 +846,7 @@ ScanResult scan(int UI_Command) {
                 tone(A2, 2000, 35);
             }
             else {
-                SendToRPi(CMD_CNT_FRAME_AVAILABLE, 0, 0, 0, 0);
+                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
             }
       
             FrameDetected = false;
@@ -863,7 +859,7 @@ ScanResult scan(int UI_Command) {
         else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
             retvalue = SCAN_FRAME_DETECTION_ERROR;
             // Tell UI (Raspberry PI) an error happened during scanning
-            SendToRPi(CMD_CNT_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps, 0, 0);
+            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps);
             FrameStepsDone = 0;
         }
         return (retvalue);
@@ -885,43 +881,80 @@ void receiveEvent(int byteCount) {
         Wire.read();
 
     if (IncomingIc > 0) {
-        push(IncomingIc, param); // No error treatment for now
+        push_cmd(IncomingIc, param); // No error treatment for now
     }
 }
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
-    Wire.write(BufferForRPi,9);
+    int cmd, p1, p2;
+    cmd = pop_rsp(&p1, &p2);
+    if (cmd != -1) {
+        BufferForRPi[0] = cmd;
+        BufferForRPi[1] = p1/256;
+        BufferForRPi[2] = p1%256;
+        BufferForRPi[3] = p2/256;
+        BufferForRPi[4] = p2%256;
+        Wire.write(BufferForRPi,5);
+    }
+    else {
+        BufferForRPi[0] = 0;
+        BufferForRPi[1] = 0;
+        BufferForRPi[2] = 0;
+        BufferForRPi[3] = 0;
+        BufferForRPi[4] = 0;
+        Wire.write(BufferForRPi,5);
+    }
 }
 
-boolean push(int IncomingIc, int param) {
+boolean push(Queue * queue, int IncomingIc, int param, int param2) {
     boolean retvalue = false;
-    if ((CommandQueue.in+1) % QUEUE_SIZE != CommandQueue.out) {
-        CommandQueue.Data[CommandQueue.in] = IncomingIc;
-        CommandQueue.Param[CommandQueue.in] = param;
-        CommandQueue.in++;
-        CommandQueue.in %= QUEUE_SIZE;
+    if ((queue -> in+1) % QUEUE_SIZE != queue -> out) {
+        queue -> Data[queue -> in] = IncomingIc;
+        queue -> Param[queue -> in] = param;
+        queue -> Param2[queue -> in] = param2;
+        queue -> in++;
+        queue -> in %= QUEUE_SIZE;
         retvalue = true;
     }
     // else: Queue full: Should not happen. Not sure how this should be handled
     return(retvalue);
 }
 
-int pop(int * param) {
+int pop(Queue * queue, int * param, int * param2) {
     int retvalue = -1;  // default return value: -1 (error)
-    if (CommandQueue.out != CommandQueue.in) {
-        retvalue = CommandQueue.Data[CommandQueue.out];
+    if (queue -> out != queue -> in) {
+        retvalue = queue -> Data[queue -> out];
         if (param != NULL)
-            *param =  CommandQueue.Param[CommandQueue.out];
-        CommandQueue.out++;
-        CommandQueue.out %= QUEUE_SIZE;
+            *param =  queue -> Param[queue -> out];
+        if (param2 != NULL)
+            *param2 =  queue -> Param2[queue -> out];
+        queue -> out++;
+        queue -> out %= QUEUE_SIZE;
     }
     // else: Queue empty: Nothing to do
     return(retvalue);
 }
 
-boolean dataInQueue(void) {
+boolean push_cmd(int cmd, int param) {
+    push(&CommandQueue, cmd, param, 0);
+}
+int pop_cmd(int * param) {
+    return(pop(&CommandQueue, param, NULL));
+}
+boolean push_rsp(int rsp, int param, int param2) {
+    push(&ResponseQueue, rsp, param, param2);
+}
+int pop_rsp(int * param, int * param2) {
+    return(pop(&ResponseQueue, param, param2));
+}
+
+boolean dataInCmdQueue(void) {
     return (CommandQueue.out != CommandQueue.in);
+}
+
+boolean dataInRspQueue(void) {
+    return (ResponseQueue.out != ResponseQueue.in);
 }
 
 void DebugPrintAux(const char * str, unsigned long i) {

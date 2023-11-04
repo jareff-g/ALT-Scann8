@@ -155,38 +155,38 @@ FilmHoleY2 = 300
 SharpnessValue = 1
 
 # Commands (RPI to Arduino)
-CMD_UI_VERSION_ID = 1
-CMD_UI_START_SCAN = 10
-CMD_UI_TERMINATE = 11
-CMD_UI_GET_NEXT_FRAME = 12
-CMD_UI_SET_REGULAR_8 = 18
-CMD_UI_SET_SUPER_8 = 19
-CMD_UI_SWITCH_REEL_LOCK_STATUS = 20
-CMD_UI_FILM_FORWARD = 30
-CMD_UI_SINGLE_STEP = 40
-CMD_UI_ADVANCE_FRAME = 41
-CMD_UI_ADVANCE_FRAME_FRACTION = 42
-CMD_UI_SET_PT_LEVEL = 50
-CMD_UI_SET_MIN_FRAME_STEPS = 52
-CMD_UI_SET_FRAME_FINE_TUNE = 54
-CMD_UI_REWIND = 60
-CMD_UI_FAST_FORWARD = 61
-CMD_UI_INCREASE_WIND_SPEED = 62
-CMD_UI_DECREASE_WIND_SPEED = 63
-CMD_UI_UNCONDITIONAL_REWIND = 64
-CMD_UI_UNCONDITIONAL_FAST_FORWARD = 65
-CMD_UI_SET_SCAN_SPEED = 70
-CMD_UI_ASYNC_ACK = 255
+CMD_VERSION_ID = 1
+CMD_GET_CNT_STATUS = 2
+CMD_START_SCAN = 10
+CMD_TERMINATE = 11
+CMD_GET_NEXT_FRAME = 12
+CMD_SET_REGULAR_8 = 18
+CMD_SET_SUPER_8 = 19
+CMD_SWITCH_REEL_LOCK_STATUS = 20
+CMD_FILM_FORWARD = 30
+CMD_SINGLE_STEP = 40
+CMD_ADVANCE_FRAME = 41
+CMD_ADVANCE_FRAME_FRACTION = 42
+CMD_SET_PT_LEVEL = 50
+CMD_SET_MIN_FRAME_STEPS = 52
+CMD_SET_FRAME_FINE_TUNE = 54
+CMD_REWIND = 60
+CMD_FAST_FORWARD = 61
+CMD_INCREASE_WIND_SPEED = 62
+CMD_DECREASE_WIND_SPEED = 63
+CMD_UNCONDITIONAL_REWIND = 64
+CMD_UNCONDITIONAL_FAST_FORWARD = 65
+CMD_SET_SCAN_SPEED = 70
 # Responses (Arduino to RPi)
-CMD_CNT_VERSION_ID = 1
-CMD_CNT_FORCE_INIT = 2
-CMD_CNT_FRAME_AVAILABLE = 80
-CMD_CNT_SCAN_ERROR = 81
-CMD_CNT_REWIND_ERROR = 82
-CMD_CNT_FAST_FORWARD_ERROR = 83
-CMD_CNT_REWIND_ENDED = 84
-CMD_CNT_FAST_FORWARD_ENDED = 85
-CMD_CNT_REPORT_AUTO_LEVELS = 86
+RSP_VERSION_ID = 1
+RSP_FORCE_INIT = 2
+RSP_FRAME_AVAILABLE = 80
+RSP_SCAN_ERROR = 81
+RSP_REWIND_ERROR = 82
+RSP_FAST_FORWARD_ERROR = 83
+RSP_REWIND_ENDED = 84
+RSP_FAST_FORWARD_ENDED = 85
+RSP_REPORT_AUTO_LEVELS = 86
 
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
@@ -259,22 +259,6 @@ SessionData = {
     "FrameStepsAuto": True
 }
 
-
-def send_arduino_command(cmd, param=12345):
-    global SimulatedRun, ALT_Scann8_controller_detected
-
-    if not SimulatedRun:
-        time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
-        try:
-            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
-        except IOError:
-            logging.warning("Error while sending command %i, param %i to Arduino. Retrying...", cmd, param)
-            time.sleep(0.2)  #wait 100 µs, to avoid I/O errors
-            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
-
-        time.sleep(0.0001)  #wait 100 µs, same
-
-
 def exit_app():  # Exit Application
     global win
     global SimulatedRun
@@ -283,7 +267,7 @@ def exit_app():  # Exit Application
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_TERMINATE)   # Tell Arduino we stop (to turn off uv led
+        send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
         # Close preview if required
         if not IsPiCamera2 or PiCam2PreviewEnabled:
             camera.stop_preview()
@@ -309,7 +293,7 @@ def set_free_mode():
         Free_btn.config(text='Unlock Reels', bg=save_bg, fg=save_fg, relief=RAISED)
 
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_SWITCH_REEL_LOCK_STATUS)
+        send_arduino_command(CMD_SWITCH_REEL_LOCK_STATUS)
 
     FreeWheelActive = not FreeWheelActive
 
@@ -656,7 +640,7 @@ def wb_spinbox_dbl_click(event):
     global colour_gains_red_value_label, colour_gains_blue_value_label
 
     if not ExpertMode:
-        return ()
+        return
 
     CurrentAwbAuto = not CurrentAwbAuto
     SessionData["CurrentAwbAuto"] = str(CurrentAwbAuto)
@@ -716,7 +700,7 @@ def manual_scan_advance_frame_fraction():
     if not ExpertMode:
         return
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_ADVANCE_FRAME_FRACTION)
+        send_arduino_command(CMD_ADVANCE_FRAME_FRACTION)
         time.sleep(0.2)
         capture('preview')
         time.sleep(0.2)
@@ -729,7 +713,7 @@ def manual_scan_take_snap():
     if not SimulatedRun:
         capture('manual')
         time.sleep(0.2)
-        send_arduino_command(CMD_UI_ADVANCE_FRAME)
+        send_arduino_command(CMD_ADVANCE_FRAME)
         time.sleep(0.2)
         capture('preview')
         time.sleep(0.2)
@@ -812,7 +796,7 @@ def rwnd_speed_down():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_INCREASE_WIND_SPEED)
+        send_arduino_command(CMD_INCREASE_WIND_SPEED)
     if rwnd_speed_delay + rwnd_speed_delay*0.1 < 4000:
         rwnd_speed_delay += rwnd_speed_delay*0.1
     else:
@@ -824,7 +808,7 @@ def rwnd_speed_up():
     global rwnd_speed_control_delay
 
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_DECREASE_WIND_SPEED)
+        send_arduino_command(CMD_DECREASE_WIND_SPEED)
     if rwnd_speed_delay -rwnd_speed_delay*0.1 > 200:
         rwnd_speed_delay -= rwnd_speed_delay*0.1
     else:
@@ -838,7 +822,7 @@ def min_frame_steps_selection(updown):
     MinFrameSteps = int(min_frame_steps_spinbox.get())
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_focus_out(event):
@@ -848,7 +832,7 @@ def min_frame_steps_spinbox_focus_out(event):
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     if not FrameSteps_auto: # Not sure we can have a focus out event for a disabled control, but just in case
-        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_dbl_click(event):
@@ -861,7 +845,7 @@ def min_frame_steps_spinbox_dbl_click(event):
         min_frame_steps_spinbox.config(state='readonly')
     else:
         min_frame_steps_spinbox.config(state=NORMAL)
-    send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 def frame_fine_tune_selection(updown):
@@ -870,7 +854,7 @@ def frame_fine_tune_selection(updown):
     FrameFineTune = int(frame_fine_tune_spinbox.get())
     SessionData["FrameFineTune"] = FrameFineTune
     SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
-    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
 def frame_fine_tune_spinbox_focus_out(event):
@@ -879,7 +863,7 @@ def frame_fine_tune_spinbox_focus_out(event):
     FrameFineTune = int(frame_fine_tune_spinbox.get())
     SessionData["FrameFineTune"] = FrameFineTune
     SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
-    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
 def pt_level_selection(updown):
@@ -888,7 +872,7 @@ def pt_level_selection(updown):
     PTLevel = int(pt_level_spinbox.get())
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+    send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_focus_out(event):
@@ -898,7 +882,7 @@ def pt_level_spinbox_focus_out(event):
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
     if not PTLevel_auto: # Not sure we can have a focus out event for a disabled control, but just in case
-        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_dbl_click(event):
@@ -911,7 +895,7 @@ def pt_level_spinbox_dbl_click(event):
         pt_level_spinbox.config(state='readonly')
     else:
         pt_level_spinbox.config(state=NORMAL)
-    send_arduino_command(CMD_UI_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+    send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
 
 
 def scan_speed_selection(updown):
@@ -919,7 +903,7 @@ def scan_speed_selection(updown):
     global ScanSpeed
     ScanSpeed = int(scan_speed_spinbox.get())
     SessionData["ScanSpeed"] = ScanSpeed
-    send_arduino_command(CMD_UI_SET_SCAN_SPEED, ScanSpeed)
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 
 def scan_speed_spinbox_focus_out(event):
@@ -927,7 +911,7 @@ def scan_speed_spinbox_focus_out(event):
     global ScanSpeed
     ScanSpeed = int(scan_speed_spinbox.get())
     SessionData["ScanSpeed"] = ScanSpeed
-    send_arduino_command(CMD_UI_SET_SCAN_SPEED, ScanSpeed)
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 
 def button_status_change_except(except_button, active):
@@ -997,7 +981,7 @@ def advance_movie():
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_FILM_FORWARD)
+        send_arduino_command(CMD_FILM_FORWARD)
 
     # Enable/Disable related buttons
     button_status_change_except(AdvanceMovie_btn, AdvanceMovieActive)
@@ -1039,7 +1023,7 @@ def rewind_movie():
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
-                send_arduino_command(CMD_UI_UNCONDITIONAL_REWIND)    # Forced rewind, no filmgate check
+                send_arduino_command(CMD_UNCONDITIONAL_REWIND)    # Forced rewind, no filmgate check
                 # Invoke fast_forward_loop a first time when fast-forward starts
                 win.after(5, rewind_loop)
         else:
@@ -1055,7 +1039,7 @@ def rewind_movie():
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            send_arduino_command(CMD_UI_REWIND)
+            send_arduino_command(CMD_REWIND)
 
     if RewindErrorOutstanding:
         RewindErrorOutstanding = False
@@ -1114,7 +1098,7 @@ def fast_forward_movie():
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
-                send_arduino_command(CMD_UI_UNCONDITIONAL_FAST_FORWARD)    # Forced FF, no filmgate check
+                send_arduino_command(CMD_UNCONDITIONAL_FAST_FORWARD)    # Forced FF, no filmgate check
                 # Invoke fast_forward_loop a first time when fast-forward starts
                 win.after(5, fast_forward_loop)
         else:
@@ -1130,7 +1114,7 @@ def fast_forward_movie():
     if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
         time.sleep(0.2)
         if not SimulatedRun:
-            send_arduino_command(CMD_UI_FAST_FORWARD)
+            send_arduino_command(CMD_FAST_FORWARD)
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
@@ -1236,7 +1220,7 @@ def single_step_movie():
     global camera
 
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_SINGLE_STEP)
+        send_arduino_command(CMD_SINGLE_STEP)
 
         if IsPiCamera2:
             # If no camera preview, capture frame in memory and display it
@@ -1397,9 +1381,9 @@ def set_s8():
     film_hole_frame_1.place(x=4, y=FilmHoleY2, height=140)
     film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_SET_SUPER_8)
-        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
-        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+        send_arduino_command(CMD_SET_SUPER_8)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 
@@ -1428,9 +1412,9 @@ def set_r8():
     film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100)
     film_hole_frame_2.place(x=4, y=FilmHoleY2, height=130)
     if not SimulatedRun:
-        send_arduino_command(CMD_UI_SET_REGULAR_8)
-        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
-        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+        send_arduino_command(CMD_SET_REGULAR_8)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
 
@@ -1522,7 +1506,7 @@ def capture(mode):
     global VideoCaptureActive
 
     if SimulatedRun:
-        return()
+        return
 
     os.chdir(CurrentDir)
 
@@ -1834,7 +1818,7 @@ def start_scan():
 
         # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun:
-            send_arduino_command(CMD_UI_START_SCAN)
+            send_arduino_command(CMD_START_SCAN)
 
         # Invoke capture_loop a first time shen scan starts
         win.after(5, capture_loop)
@@ -1900,7 +1884,7 @@ def capture_loop():
                     # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
                     NewFrameAvailable = False
                     logging.debug("Frame %i captured.", CurrentFrame)
-                    send_arduino_command(CMD_UI_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
+                    send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
                 except IOError:
                     CurrentFrame -= 1
                     NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
@@ -1974,6 +1958,22 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
     win.after(1000, temperature_loop)
 
 
+# send_arduino_command: No response expected
+def send_arduino_command(cmd, param=0):
+    global SimulatedRun, ALT_Scann8_controller_detected
+
+    if not SimulatedRun:
+        time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
+        try:
+            i2c.write_i2c_block_data(16, cmd, [int(param % 256), int(param >> 8)])  # Send command to Arduino
+        except IOError:
+            logging.warning("Error while sending command %i (param %i) to Arduino. Retrying...", cmd, param)
+            time.sleep(0.2)  #wait 100 µs, to avoid I/O errors
+            i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
+
+        time.sleep(0.0001)  #wait 100 µs, same
+
+
 def arduino_listen_loop():  # Waits for Arduino communicated events and dispatches accordingly
     global NewFrameAvailable
     global RewindErrorOutstanding, RewindEndOutstanding
@@ -1989,12 +1989,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if not SimulatedRun:
         try:
-            ArduinoData = i2c.read_i2c_block_data(16, 0, 9)
+            ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
             ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
-            ArduinoParam3 = ArduinoData[5] * 256 + ArduinoData[6]
-            ArduinoParam4 = ArduinoData[7] * 256 + ArduinoData[8]
         except IOError:
             ArduinoTrigger = 0
             # Log error to console
@@ -2014,35 +2012,35 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
-    elif ArduinoTrigger == CMD_CNT_VERSION_ID:  # New Frame available
+    elif ArduinoTrigger == RSP_VERSION_ID:  # New Frame available
         Controller_Id = ArduinoParam1
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
-    elif ArduinoTrigger == CMD_CNT_FORCE_INIT:  # Controller reloaded, sent init sequence again
+    elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.info("Controller requested to reinit")
         reinit_controller()
-    elif ArduinoTrigger == CMD_CNT_FRAME_AVAILABLE:  # New Frame available
+    elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
         NewFrameAvailable = True
-    elif ArduinoTrigger == CMD_CNT_SCAN_ERROR:  # Error during scan
-        logging.warning("Received scan error from Arduino (%i, %i, %i, %i)", ArduinoParam1, ArduinoParam2, ArduinoParam3, ArduinoParam4)
+    elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
+        logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
-    elif ArduinoTrigger == CMD_CNT_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
+    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
         if (PTLevel_auto):
             pt_level_str.set(str(ArduinoParam1))
         if (FrameSteps_auto):
             min_frame_steps_str.set(str(ArduinoParam2))
-    elif ArduinoTrigger == CMD_CNT_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
+    elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.info("Received rewind end event from Arduino")
-    elif ArduinoTrigger == CMD_CNT_FAST_FORWARD_ENDED:  # FastForward ended, we can re-enable buttons
+    elif ArduinoTrigger == RSP_FAST_FORWARD_ENDED:  # FastForward ended, we can re-enable buttons
         FastForwardEndOutstanding = True
         logging.info("Received fast forward end event from Arduino")
-    elif ArduinoTrigger == CMD_CNT_REWIND_ERROR:  # Error during Rewind
+    elif ArduinoTrigger == RSP_REWIND_ERROR:  # Error during Rewind
         RewindErrorOutstanding = True
         logging.warning("Received rewind error from Arduino")
-    elif ArduinoTrigger == CMD_CNT_FAST_FORWARD_ERROR:  # Error during FastForward
+    elif ArduinoTrigger == RSP_FAST_FORWARD_ERROR:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     else:
@@ -2050,13 +2048,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger != 0:
         ArduinoTrigger = 0
-        try:
-            send_arduino_command(CMD_UI_ASYNC_ACK, 0)  # Ask arduino to send empty buffer to clear previous async report
-        except IOError:
-            # Log error to console
-            logging.debug("Non-critical IOError while clearing async event from Arduino. Will check again.")
 
-    win.after(1, arduino_listen_loop)
+    win.after(10, arduino_listen_loop)
 
 
 def on_form_event(dummy):
@@ -2301,16 +2294,16 @@ def load_session_data():
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = SessionData["MinFrameSteps"]
                     min_frame_steps_str.set(str(MinFrameSteps))
-                    send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
                     FrameSteps_auto = SessionData["FrameStepsAuto"]
                     min_frame_steps_str.set(str(MinFrameSteps))
                     if FrameSteps_auto:
                         min_frame_steps_spinbox.config(state='readonly')
-                        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
                         min_frame_steps_spinbox.config(fg='black', state=NORMAL)
-                        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
                 if 'MinFrameStepsR8' in SessionData:
@@ -2318,21 +2311,21 @@ def load_session_data():
                 if 'FrameFineTune' in SessionData:
                     FrameFineTune = SessionData["FrameFineTune"]
                     frame_fine_tune_str.set(str(FrameFineTune))
-                    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
                 if 'PTLevelAuto' in SessionData:
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
                     if PTLevel_auto:
                         pt_level_spinbox.config(state='readonly')
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0)
+                        send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
                         pt_level_spinbox.config(fg='black', state=NORMAL)
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+                        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevel' in SessionData:
                     PTLevel = SessionData["PTLevel"]
                     if not PTLevel_auto:
                         pt_level_str.set(str(PTLevel))
-                        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+                        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevelS8' in SessionData:
                     PTLevelS8 = SessionData["PTLevelS8"]
                 if 'PTLevelR8' in SessionData:
@@ -2340,7 +2333,7 @@ def load_session_data():
                 if 'ScanSpeed' in SessionData:
                     ScanSpeed = SessionData["ScanSpeed"]
                     scan_speed_str.set(str(ScanSpeed))
-                    send_arduino_command(CMD_UI_SET_SCAN_SPEED, ScanSpeed)
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
         display_preview()
 
@@ -2351,23 +2344,23 @@ def reinit_controller():
     global FrameFineTune, ScanSpeed
 
     if PTLevel_auto:
-        send_arduino_command(CMD_UI_SET_PT_LEVEL, 0)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0)
     else:
-        send_arduino_command(CMD_UI_SET_PT_LEVEL, PTLevel)
+        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
     if FrameSteps_auto:
-        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, 0)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
     else:
-        send_arduino_command(CMD_UI_SET_MIN_FRAME_STEPS, MinFrameSteps)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
     if 'FilmType' in SessionData:
         if SessionData["FilmType"] == "R8":
-            send_arduino_command(CMD_UI_SET_REGULAR_8)
+            send_arduino_command(CMD_SET_REGULAR_8)
         else:
-            send_arduino_command(CMD_UI_SET_SUPER_8)
+            send_arduino_command(CMD_SET_SUPER_8)
 
-    send_arduino_command(CMD_UI_SET_FRAME_FINE_TUNE, FrameFineTune)
-    send_arduino_command(CMD_UI_SET_SCAN_SPEED, ScanSpeed)
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 def PiCam2_configure():
     global camera, capture_config, preview_config
@@ -3069,9 +3062,10 @@ def build_ui():
 
 
 def get_controller_version():
+    global Controller_Id
     if Controller_Id == 0:
         logging.debug("Requesting controller version")
-        send_arduino_command(CMD_UI_VERSION_ID)
+        send_arduino_command(CMD_VERSION_ID)
 
 
 def main(argv):
