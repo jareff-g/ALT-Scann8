@@ -170,6 +170,7 @@ CMD_ADVANCE_FRAME_FRACTION = 42
 CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
 CMD_SET_FRAME_FINE_TUNE = 54
+CMD_BOOST_PT_THRESHOLD = 56
 CMD_REWIND = 60
 CMD_FAST_FORWARD = 61
 CMD_INCREASE_WIND_SPEED = 62
@@ -209,6 +210,7 @@ GainBlue = 2.2  # 2.8
 PreviousGainRed = 1
 PreviousGainBlue = 1
 ManualScanEnabled = False
+BoostedThreshold = False
 
 # Statistical information about where time is spent (expert mode only)
 total_wait_time_preview_display = 0
@@ -688,23 +690,39 @@ def auto_white_balance_change_pause_selection():
     SessionData["AwbPause"] = str(AwbPause)
 
 
+def Boosted_threshold_selection():
+    global BoostedThreshold, Boosted_threshold, frame_fine_tune_spinbox
+    BoostedThreshold = Boosted_threshold.get()
+    send_arduino_command(CMD_BOOST_PT_THRESHOLD, BoostedThreshold)
+    if BoostedThreshold:
+        frame_fine_tune_spinbox.config(state=DISABLED)
+    else:
+        frame_fine_tune_spinbox.config(state=NORMAL)
+
 def Manual_scan_activated_selection():
     global ManualScanEnabled, Manual_scan_activated
-    global manual_scan_advance_fraction_btn, manual_scan_take_snap_btn
+    global manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
     ManualScanEnabled = Manual_scan_activated.get()
-    manual_scan_advance_fraction_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    manual_scan_advance_fraction_5_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    manual_scan_advance_fraction_20_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
     manual_scan_take_snap_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
 
 
-def manual_scan_advance_frame_fraction():
+def manual_scan_advance_frame_fraction(steps):
     if not ExpertMode:
         return
     if not SimulatedRun:
-        send_arduino_command(CMD_ADVANCE_FRAME_FRACTION)
+        send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
         time.sleep(0.2)
         capture('preview')
         time.sleep(0.2)
 
+def manual_scan_advance_frame_fraction_5():
+    manual_scan_advance_frame_fraction(5)
+
+
+def manual_scan_advance_frame_fraction_20():
+    manual_scan_advance_frame_fraction(20)
 
 
 def manual_scan_take_snap():
@@ -2615,7 +2633,8 @@ def build_ui():
     global stabilization_delay_spinbox, stabilization_delay_str
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
-    global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_btn, manual_scan_take_snap_btn
+    global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
+    global Boosted_threshold, BoostedThreshold
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3037,25 +3056,34 @@ def build_ui():
                 textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", 7))
             rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
 
-            # Manual scan control, to handle damaged film (broken perforations)
-            Manual_scan_frame = LabelFrame(experimental_frame, text='Manual scan', width=18, height=3, font=("Arial", 7))
-            Manual_scan_frame.grid(row=2, column=0, columnspan=2, padx=2, pady=1, sticky='')
+            # Damaged film helpers, to help handling damaged film (broken perforations)
+            Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", 7))
+            Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=2, pady=1, sticky='')
+            # Checkbox to enable/disable increased PT threshold for damaged perfomations
+            Boosted_threshold = tk.BooleanVar(value=BoostedThreshold)
+            Boosted_threshold_checkbox = tk.Checkbutton(Damaged_film_frame, text='Boosted threshold', width=20, height=1,
+                                                   variable=Boosted_threshold, onvalue=True,
+                                                   offvalue=False,
+                                                   command=Boosted_threshold_selection, font=("Arial", 7))
+            Boosted_threshold_checkbox.pack(side=TOP)
             # Checkbox to enable/disable manual scan
             Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
-            Manual_scan_checkbox = tk.Checkbutton(Manual_scan_frame, text='Enable manual scan', width=20, height=1,
+            Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
                                                    variable=Manual_scan_activated, onvalue=True,
                                                    offvalue=False,
                                                    command=Manual_scan_activated_selection, font=("Arial", 7))
             Manual_scan_checkbox.pack(side=TOP)
-
             # Common area for buttons
-            Manual_scan_btn_frame = Frame(Manual_scan_frame, width=18, height=2)
+            Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
             Manual_scan_btn_frame.pack(side=TOP)
 
             # Manual scan buttons
-            manual_scan_advance_fraction_btn = Button(Manual_scan_btn_frame, text="Advance", width=1, height=1, command=manual_scan_advance_frame_fraction,
+            manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
                                     state=DISABLED, font=("Arial", 7))
-            manual_scan_advance_fraction_btn.pack(side=LEFT, ipadx=5, fill=Y)
+            manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
+            manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
+                                    state=DISABLED, font=("Arial", 7))
+            manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
             manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
                                      state=DISABLED, font=("Arial", 7))
             manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
