@@ -68,6 +68,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
+#define CMD_BOOST_PT_THRESHOLD 56
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -147,6 +148,7 @@ boolean FrameDetected = false;  // Used for frame detection, in play ond single 
 boolean UVLedOn = false;
 int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
+int OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
 int FrameStepsDone = 0;                     // Count steps
 // OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
 // with dynamically calculated values
@@ -300,8 +302,16 @@ void loop() {
             case CMD_SET_FRAME_FINE_TUNE:
                 DebugPrint(">FineT", param);
                 PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
+                OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
                 if (param > 0)  // Also to move up we add extra steps
                     FrameFineTune = param;
+                break;
+            case CMD_BOOST_PT_THRESHOLD:
+                DebugPrint(">BoostPT", param);
+                if (param > 0)  // Also to move up we add extra steps
+                    PerforationThresholdAutoLevelRatio = 90;    // Change threshold ratio to maximum (for damaged film)
+                else
+                    PerforationThresholdAutoLevelRatio = OriginalPerforationThresholdAutoLevelRatio;
                 break;
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
@@ -446,8 +456,8 @@ void loop() {
                             capstan_advance(MinFrameStepsR8);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
-                        DebugPrint(">Advance frame", 5);
-                        capstan_advance(5);
+                        DebugPrint(">Advance frame", param);
+                        capstan_advance(param);
                         break;
                 }
                 break;
