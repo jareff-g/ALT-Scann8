@@ -316,9 +316,11 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                if (ScanSpeed < OriginalScanSpeed && collect_modulo > 0)  // Increase film collection frequency if increasing scan speed
+                if (ScanSpeed < OriginalScanSpeed && collect_modulo > 1)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
+                DecreaseSpeedFrameStepsBefore = max(0, 70 - 7*param); 
+                DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 break;
         }
 
@@ -623,8 +625,7 @@ void CollectOutgoingFilm(bool force = false) {
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
-    static unsigned long LastSwitchActivationTime = 0L;
-    static unsigned long LastSwitchActivationCheckTime = millis()+10000;
+    static unsigned long LastSwitchActivationCheckTime = millis()+3000;
     unsigned long CurrentTime = millis();
 
     if (loop_counter % collect_modulo == 0) {
@@ -639,16 +640,15 @@ void CollectOutgoingFilm(bool force = false) {
         TractionSwitchActive = digitalRead(TractionStopPin);
         if (TractionSwitchActive) {
             if (CollectOngoing) {
-                if (CurrentTime < LastSwitchActivationTime + 1000){  // Collecting too often: Increase modulo
+                if (CurrentTime < LastSwitchActivationCheckTime){  // Collecting too often: Increase modulo
                     collect_modulo++;
                 }
                 DebugPrint("Collect Mod", collect_modulo);
-                LastSwitchActivationTime = CurrentTime;
+                LastSwitchActivationCheckTime = CurrentTime + 3000;
             }
             CollectOngoing = false;
         }
-        else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationTime + 1000) {  // Not collecting enough : Decrease modulo
-            LastSwitchActivationTime = CurrentTime;
+        else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationCheckTime) {  // Not collecting enough : Decrease modulo
             collect_modulo-=2;
             DebugPrint("Collect Mod", collect_modulo);
         }
