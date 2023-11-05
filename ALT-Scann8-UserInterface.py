@@ -107,7 +107,7 @@ ScriptDir = os.path.dirname(
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
-last_cmd_time = 0
+last_frame_time = 0
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
@@ -1675,6 +1675,8 @@ def start_scan_simulated():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
+    global last_frame_time
+
 
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
@@ -1692,6 +1694,7 @@ def start_scan_simulated():
         CurrentScanStartFrame = CurrentFrame
 
         ScanOngoing = True
+        last_frame_time = time.time() + 3
 
         # Enable/Disable related buttons
         button_status_change_except(Start_btn, ScanOngoing)
@@ -1801,6 +1804,7 @@ def start_scan():
     global NewFrameAvailable
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
+    global last_frame_time
 
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
@@ -1819,6 +1823,7 @@ def start_scan():
         CurrentScanStartFrame = CurrentFrame
 
         ScanOngoing = True
+        last_frame_time = time.time() + 3
 
         # Set new frame indicator to false, in case this is the cause of the strange
         # behaviour after stopping/restarting the scan process
@@ -2001,7 +2006,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanProcessError
     global ScanOngoing
     global ALT_Scann8_controller_detected
-    global last_cmd_time
+    global last_frame_time
     global pt_level_str, min_frame_steps_str
     global Controller_Id
 
@@ -2016,14 +2021,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             # Log error to console
             logging.debug("Non-critical IOError while checking incoming event from Arduino. Will check again.")
 
-    if ArduinoTrigger != 0:
-        last_cmd_time = time.time()
-    elif (ScanOngoing and (time.time() - last_cmd_time) > 3):
+    if ScanOngoing and time.time() > last_frame_time:
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
         # This means a duplicate frame might be generated.
-        last_cmd_time = time.time()
+        last_frame_time = time.time() + 3
         NewFrameAvailable = True
         logging.warning("More than 3 sec. since last command: Forcing new "
                         "frame event (frame %i).",CurrentFrame)
@@ -2040,6 +2043,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.info("Controller requested to reinit")
         reinit_controller()
     elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
+        last_frame_time = time.time() + 3
         NewFrameAvailable = True
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
