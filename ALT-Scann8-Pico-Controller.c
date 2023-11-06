@@ -387,7 +387,7 @@ void loop() {
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 1)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
-                DecreaseSpeedFrameStepsBefore = max(0, 70 - 7*param); 
+                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 break;
         }
@@ -405,7 +405,7 @@ void loop() {
                         pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
                         // analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
-                        sleep_ms(500);
+                        sleep_ms(200);
                         StartFrameTime = get_absolute_time();
                         ScanSpeed = OriginalScanSpeed;
                         collect_modulo = 10;
@@ -560,18 +560,12 @@ void loop() {
                     gpio_put(PIN_MOTOR_B_NEUTRAL,0);
                     gpio_put(PIN_MOTOR_C_NEUTRAL,0);
                     ScanState = Sts_Idle;
-                    pwm_set_gpio_level (PIN_UV_LED, 0);   // Need to check if this maps to Arduino (see next commented line)
-                    //analogWrite(11, 0); // Turn off UV LED
-                    UVLedOn = false;
                 }
                 else {
                     if (not ReelsUnlocked){
                         ReelsUnlocked = true;
                         gpio_put(PIN_MOTOR_B_NEUTRAL,1);
                         gpio_put(PIN_MOTOR_C_NEUTRAL,1);
-                        pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
-                        // analogWrite(11, UVLedBrightness); // Turn on UV LED
-                        UVLedOn = true;
                     }
                     GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
@@ -777,7 +771,7 @@ boolean FilmInFilmgate() {
     pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
     // analogWrite(11, UVLedBrightness); // Turn on UV LED
     UVLedOn = true;
-    sleep_ms(500);  // Give time to FT to stabilize
+    sleep_ms(200);  // Give time to FT to stabilize
 
     // MinFrameSteps used here as a reference, just to skip two frames in worst case
     // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
@@ -872,11 +866,6 @@ ScanResult scan(int UI_Command) {
     else {
         TimeToScan = CurrentTime + ScanSpeed;
 
-
-        pwm_set_gpio_level (PIN_UV_LED, UVLedBrightness);   // Need to check if this maps to Arduino (see next commented line)
-        //analogWrite(11, UVLedBrightness);
-        UVLedOn = true;
-
         if (GreenLedOn) {  // If last time frame was detected ...
             GreenLedOn = false;
             pwm_set_gpio_level (PIN_GREEN_LED, 0);   // Turn off green led
@@ -935,10 +924,10 @@ ScanResult scan(int UI_Command) {
             if (DebugState == FrameSteps)
                 SerialPrintInt(LastFrameSteps);
         }
-        else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
+        else if (FrameStepsDone > 2*MinFrameSteps) {
             retvalue = SCAN_FRAME_DETECTION_ERROR;
             // Tell UI (Raspberry PI) an error happened during scanning
-            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps);
+            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*MinFrameSteps);
             FrameStepsDone = 0;
         }
         return (retvalue);

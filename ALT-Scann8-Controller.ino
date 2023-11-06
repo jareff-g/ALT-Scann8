@@ -319,7 +319,7 @@ void loop() {
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 1)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
-                DecreaseSpeedFrameStepsBefore = max(0, 70 - 7*param); 
+                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param); 
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 break;
         }
@@ -336,7 +336,7 @@ void loop() {
                         ScanState = Sts_Scan;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
-                        delay(500);     // Wait for PT to stabilize after switching UV led on
+                        delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
                         collect_modulo = 10;
@@ -494,16 +494,12 @@ void loop() {
                     digitalWrite(MotorB_Neutral, LOW);
                     digitalWrite(MotorC_Neutral, LOW);
                     ScanState = Sts_Idle;
-                    analogWrite(11, 0); // Turn off UV LED
-                    UVLedOn = false;
                 }
                 else {
                     if (not ReelsUnlocked){
                         ReelsUnlocked = true;
                         digitalWrite(MotorB_Neutral, HIGH);
                         digitalWrite(MotorC_Neutral, HIGH);
-                        analogWrite(11, UVLedBrightness); // Turn on UV LED
-                        UVLedOn = true;
                     }
                     GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
@@ -712,7 +708,7 @@ boolean FilmInFilmgate() {
 
     analogWrite(11, UVLedBrightness); // Turn on UV LED
     UVLedOn = true;
-    delay(500);  // Give time to FT to stabilize
+    delay(200);  // Give time to FT to stabilize
 
 
     // MinFrameSteps used here as a reference, just to skip two frames in worst case
@@ -807,11 +803,6 @@ ScanResult scan(int UI_Command) {
     else {
         TimeToScan = CurrentTime + ScanSpeed;
 
-        Wire.begin(16);
-
-        analogWrite(11, UVLedBrightness);
-        UVLedOn = true;
-
         if (GreenLedOn) {  // If last time frame was detected ...
             GreenLedOn = false;
             analogWrite(A1, 0); // ... Turn off green led
@@ -866,10 +857,10 @@ ScanResult scan(int UI_Command) {
             if (DebugState == FrameSteps)
                 SerialPrintInt(LastFrameSteps);
         }
-        else if (FrameStepsDone > 2*DecreaseSpeedFrameSteps) {
+        else if (FrameStepsDone > 2*MinFrameSteps) {
             retvalue = SCAN_FRAME_DETECTION_ERROR;
             // Tell UI (Raspberry PI) an error happened during scanning
-            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*DecreaseSpeedFrameSteps);
+            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*MinFrameSteps);
             FrameStepsDone = 0;
         }
         return (retvalue);
