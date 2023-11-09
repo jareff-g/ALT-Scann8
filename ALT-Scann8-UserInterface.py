@@ -472,9 +472,9 @@ def set_existing_folder():
     # Disable preview to make tkinter dialogs visible
     hide_preview()
     if not SimulatedRun:
-        CurrentDir = tk.filedialog.askdirectory(initialdir=BaseDir, title="Select existing folder for capture")
+        CurrentDir = tk.filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
     else:
-        CurrentDir = tk.filedialog.askdirectory(initialdir=BaseDir,
+        CurrentDir = tk.filedialog.askdirectory(initialdir=CurrentDir,
                                                 title="Select existing folder with snapshots for simulated run")
     if not CurrentDir:
         return
@@ -3127,6 +3127,7 @@ def main(argv):
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
 
+    ExpertMode = True   # Expert mode becomes default
     LogLevel = getattr(logging, LoggingMode.upper(), None)
     if not isinstance(LogLevel, int):
         raise ValueError('Invalid log level: %s' % LogLevel)
