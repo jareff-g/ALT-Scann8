@@ -67,7 +67,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
-#define CMD_BOOST_PT_THRESHOLD 56
+#define CMD_SET_EXTRA_STEPS 56
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -367,19 +367,15 @@ void loop() {
                     }
                 }
                 break;
-            case CMD_SET_FRAME_FINE_TUNE:
+            case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
                 DebugPrint(">FineT", param);
-                PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
-                OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
-                if (param > 0)  // Also to move up we add extra steps
-                    FrameFineTune = param;
+                if (param >= 5 and param <= 95)   // Añllowed valued between 5 adn 95%
+                    PerforationThresholdAutoLevelRatio = param;
                 break;
-            case CMD_BOOST_PT_THRESHOLD:
+            case CMD_SET_EXTRA_STEPS:
                 DebugPrint(">BoostPT", param);
-                if (param > 0)  // Also to move up we add extra steps
-                    PerforationThresholdAutoLevelRatio = 90;    // Change threshold ratio to maximum (for damaged film)
-                else
-                    PerforationThresholdAutoLevelRatio = OriginalPerforationThresholdAutoLevelRatio;
+                if (param >= 1 && param <= 20)  // Also to move up we add extra steps
+                    FrameExtraSteps = param;
                 break;
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
