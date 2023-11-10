@@ -112,7 +112,8 @@ MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
 FrameSteps_auto = True
-FrameFineTune = 0     # Frame fine tune value: Extra steps manually added or PT level retio reduced
+FrameExtraSteps = 0     # Extra steps manually added after frame detected
+FrameFineTune = 70      # Frame fine tune: PT threshold value as % between min adn max PT values
 PTLevelS8 = 80
 PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
@@ -170,7 +171,7 @@ CMD_ADVANCE_FRAME_FRACTION = 42
 CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
 CMD_SET_FRAME_FINE_TUNE = 54
-CMD_BOOST_PT_THRESHOLD = 56
+CMD_SET_EXTRA_STEPS = 56
 CMD_REWIND = 60
 CMD_FAST_FORWARD = 61
 CMD_INCREASE_WIND_SPEED = 62
@@ -210,7 +211,6 @@ GainBlue = 2.2  # 2.8
 PreviousGainRed = 1
 PreviousGainBlue = 1
 ManualScanEnabled = False
-BoostedThreshold = False
 
 # Statistical information about where time is spent (expert mode only)
 total_wait_time_preview_display = 0
@@ -253,7 +253,8 @@ SessionData = {
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8":  260,
     "MinFrameSteps":  290,
-    "FrameFineTune":  0,
+    "FrameFineTune":  70,
+    "FrameExtraSteps": 0,
     "PTLevelS8":  80,
     "PTLevelR8":  200,
     "PTLevel":  80,
@@ -690,15 +691,6 @@ def auto_white_balance_change_pause_selection():
     SessionData["AwbPause"] = str(AwbPause)
 
 
-def Boosted_threshold_selection():
-    global BoostedThreshold, Boosted_threshold, frame_fine_tune_spinbox
-    BoostedThreshold = Boosted_threshold.get()
-    send_arduino_command(CMD_BOOST_PT_THRESHOLD, BoostedThreshold)
-    if BoostedThreshold:
-        frame_fine_tune_spinbox.config(state=DISABLED)
-    else:
-        frame_fine_tune_spinbox.config(state=NORMAL)
-
 def Manual_scan_activated_selection():
     global ManualScanEnabled, Manual_scan_activated
     global manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
@@ -882,6 +874,22 @@ def frame_fine_tune_spinbox_focus_out(event):
     SessionData["FrameFineTune"] = FrameFineTune
     SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
+
+
+def frame_extra_steps_selection(updown):
+    global frame_extra_steps_spinbox, frame_extra_steps_str
+    global FrameExtraSteps
+    FrameExtraSteps = int(frame_extra_steps_spinbox.get())
+    SessionData["FrameExtraSteps"] = FrameExtraSteps
+    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
+
+
+def frame_extra_steps_spinbox_focus_out(event):
+    global frame_extra_steps_spinbox, frame_extra_steps_str
+    global FrameExtraSteps
+    FrameExtraSteps = int(frame_extra_steps_spinbox.get())
+    SessionData["FrameExtraSteps"] = FrameExtraSteps
+    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
 
 
 def pt_level_selection(updown):
@@ -2226,7 +2234,7 @@ def load_session_data():
     global PersistedDataLoaded
     global exposure_frame_value_label
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
     global ScanSpeed, scan_speed_str
     global exposure_spinbox, exposure_str
@@ -2334,6 +2342,10 @@ def load_session_data():
                     FrameFineTune = SessionData["FrameFineTune"]
                     frame_fine_tune_str.set(str(FrameFineTune))
                     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
+                if 'FrameExtraSteps' in SessionData:
+                    FrameExtraSteps = SessionData["FrameExtraSteps"]
+                    frame_fine_tune_str.set(str(FrameExtraSteps))
+                    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
                 if 'PTLevelAuto' in SessionData:
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
@@ -2363,7 +2375,7 @@ def load_session_data():
 def reinit_controller():
     global PTLevel_auto, PTLevel
     global FrameSteps_auto, MinFrameSteps
-    global FrameFineTune, ScanSpeed
+    global FrameFineTune, ScanSpeed, FrameExtraSteps
 
     if PTLevel_auto:
         send_arduino_command(CMD_SET_PT_LEVEL, 0)
@@ -2382,6 +2394,7 @@ def reinit_controller():
             send_arduino_command(CMD_SET_SUPER_8)
 
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
+    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 def PiCam2_configure():
@@ -2638,7 +2651,6 @@ def build_ui():
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
     global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
-    global Boosted_threshold, BoostedThreshold
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2959,25 +2971,11 @@ def build_ui():
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_dbl_click)
-        # Spinbox to select FrameFineTune on Arduino
-        frame_fine_tune_label = tk.Label(frame_alignment_frame,
-                                         text='Fine tune:',
-                                         width=10, font=("Arial", 7))
-        frame_fine_tune_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
-        frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
-        frame_fine_tune_selection_aux = frame_alignment_frame.register(
-            frame_fine_tune_selection)
-        frame_fine_tune_spinbox = tk.Spinbox(
-            frame_alignment_frame,
-            command=(frame_fine_tune_selection_aux, '%d'), width=8,
-            textvariable=frame_fine_tune_str, from_=-20, to=20, font=("Arial", 7))
-        frame_fine_tune_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
-        frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
         # Spinbox to select PTLevel on Arduino
         pt_level_label = tk.Label(frame_alignment_frame,
                                   text='PT Level:',
                                   width=10, font=("Arial", 7))
-        pt_level_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        pt_level_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
         pt_level_str = tk.StringVar(value=str(PTLevel))
         pt_level_selection_aux = frame_alignment_frame.register(
             pt_level_selection)
@@ -2985,9 +2983,37 @@ def build_ui():
             frame_alignment_frame,
             command=(pt_level_selection_aux, '%d'), width=8,
             textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
-        pt_level_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        pt_level_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
         pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
+        # Spinbox to select FrameFineTune on Arduino
+        frame_fine_tune_label = tk.Label(frame_alignment_frame,
+                                         text='Fine tune:',
+                                         width=10, font=("Arial", 7))
+        frame_fine_tune_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
+        frame_fine_tune_selection_aux = frame_alignment_frame.register(
+            frame_fine_tune_selection)
+        frame_fine_tune_spinbox = tk.Spinbox(
+            frame_alignment_frame,
+            command=(frame_fine_tune_selection_aux, '%d'), width=8,
+            textvariable=frame_fine_tune_str, from_=5, to=95, increment=5, font=("Arial", 7))
+        frame_fine_tune_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
+        # Spinbox to select Extra Steps on Arduino
+        frame_extra_steps_label = tk.Label(frame_alignment_frame,
+                                         text='Extra Steps:',
+                                         width=10, font=("Arial", 7))
+        frame_extra_steps_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        frame_extra_steps_str = tk.StringVar(value=str(FrameExtraSteps))
+        frame_extra_steps_selection_aux = frame_alignment_frame.register(
+            frame_extra_steps_selection)
+        frame_extra_steps_spinbox = tk.Spinbox(
+            frame_alignment_frame,
+            command=(frame_extra_steps_selection_aux, '%d'), width=8,
+            textvariable=frame_extra_steps_str, from_=0, to=20, font=("Arial", 7))
+        frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
         speed_quality_frame = LabelFrame(expert_frame, text="Speed / Quality", width=18, height=2,
@@ -3063,13 +3089,6 @@ def build_ui():
             # Damaged film helpers, to help handling damaged film (broken perforations)
             Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", 7))
             Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=2, pady=1, sticky='')
-            # Checkbox to enable/disable increased PT threshold for damaged perfomations
-            Boosted_threshold = tk.BooleanVar(value=BoostedThreshold)
-            Boosted_threshold_checkbox = tk.Checkbutton(Damaged_film_frame, text='Boosted threshold', width=20, height=1,
-                                                   variable=Boosted_threshold, onvalue=True,
-                                                   offvalue=False,
-                                                   command=Boosted_threshold_selection, font=("Arial", 7))
-            Boosted_threshold_checkbox.pack(side=TOP)
             # Checkbox to enable/disable manual scan
             Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
             Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,

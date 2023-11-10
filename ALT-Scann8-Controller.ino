@@ -68,7 +68,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
-#define CMD_BOOST_PT_THRESHOLD 56
+#define CMD_SET_EXTRA_STEPS 56
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -138,7 +138,7 @@ float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual n
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
-int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
@@ -299,19 +299,15 @@ void loop() {
                     }
                 }
                 break;
-            case CMD_SET_FRAME_FINE_TUNE:
+            case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
                 DebugPrint(">FineT", param);
-                PerforationThresholdAutoLevelRatio = 40 + param;    // Change threshold ratio
-                OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
-                if (param > 0)  // Also to move up we add extra steps
-                    FrameFineTune = param;
+                if (param >= 5 and param <= 95)   // Añllowed valued between 5 adn 95%
+                    PerforationThresholdAutoLevelRatio = param;
                 break;
-            case CMD_BOOST_PT_THRESHOLD:
+            case CMD_SET_EXTRA_STEPS:
                 DebugPrint(">BoostPT", param);
-                if (param > 0)  // Also to move up we add extra steps
-                    PerforationThresholdAutoLevelRatio = 90;    // Change threshold ratio to maximum (for damaged film)
-                else
-                    PerforationThresholdAutoLevelRatio = OriginalPerforationThresholdAutoLevelRatio;
+                if (param >= 1 && param <= 20)  // Also to move up we add extra steps
+                    FrameExtraSteps = param;
                 break;
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
@@ -319,7 +315,7 @@ void loop() {
                 if (ScanSpeed < OriginalScanSpeed && collect_modulo > 1)  // Increase film collection frequency if increasing scan speed
                     collect_modulo--;
                 OriginalScanSpeed = ScanSpeed;
-                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param); 
+                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 break;
         }
@@ -836,8 +832,8 @@ ScanResult scan(int UI_Command) {
 
         if (FrameDetected) {
             DebugPrintStr("Frame!");
-            if (FrameFineTune > 0)  // If positive, aditional steps after detection
-                capstan_advance(FrameFineTune);
+            if (FrameExtraSteps > 0)  // If positive, aditional steps after detection
+                capstan_advance(FrameExtraSteps);
             LastFrameSteps = FrameStepsDone;
             adjust_framesteps(LastFrameSteps);
             FrameStepsDone = 0;
