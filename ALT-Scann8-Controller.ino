@@ -172,7 +172,7 @@ boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 boolean Frame_Steps_Auto = true;
 
 // Collect outgoing film frequency
-int collect_modulo = 10; 
+int collect_modulo = 80; 
 
 // Forward definition
 void CollectOutgoingFilm(bool);
@@ -335,7 +335,7 @@ void loop() {
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = 10;
+                        collect_modulo = 80;
                         tone(A2, 2000, 50);
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -380,7 +380,7 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        collect_modulo = 4;
+                        collect_modulo = 20;
                         ScanState = Sts_SlowForward;
                         delay(50);
                         break;
@@ -633,7 +633,8 @@ void CollectOutgoingFilm(bool force = false) {
         if (TractionSwitchActive) {
             if (CollectOngoing) {
                 if (CurrentTime < LastSwitchActivationCheckTime){  // Collecting too often: Increase modulo
-                    collect_modulo++;
+                    collect_modulo+=20;
+                    DebugPrint("Collect Mod", collect_modulo);
                 }
                 DebugPrint("Collect Mod", collect_modulo);
                 LastSwitchActivationCheckTime = CurrentTime + 3000;
@@ -643,6 +644,7 @@ void CollectOutgoingFilm(bool force = false) {
         else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationCheckTime) {  // Not collecting enough : Decrease modulo
             collect_modulo-=2;
             DebugPrint("Collect Mod", collect_modulo);
+            LastSwitchActivationCheckTime = CurrentTime + 100;
         }
     }
     loop_counter++;

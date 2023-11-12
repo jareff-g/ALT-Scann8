@@ -191,7 +191,7 @@ boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 boolean Frame_Steps_Auto = true;
 
 // Collect outgoing film frequency
-int collect_modulo = 10; 
+int collect_modulo = 80; 
 
 // Forward definition
 void CollectOutgoingFilm(bool);
@@ -404,7 +404,7 @@ void loop() {
                         sleep_ms(200);
                         StartFrameTime = get_absolute_time();
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = 10;
+                        collect_modulo = 80;
                         //tone(A2, 2000, 50);   // No tone in pico, to be checked
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -449,7 +449,7 @@ void loop() {
                         sleep_ms(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        collect_modulo = 4;
+                        collect_modulo = 20;
                         ScanState = Sts_SlowForward;
                         sleep_ms(50);
                         break;
@@ -530,8 +530,8 @@ void loop() {
                             capstan_advance(MinFrameStepsR8);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
-                        DebugPrint(">Advance frame", 5);
-                        capstan_advance(5);
+                        DebugPrint(">Advance frame", param);
+                        capstan_advance(param);
                         break;
                 }
                 break;
@@ -696,7 +696,8 @@ void CollectOutgoingFilm(bool force = false) {
         if (TractionSwitchActive) {
             if (CollectOngoing) {
                 if (CurrentTime < LastSwitchActivationCheckTime){  // Collecting too often: Increase modulo
-                    collect_modulo++;
+                    collect_modulo+=20;
+                    DebugPrint("Collect Mod", collect_modulo);
                 }
                 DebugPrint("Collect Mod", collect_modulo);
                 LastSwitchActivationCheckTime = delayed_by_ms(get_absolute_time(),3000);
@@ -706,6 +707,7 @@ void CollectOutgoingFilm(bool force = false) {
         else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationCheckTime) {  // Not collecting enough : Decrease modulo
             collect_modulo-=2;
             DebugPrint("Collect Mod", collect_modulo);
+            LastSwitchActivationCheckTime = delayed_by_ms(get_absolute_time(),100);
         }
     }
     loop_counter++;
