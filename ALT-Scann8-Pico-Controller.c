@@ -54,6 +54,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 // I2C commands (RPi to Arduino): Constant definition
 #define CMD_VERSION_ID 1
 #define CMD_GET_CNT_STATUS 2
+#define CMD_RESET_CONTROLLER 3
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
 #define CMD_GET_NEXT_FRAME 12
@@ -75,6 +76,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_REWIND 64
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
+#define CMD_REPORT_PLOTTER_INFO 87
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
 #define RSP_FORCE_INIT 2
@@ -85,6 +87,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REWIND_ENDED 84
 #define RSP_FAST_FORWARD_ENDED 85
 #define RSP_REPORT_AUTO_LEVELS 86
+#define RSP_REPORT_PLOTTER_INFO    87
 
 
 // Immutable values
@@ -189,6 +192,8 @@ int PT_SignalLevelRead;   // Raw signal level from phototransistor
 boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 boolean Frame_Steps_Auto = true;
+
+boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
 int collect_modulo = 80; 
@@ -385,6 +390,9 @@ void loop() {
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                break;
+            case CMD_REPORT_PLOTTER_INFO:
+                IntegratedPlotter = true;
                 break;
         }
 
@@ -745,6 +753,8 @@ void ReportPlotterInfo() {
             SerialPrintStr(out);
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
+            if (IntegratedPlotter)
+                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
         }
     }
 }

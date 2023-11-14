@@ -45,7 +45,7 @@ enum {
     DebugInfo,
     DebugInfoSingle,
     None
-} DebugState = PlotterInfo;
+} DebugState = None;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -55,6 +55,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 // I2C commands (RPi to Arduino): Constant definition
 #define CMD_VERSION_ID 1
 #define CMD_GET_CNT_STATUS 2
+#define CMD_RESET_CONTROLLER 3
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
 #define CMD_GET_NEXT_FRAME 12
@@ -76,6 +77,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_REWIND 64
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
+#define CMD_REPORT_PLOTTER_INFO 87
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
 #define RSP_FORCE_INIT 2
@@ -86,6 +88,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REWIND_ENDED 84
 #define RSP_FAST_FORWARD_ENDED 85
 #define RSP_REPORT_AUTO_LEVELS 86
+#define RSP_REPORT_PLOTTER_INFO    87
 
 
 // Immutable values
@@ -171,6 +174,8 @@ boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 
 boolean Frame_Steps_Auto = true;
 
+boolean IntegratedPlotter = false;
+
 // Collect outgoing film frequency
 int collect_modulo = 80; 
 
@@ -195,12 +200,14 @@ void SendToRPi(byte rsp, int param1, int param2)
     push_rsp(rsp, param1, param2);
 }
 
+void(* resetFunc) (void) = 0;//declare reset function at address 0
 
 void setup() {
     // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
     Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
   
     Wire.begin(16);  // join I2c bus with address #16
+    Wire.setClock(400000);  // Set the I2C clock frequency to 400 kHz
     Wire.onReceive(receiveEvent); // register event
     Wire.onRequest(sendEvent);
 
@@ -249,8 +256,6 @@ void loop() {
         else
             UI_Command = 0;
 
-        Wire.begin(16);
-
         TractionSwitchActive = digitalRead(TractionStopPin);
 
         ReportPlotterInfo();    // Regular report of plotter info
@@ -269,6 +274,9 @@ void loop() {
         }
 
         switch (UI_Command) {   // Stateless commands
+            case CMD_RESET_CONTROLLER:
+                resetFunc();
+                break;
             case CMD_SET_PT_LEVEL:
                 DebugPrint(">PTLevel", param);
                 if (param >= 0 && param <= 900) {
@@ -317,6 +325,10 @@ void loop() {
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                break;
+            case CMD_REPORT_PLOTTER_INFO:
+                DebugPrint(">PlotterInfo", param);
+                IntegratedPlotter = param;
                 break;
         }
 
@@ -536,8 +548,6 @@ boolean RewindFilm(int UI_Command) {
     boolean retvalue = true;
     static boolean stopping = false;
 
-    Wire.begin(16);
-
     if (UI_Command == CMD_REWIND) {
       stopping = true;
     }
@@ -573,8 +583,6 @@ boolean RewindFilm(int UI_Command) {
 boolean FastForwardFilm(int UI_Command) {
     boolean retvalue = true;
     static boolean stopping = false;
-
-    Wire.begin(16);  // join I2c bus with address #16
 
     if (UI_Command == CMD_FAST_FORWARD) {
         stopping = true;
@@ -650,6 +658,33 @@ void CollectOutgoingFilm(bool force = false) {
     loop_counter++;
 }
 
+void CollectOutgoingFilm_new(bool force = false) {
+    static int loop_counter = 0;
+    static boolean CollectOngoing = true;
+
+    static unsigned long LastSwitchActivationCheckTime = millis()+3000;
+    unsigned long CurrentTime = millis();
+
+    CurrentTime = millis();
+
+    if (loop_counter % collect_modulo == 0) {
+        if (CurrentTime > LastSwitchActivationCheckTime) {
+            TractionSwitchActive = digitalRead(TractionStopPin);
+            if (!TractionSwitchActive) {  //Motor allowed to turn
+                CollectOngoing = true;
+                //delayMicroseconds(1000);
+                digitalWrite(MotorC_Stepper, LOW);
+                digitalWrite(MotorC_Stepper, HIGH);
+                digitalWrite(MotorC_Stepper, LOW);
+                TractionSwitchActive = digitalRead(TractionStopPin);
+                if (TractionSwitchActive)
+                    LastSwitchActivationCheckTime = CurrentTime + 2000;
+            }
+        }
+    }
+    loop_counter++;
+}
+
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
   float ratio;
@@ -675,14 +710,22 @@ void ReportPlotterInfo() {
     static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
     static char out[100];
 
-    if (DebugState == PlotterInfo && millis() > NextReport) {
+    if (millis() > NextReport) {
         if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
             NextReport = millis() + 20;
-            sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
-            //sprintf(out,"PT:%i", PT_SignalLevelRead);
-            SerialPrintStr(out);
+            if (DebugState == PlotterInfo) {  // Plotter info to Arduino IDE
+                sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+                //sprintf(out,"PT:%i", PT_SignalLevelRead);
+                SerialPrintStr(out);
+            }
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
+            if (IntegratedPlotter) {  // Plotter info to ALT-Scann 8 Integrated plotter
+                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
+                DebugPrint("plotter report", PT_SignalLevelRead);
+            }
+/*            else
+                DebugPrint("NO plotter report", PT_SignalLevelRead);*/
         }
     }
 }

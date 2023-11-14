@@ -158,6 +158,7 @@ SharpnessValue = 1
 # Commands (RPI to Arduino)
 CMD_VERSION_ID = 1
 CMD_GET_CNT_STATUS = 2
+CMD_RESET_CONTROLLER = 3
 CMD_START_SCAN = 10
 CMD_TERMINATE = 11
 CMD_GET_NEXT_FRAME = 12
@@ -179,6 +180,7 @@ CMD_DECREASE_WIND_SPEED = 63
 CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
+CMD_REPORT_PLOTTER_INFO = 87
 # Responses (Arduino to RPi)
 RSP_VERSION_ID = 1
 RSP_FORCE_INIT = 2
@@ -189,11 +191,15 @@ RSP_FAST_FORWARD_ERROR = 83
 RSP_REWIND_ENDED = 84
 RSP_FAST_FORWARD_ENDED = 85
 RSP_REPORT_AUTO_LEVELS = 86
-
+RSP_REPORT_PLOTTER_INFO = 87
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
 ExperimentalMode = False
+PlotterMode = False
+plotter_canvas = None
+PrevPTValue = 0
+MaxPT = 100
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
                         # That ,means we wait until the difference between a frame and the previous one is less
@@ -1989,6 +1995,27 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
     win.after(1000, temperature_loop)
 
 
+def UpdatePlotterWindow(PTValue):
+    global plotter_canvas
+    global MaxPT, PrevPTValue
+
+    if plotter_canvas == None:
+        return
+
+    if PTValue > MaxPT * 10:
+        return
+
+    MaxPT = max(MaxPT,PTValue)
+    # Shift the graph to the left
+    for item in plotter_canvas.find_all():
+        plotter_canvas.move(item, -5, 0)
+
+    # Draw the new line segment
+    plotter_canvas.create_line(194, 120-(PrevPTValue/(MaxPT/120)), 199, 120-(PTValue/(MaxPT/120)), width=1, fill="blue")
+
+    PrevPTValue = PTValue
+
+
 # send_arduino_command: No response expected
 def send_arduino_command(cmd, param=0):
     global SimulatedRun, ALT_Scann8_controller_detected
@@ -2073,6 +2100,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_FAST_FORWARD_ERROR:  # Error during FastForward
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
+    elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
+        if PlotterMode:
+            UpdatePlotterWindow(ArduinoParam1)
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
@@ -2507,6 +2537,9 @@ def tscann8_init():
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
+    # Set the I2C clock frequency to 400 kHz
+    i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
+    i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
     win = Tk()  # creating the main window and storing the window object in 'win'
     win.title('ALT-Scann 8')  # setting title of the window
@@ -2523,7 +2556,11 @@ def tscann8_init():
     if SimulatedRun:
         win.wm_title(string='*** ALT-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
 
+    reset_controller()
+
     get_controller_version()
+
+    send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
 
     win.update_idletasks()
 
@@ -2651,6 +2688,7 @@ def build_ui():
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
     global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
+    global plotter_canvas
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3051,6 +3089,14 @@ def build_ui():
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
         #stabilization_delay_selection('down')
 
+        # Integrated plotter
+        if PlotterMode:
+            integrated_plotter_frame = LabelFrame(extended_frame, text='Plotter Area', width=8, height=5, font=("Arial", 7))
+            integrated_plotter_frame.pack(side=LEFT, ipadx=5, fill=Y)
+            plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
+                                         width=200, height=120)
+            plotter_canvas.pack(side=TOP, anchor=N)
+
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
             experimental_frame.pack(side=LEFT, ipadx=5, fill=Y)
@@ -3118,16 +3164,21 @@ def get_controller_version():
         logging.debug("Requesting controller version")
         send_arduino_command(CMD_VERSION_ID)
 
+def reset_controller():
+    logging.debug("Resetting controller")
+    send_arduino_command(CMD_RESET_CONTROLLER)
+    time.sleep(0.5)
+
 
 def main(argv):
     global SimulatedRun
-    global ExpertMode, ExperimentalMode
+    global ExpertMode, ExperimentalMode, PlotterMode
     global LogLevel, LoggingMode
     global capture_display_event, capture_save_event
     global capture_display_queue, capture_save_queue
     global ALT_scann_init_done
 
-    opts, args = getopt.getopt(argv, "sexl:h")
+    opts, args = getopt.getopt(argv, "sexl:ph")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -3143,8 +3194,11 @@ def main(argv):
             print("  -s             Start Simulated session")
             print("  -e             Activate expert mode")
             print("  -x             Activate experimental mode")
+            print("  -p             Activate integratted plotter")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
+        elif opt == '-p':
+            PlotterMode = True
 
     ExpertMode = True   # Expert mode becomes default
     LogLevel = getattr(logging, LoggingMode.upper(), None)
