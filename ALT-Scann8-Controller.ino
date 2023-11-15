@@ -177,7 +177,10 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
-int collect_modulo = 80; 
+int collect_modulo = 10; 
+int collect_timer = 500;
+int scan_collect_modulo = collect_modulo; 
+int scan_collect_timer = collect_timer;
 
 // Forward definition
 void CollectOutgoingFilm(bool);
@@ -320,8 +323,8 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                if (ScanSpeed < OriginalScanSpeed && collect_modulo > 1)  // Increase film collection frequency if increasing scan speed
-                    collect_modulo--;
+                scan_collect_timer = collect_timer = 100 + (10-param) * 100;
+                scan_collect_modulo = collect_modulo = 10 + (10-param) * 3;
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -347,7 +350,8 @@ void loop() {
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = 80;
+                        collect_modulo = scan_collect_modulo;
+                        collect_timer = scan_collect_timer;
                         tone(A2, 2000, 50);
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -392,7 +396,8 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        collect_modulo = 20;
+                        collect_modulo = 10;
+                        collect_timer = 100;
                         ScanState = Sts_SlowForward;
                         delay(50);
                         break;
@@ -616,70 +621,28 @@ boolean FastForwardFilm(int UI_Command) {
 }
 
 // ------------- Collect outgoing film
-// New version, collection speed is throttled based on the frequency of microswitch activation.
-// This new method provides a more regular mechanism, and it keeps minimum tension in the film.
-// Because of this, a pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch 
+// Latest version, simpler, based on regular activation and motor activation frequency (to soften the pull)
+// Still, pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(bool force = false) {
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
-    static unsigned long LastSwitchActivationCheckTime = millis()+3000;
+    static unsigned long TimeToCollect = 0;
     unsigned long CurrentTime = millis();
 
     if (loop_counter % collect_modulo == 0) {
-        TractionSwitchActive = digitalRead(TractionStopPin);
-        if (!TractionSwitchActive) {  //Motor allowed to turn
-            CollectOngoing = true;
-            //delayMicroseconds(1000);
-            digitalWrite(MotorC_Stepper, LOW);
-            digitalWrite(MotorC_Stepper, HIGH);
-            digitalWrite(MotorC_Stepper, LOW);
-        }
-        TractionSwitchActive = digitalRead(TractionStopPin);
-        if (TractionSwitchActive) {
-            if (CollectOngoing) {
-                if (CurrentTime < LastSwitchActivationCheckTime){  // Collecting too often: Increase modulo
-                    collect_modulo+=20;
-                    DebugPrint("Collect Mod", collect_modulo);
-                }
-                DebugPrint("Collect Mod", collect_modulo);
-                LastSwitchActivationCheckTime = CurrentTime + 3000;
-            }
-            CollectOngoing = false;
-        }
-        else if (collect_modulo > 2 && CurrentTime > LastSwitchActivationCheckTime) {  // Not collecting enough : Decrease modulo
-            collect_modulo-=2;
-            DebugPrint("Collect Mod", collect_modulo);
-            LastSwitchActivationCheckTime = CurrentTime + 100;
-        }
-    }
-    loop_counter++;
-}
-
-void CollectOutgoingFilm_new(bool force = false) {
-    static int loop_counter = 0;
-    static boolean CollectOngoing = true;
-
-    static unsigned long LastSwitchActivationCheckTime = millis()+3000;
-    unsigned long CurrentTime = millis();
-
-    CurrentTime = millis();
-
-    if (loop_counter % collect_modulo == 0) {
-        if (CurrentTime > LastSwitchActivationCheckTime) {
+        if (CurrentTime > TimeToCollect) {
             TractionSwitchActive = digitalRead(TractionStopPin);
             if (!TractionSwitchActive) {  //Motor allowed to turn
-                CollectOngoing = true;
-                //delayMicroseconds(1000);
                 digitalWrite(MotorC_Stepper, LOW);
                 digitalWrite(MotorC_Stepper, HIGH);
                 digitalWrite(MotorC_Stepper, LOW);
                 TractionSwitchActive = digitalRead(TractionStopPin);
-                if (TractionSwitchActive)
-                    LastSwitchActivationCheckTime = CurrentTime + 2000;
             }
+            if (TractionSwitchActive)
+                TimeToCollect = CurrentTime + collect_timer;
         }
     }
     loop_counter++;
