@@ -192,6 +192,7 @@ RSP_REWIND_ENDED = 84
 RSP_FAST_FORWARD_ENDED = 85
 RSP_REPORT_AUTO_LEVELS = 86
 RSP_REPORT_PLOTTER_INFO = 87
+RSP_SCAN_ENDED = 88
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
@@ -2044,6 +2045,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global last_frame_time
     global pt_level_str, min_frame_steps_str
     global Controller_Id
+    global ScanStopRequested
 
     if not SimulatedRun:
         try:
@@ -2083,6 +2085,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
+    elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the edn of the reel
+        logging.warning("End of reel reached: Scan terminated")
+        ScanStopRequested = True
     elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
         if (PTLevel_auto):
             pt_level_str.set(str(ArduinoParam1))

@@ -44,7 +44,7 @@ enum {
     DebugInfo,
     DebugInfoSingle,
     None
-} DebugState = PlotterInfo;
+} DebugState = None;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -87,8 +87,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REWIND_ENDED 84
 #define RSP_FAST_FORWARD_ENDED 85
 #define RSP_REPORT_AUTO_LEVELS 86
-#define RSP_REPORT_PLOTTER_INFO    87
-
+#define RSP_REPORT_PLOTTER_INFO 87
+#define RSP_SCAN_ENDED 88
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -159,7 +159,7 @@ float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual n
 int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
-int FrameFineTune = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
@@ -185,6 +185,8 @@ boolean TractionSwitchActive = true;  // When traction micro-switch is closed
 
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
+unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
+bool NoFilmDetected = false;
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
@@ -200,9 +202,6 @@ int collect_modulo = 10;
 int collect_timer = 500;
 int scan_collect_modulo = collect_modulo;
 int scan_collect_timer = collect_timer;
-
-// Forward definition
-void CollectOutgoingFilm(bool);
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
@@ -388,14 +387,15 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                scan_collect_timer = collect_timer = 100 + (10-param) * 100;
+                scan_collect_timer = collect_timer = 50 + (10-param) * 100;
                 scan_collect_modulo = collect_modulo = 10 + (10-param) * 3;
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 break;
             case CMD_REPORT_PLOTTER_INFO:
-                IntegratedPlotter = true;
+                DebugPrint(">PlotterInfo", param);
+                IntegratedPlotter = param;
                 break;
         }
 
@@ -414,6 +414,8 @@ void loop() {
                         UVLedOn = true;
                         sleep_ms(200);
                         StartFrameTime = get_absolute_time();
+                        FilmDetectedTime = millis();
+                        NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
                         collect_modulo = scan_collect_modulo;
                         collect_timer = scan_collect_timer;
@@ -461,8 +463,8 @@ void loop() {
                         sleep_ms(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        collect_modulo = 10;
-                        collect_timer = 100;
+                        collect_modulo = 5;
+                        collect_timer = 10;
                         ScanState = Sts_SlowForward;
                         sleep_ms(50);
                         break;
@@ -549,7 +551,7 @@ void loop() {
                 }
                 break;
             case Sts_Scan:
-                CollectOutgoingFilm(false);
+                CollectOutgoingFilm();
                 if (UI_Command == CMD_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
@@ -612,8 +614,6 @@ void loop() {
 boolean RewindFilm(int UI_Command) {
     boolean retvalue = true;
     static boolean stopping = false;
-  
-    //Wire.begin(16);
 
     if (UI_Command == CMD_REWIND) {
         stopping = true;
@@ -650,8 +650,6 @@ boolean RewindFilm(int UI_Command) {
 boolean FastForwardFilm(int UI_Command) {
     boolean retvalue = true;
     static boolean stopping = false;
-
-  //Wire.begin(16);  // join I2c bus with address #16
 
     if (UI_Command == CMD_FAST_FORWARD) {
         stopping = true;
@@ -725,8 +723,16 @@ int GetLevelPT() {
     if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
     //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
-    if (PT_Level_Auto)
-        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * 0.5))/10);
+    if (PT_Level_Auto) {
+        ratio = (float)PerforationThresholdAutoLevelRatio/100;
+        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+    }
+
+    // If relevant diff between max/min dinamic it means we have film passing by
+    if (millis() - FilmDetectedTime > 5000)
+        NoFilmDetected = true;
+    else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
+        FilmDetectedTime = millis();
 
     return(PT_SignalLevelRead);
 }
@@ -737,14 +743,16 @@ void ReportPlotterInfo() {
     static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
     static char out[100];
 
-    if (DebugState == PlotterInfo && get_absolute_time() > NextReport) {
+    if (get_absolute_time() > NextReport) {
         if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
             NextReport = delayed_by_ms(get_absolute_time(),20);
-            sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
-            SerialPrintStr(out);
+            if (DebugState == PlotterInfo {  // Plotter info to Arduino IDE
+                    sprintf(out,"PT:%i,MaxPT:%i,MinPT:%i,Threshold:%i", PT_SignalLevelRead,int(MaxPT_Dynamic/10),int(MinPT_Dynamic/10),PerforationThresholdLevel);
+                    SerialPrintStr(out);
+            }
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
-            if (IntegratedPlotter)
+            if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
                 SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
         }
     }
@@ -876,6 +884,12 @@ ScanResult scan(int UI_Command) {
             ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
         FrameDetected = false;
+
+        // Check if film still presend (auto stop at end of reel)
+        if (NoFilmDetected) {
+            SendToRPi(RSP_SCAN_ENDED, 0, 0);
+            return(SCAN_TERMINATION_REQUESTED);
+        }
 
         //-------------ScanFilm-----------
         if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
