@@ -88,8 +88,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REWIND_ENDED 84
 #define RSP_FAST_FORWARD_ENDED 85
 #define RSP_REPORT_AUTO_LEVELS 86
-#define RSP_REPORT_PLOTTER_INFO    87
-
+#define RSP_REPORT_PLOTTER_INFO 87
+#define RSP_SCAN_ENDED 88
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -166,6 +166,8 @@ boolean TractionSwitchActive = true;  // When traction micro-switch is closed
 
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
+unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
+bool NoFilmDetected = false;
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
@@ -177,13 +179,10 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
-int collect_modulo = 10; 
+int collect_modulo = 10;
 int collect_timer = 500;
-int scan_collect_modulo = collect_modulo; 
+int scan_collect_modulo = collect_modulo;
 int scan_collect_timer = collect_timer;
-
-// Forward definition
-void CollectOutgoingFilm(bool);
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
@@ -323,7 +322,7 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                scan_collect_timer = collect_timer = 100 + (10-param) * 100;
+                scan_collect_timer = collect_timer = 50 + (10-param) * 100;
                 scan_collect_modulo = collect_modulo = 10 + (10-param) * 3;
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
@@ -349,6 +348,8 @@ void loop() {
                         UVLedOn = true;
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
+                        FilmDetectedTime = millis();
+                        NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
                         collect_modulo = scan_collect_modulo;
                         collect_timer = scan_collect_timer;
@@ -396,8 +397,8 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        collect_modulo = 10;
-                        collect_timer = 100;
+                        collect_modulo = 5;
+                        collect_timer = 10;
                         ScanState = Sts_SlowForward;
                         delay(50);
                         break;
@@ -477,7 +478,7 @@ void loop() {
                 }
                 break;
             case Sts_Scan:
-                CollectOutgoingFilm(false);
+                CollectOutgoingFilm();
                 if (UI_Command == CMD_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
@@ -554,7 +555,7 @@ boolean RewindFilm(int UI_Command) {
     static boolean stopping = false;
 
     if (UI_Command == CMD_REWIND) {
-      stopping = true;
+        stopping = true;
     }
     else if (stopping) {
         if (RewindSpeed < 4000) {
@@ -625,7 +626,7 @@ boolean FastForwardFilm(int UI_Command) {
 // Still, pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
-void CollectOutgoingFilm(bool force = false) {
+void CollectOutgoingFilm(void) {
     static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
@@ -650,7 +651,8 @@ void CollectOutgoingFilm(bool force = false) {
 
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
-  float ratio;
+    float ratio;
+
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
     MinPT = min(PT_SignalLevelRead, MinPT);
@@ -663,6 +665,12 @@ int GetLevelPT() {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
         PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
     }
+
+    // If relevant diff between max/min dinamic it means we have film passing by
+    if (millis() - FilmDetectedTime > 5000)
+        NoFilmDetected = true;
+    else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
+        FilmDetectedTime = millis();
 
     return(PT_SignalLevelRead);
 }
@@ -678,17 +686,12 @@ void ReportPlotterInfo() {
             NextReport = millis() + 20;
             if (DebugState == PlotterInfo) {  // Plotter info to Arduino IDE
                 sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
-                //sprintf(out,"PT:%i", PT_SignalLevelRead);
                 SerialPrintStr(out);
             }
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
-            if (IntegratedPlotter) {  // Plotter info to ALT-Scann 8 Integrated plotter
+            if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
                 SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
-                DebugPrint("plotter report", PT_SignalLevelRead);
-            }
-/*            else
-                DebugPrint("NO plotter report", PT_SignalLevelRead);*/
         }
     }
 }
@@ -698,7 +701,7 @@ void SlowForward(){
     unsigned long CurrentTime = micros();
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
         GetLevelPT();   // No need to know PT level here, but used to update plotter data
-        CollectOutgoingFilm(false);
+        CollectOutgoingFilm();
         digitalWrite(MotorB_Stepper, HIGH);
         LastMove = CurrentTime + 700;
     }
@@ -818,6 +821,12 @@ ScanResult scan(int UI_Command) {
             ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
         FrameDetected = false;
+
+        // Check if film still presend (auto stop at end of reel)
+        if (NoFilmDetected) {
+            SendToRPi(RSP_SCAN_ENDED, 0, 0);
+            return(SCAN_TERMINATION_REQUESTED);
+        }
 
         //-------------ScanFilm-----------
         if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
