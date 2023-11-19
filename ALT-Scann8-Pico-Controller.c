@@ -729,7 +729,7 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    if (millis() - FilmDetectedTime > 5000)
+    if (millis() - FilmDetectedTime > 12000)
         NoFilmDetected = true;
     else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
         FilmDetectedTime = millis();

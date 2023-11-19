@@ -239,7 +239,7 @@ VideoCaptureActive = False
 
 # *** HDR variables
 image_list = []
-dry_run_iterations = 3
+dry_run_iterations = 9
 min_exp = 10  # Originally 0.9
 max_exp = 150 # Origially 56
 num_steps = 4
@@ -1286,6 +1286,8 @@ def update_rpi_temp():
 def switch_hdr_capture():
     global HdrCaptureActive
     global hdr_btn
+    global CurrentExposure
+    global SimulatedRun
 
     HdrCaptureActive = not HdrCaptureActive
     SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
@@ -1293,6 +1295,26 @@ def switch_hdr_capture():
                    relief=SUNKEN if HdrCaptureActive else RAISED,
                    bg='red' if HdrCaptureActive else save_bg,
                    fg='white' if HdrCaptureActive else save_fg)
+    if not HdrCaptureActive:    # If disabling HDR, need to set standard exposure as set in UI
+        if CurrentExposure == 0:  # Automatic mode
+            SessionData["CurrentExposure"] = str(CurrentExposure)
+            if not SimulatedRun:
+                if IsPiCamera2:
+                    camera.controls.ExposureTime = int(
+                        CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
+                else:
+                    camera.shutter_speed = int(CurrentExposure)
+        else:
+            if not SimulatedRun:
+                # Since we are in auto exposure mode, retrieve current value to start from there
+                if IsPiCamera2:
+                    metadata = camera.capture_metadata()
+                    CurrentExposure = metadata["ExposureTime"]
+                else:
+                    CurrentExposure = camera.exposure_speed
+            else:
+                CurrentExposure = 3500  # Arbitrary Value for Simulated run
+            SessionData["CurrentExposure"] = str(CurrentExposure)
 
 
 # Capture with sensor at 4056x3040
@@ -1459,7 +1481,7 @@ def register_frame():
     # Get current time
     frame_time = time.time()
     # Determine if we should start new count (last capture older than 5 seconds)
-    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 5:
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 12:
         FPM_StartTime = frame_time
         FPM_LastMinuteFrameTimes.clear()
         FPM_CalculatedValue = -1
@@ -1500,12 +1522,13 @@ def capture_hdr():
                 captured_snapshot = img.copy()
                 request.release()
             else:
-                for i in range(1,dry_run_iterations):
+                for i in range(1,dry_run_iterations):   # Apparently, a few captures need to be done to allow stabilization
                     camera.capture_image("main")
+                    win.update()
                 captured_snapshot = camera.capture_image("main")
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((captured_snapshot, CurrentFrame, idx))
-            if (idx == 3):   # Take only third image for preview
+            if (idx == int(len(exp_list)/2)):   # Take only image at the middle for preview
                 capture_display_queue.put(queue_item)
             capture_save_queue.put(queue_item)
         else:
@@ -2047,6 +2070,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global Controller_Id
     global ScanStopRequested
 
+    max_inactivity_delay = 12 if HdrCaptureActive else 3
+
     if not SimulatedRun:
         try:
             ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
@@ -2063,10 +2088,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
         # This means a duplicate frame might be generated.
-        last_frame_time = time.time() + 3
+        last_frame_time = time.time() + max_inactivity_delay
         NewFrameAvailable = True
-        logging.warning("More than 3 sec. since last command: Forcing new "
-                        "frame event (frame %i).",CurrentFrame)
+        logging.warning("More than %i sec. since last command: Forcing new "
+                        "frame event (frame %i).", max_inactivity_delay, CurrentFrame)
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
@@ -2080,12 +2105,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.info("Controller requested to reinit")
         reinit_controller()
     elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
-        last_frame_time = time.time() + 3
+        last_frame_time = time.time() + max_inactivity_delay
         NewFrameAvailable = True
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
-    elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the edn of the reel
+    elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
         logging.warning("End of reel reached: Scan terminated")
         ScanStopRequested = True
     elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
@@ -2526,6 +2551,7 @@ def tscann8_init():
     # Init HDR variables
     step_value = (max_exp - min_exp) / num_steps
     exp_list = numpy.arange(min_exp, max_exp, step_value).tolist()
+    exp_list.sort()
 
     # Try to determine Video folder of user logged in
     homefolder = os.environ['HOME']
@@ -2542,9 +2568,9 @@ def tscann8_init():
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
-    # Set the I2C clock frequency to 400 kHz
-    i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
-    i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
+        # Set the I2C clock frequency to 400 kHz
+        i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
+        i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
     win = Tk()  # creating the main window and storing the window object in 'win'
     win.title('ALT-Scann 8')  # setting title of the window
