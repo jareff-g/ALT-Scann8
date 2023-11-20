@@ -2041,6 +2041,10 @@ def UpdatePlotterWindow(PTValue):
     for item in plotter_canvas.find_all():
         plotter_canvas.move(item, -5, 0)
 
+    # Delete lines moving out of the canvas
+    for item in plotter_canvas.find_overlapping(-10,0,0, 120):
+        plotter_canvas.delete(item)
+
     # Draw the new line segment
     plotter_canvas.create_line(194, 120-(PrevPTValue/(MaxPT/120)), 199, 120-(PTValue/(MaxPT/120)), width=1, fill="blue")
 
@@ -2077,7 +2081,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global Controller_Id
     global ScanStopRequested
 
-    max_inactivity_delay = 12 if HdrCaptureActive else 3
+    max_inactivity_delay = 6 if HdrCaptureActive else 3
 
     if not SimulatedRun:
         try:

@@ -180,7 +180,7 @@ boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
 int collect_modulo = 10;
-int collect_timer = 500;
+int collect_timer = 50;
 int scan_collect_modulo = collect_modulo;
 int scan_collect_timer = collect_timer;
 
