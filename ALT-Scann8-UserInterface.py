@@ -239,9 +239,11 @@ VideoCaptureActive = False
 
 # *** HDR variables
 image_list = []
-dry_run_iterations = 9
-min_exp = 10  # Originally 0.9
-max_exp = 150 # Origially 56
+# 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
+dry_run_iterations = 4
+# HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (0.9-56) are better
+min_exp = 0.9
+max_exp = 56
 num_steps = 4
 step_value = 1
 exp_list = []
@@ -1516,16 +1518,19 @@ def capture_hdr():
             if VideoCaptureActive:
                 for i in range(1, dry_run_iterations):
                     camera.capture_request()
+                    win.update()
                 request = camera.capture_request()
+                win.update()
                 img = request.make_image("main")
                 img = img.convert('RGB')
                 captured_snapshot = img.copy()
                 request.release()
             else:
-                for i in range(1,dry_run_iterations):   # Apparently, a few captures need to be done to allow stabilization
+                for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
                     camera.capture_image("main")
                     win.update()
                 captured_snapshot = camera.capture_image("main")
+                win.update()
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((captured_snapshot, CurrentFrame, idx))
             if (idx == int(len(exp_list)/2)):   # Take only image at the middle for preview
@@ -1535,7 +1540,9 @@ def capture_hdr():
             camera.shutter_speed = exp*1000
             for i in range(1,dry_run_iterations):
                 camera.capture(None, format='jpeg')     # Not sure None will work here
+                win.update()
             camera.capture('hdrpic-%05d.%i.jpg' % (CurrentFrame, idx), quality=100)
+            win.update()
         idx += 1
 
 # 4 possible modes:
