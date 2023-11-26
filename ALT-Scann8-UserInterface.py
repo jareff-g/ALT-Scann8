@@ -16,10 +16,11 @@ More info in README.md file
 """
 
 __author__ = 'Juan Remirez de Esparza'
-__copyright__ = "Copyright 2022, Juan Remirez de Esparza"
+__copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.0"
+__version__ = "1.8.0"
+__date__ = "2023-11-26"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1679,7 +1680,6 @@ def adjust_hdr_bracket():
 # 'preview': Manual scan, display only, do not save
 def capture(mode):
     global CurrentDir, CurrentFrame, CurrentExposure
-    global exposure_frame_value_label
     global SessionData
     global PreviousCurrentExposure
     global SimulatedRun
@@ -1717,11 +1717,8 @@ def capture(mode):
             if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
                     aux_exposure_str = "Auto (" + str(round((aux_current_exposure - 20000) / 2000)) + ")"
-                    #print(f"AE match: ({aux_current_exposure},{aux_exposure_str})")
                     logging.info("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
-                if ExpertMode:
-                    exposure_frame_value_label.config(text=aux_exposure_str)
                 PreviousCurrentExposure = aux_current_exposure
                 win.update()
                 time.sleep(0.2)
@@ -2431,7 +2428,6 @@ def load_session_data():
     global colour_gains_red_value_label, colour_gains_blue_value_label
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
-    global exposure_frame_value_label
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
@@ -2527,7 +2523,8 @@ def load_session_data():
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
-                        awb_wait_checkbox.select()
+                        awb_red_wait_checkbox.select()
+                        awb_blue_wait_checkbox.select()
                 if 'GainRed' in SessionData:
                     GainRed = float(SessionData["GainRed"])
                     wb_red_str.set(GainRed)
@@ -2702,6 +2699,7 @@ def tscann8_init():
         ]
     )
 
+    logging.info("ALT-Scann8 %s (%s)", __version__, __date__)
     logging.info("Log file: %s", log_file_fullpath)
 
     if SimulatedRun:
@@ -2836,7 +2834,7 @@ def build_ui():
     global folder_frame_target_dir
     global Scanned_Images_number_label
     global Scanned_Images_fpm
-    global exposure_frame_value_label, exposure_frame
+    global exposure_frame
     global film_type_S8_btn
     global film_type_R8_btn
     global save_bg, save_fg
