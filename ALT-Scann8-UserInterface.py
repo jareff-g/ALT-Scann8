@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.0"
-__date__ = "2023-11-26"
+__version__ = "1.8.1"
+__date__ = "2023-11-27"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -32,6 +32,8 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import *
+from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, X, RAISED, SUNKEN
+from tkinter import Toplevel, Label, Button, Frame, LabelFrame, Canvas
 
 from PIL import ImageTk, Image
 
@@ -524,6 +526,7 @@ def exposure_selection(updown):
     global exposure_spinbox, exposure_str
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
+    global auto_exp_wait_checkbox
 
     if not ExpertMode:
         return
@@ -561,6 +564,7 @@ def exposure_spinbox_dbl_click(event):
     global exposure_spinbox, exposure_str
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
+    global auto_exp_wait_checkbox
 
     if CurrentExposure != 0:  # Not in automatic mode, activate auto
         CurrentExposure = 0
@@ -1013,6 +1017,7 @@ def button_status_change_except(except_button, active):
     global film_type_S8_btn, film_type_R8_btn
     global PiCam2_preview_btn, hdr_btn, hq_btn, turbo_btn
     global button_lock_counter
+    global hdr_capture_active_checkbox
 
     if active:
         button_lock_counter += 1
@@ -1369,7 +1374,7 @@ def hdr_set_controls():
 def switch_hdr_capture():
     global CurrentExposure
     global SimulatedRun
-    global hdr_capture_active, HdrCaptureActive, hdr_capture_active_checkbox
+    global hdr_capture_active, HdrCaptureActive
 
     HdrCaptureActive = hdr_capture_active.get()
     SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
@@ -1504,6 +1509,7 @@ def set_s8():
     global pt_level_str, min_frame_steps_str
     global FilmHoleY1, FilmHoleY2
     global ALT_scann_init_done
+    global film_hole_frame_1, film_hole_frame_2
 
     film_type_S8_btn.config(relief=SUNKEN)
     film_type_R8_btn.config(relief=RAISED)
@@ -1535,6 +1541,7 @@ def set_r8():
     global PTLevel, PTLevelR8
     global MinFrameSteps, MinFrameStepsR8
     global pt_level_str, min_frame_steps_str
+    global film_hole_frame_1, film_hole_frame_2
 
     film_type_R8_btn.config(relief=SUNKEN)
     film_type_S8_btn.config(relief=RAISED)
@@ -1591,9 +1598,6 @@ def capture_hdr():
     global camera, exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
 
-    if not IsPiCamera2:
-        # Create the in-memory stream
-        stream = BytesIO()
     if recalculate_hdr_exp_list:
         hdr_init()
         recalculate_hdr_exp_list = False
@@ -1785,13 +1789,6 @@ def capture(mode):
                 # Time passed since frame arrival notification is deducted from the delay (it can be relevant,
                 # if adaptation delay for AE and AWB is enabled)
                 time.sleep(CaptureStabilizationDelay)
-                """
-                stabilization_time = CaptureStabilizationDelay-(time.time()-FrameArrivalTime)
-                if stabilization_time > 0:
-                    time.sleep(stabilization_time)
-                else:
-                    print(CaptureStabilizationDelay, time.time(), FrameArrivalTime)
-                """
                 if mode == 'still':
                     captured_snapshot = camera.capture_image("main")
                     captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
@@ -1911,6 +1908,7 @@ def capture_loop_simulated():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
+    global Scanned_Images_fpm
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2042,6 +2040,7 @@ def capture_loop():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames, CurrentStill
+    global Scanned_Images_fpm
 
     if ScanStopRequested:
         stop_scan()
@@ -2063,8 +2062,6 @@ def capture_loop():
                          round((total_wait_time_autoexp*1000/session_frames),1))
     elif ScanOngoing:
         if NewFrameAvailable:
-            FrameArrivalTime = time.time()  # Time in microseconds (used to honor stability delay)
-            curtime = time.ctime()
             CurrentFrame += 1
             session_frames += 1
             register_frame()
@@ -2180,6 +2177,7 @@ def UpdatePlotterWindow(PTValue):
 # send_arduino_command: No response expected
 def send_arduino_command(cmd, param=0):
     global SimulatedRun, ALT_Scann8_controller_detected
+    global i2c
 
     if not SimulatedRun:
         time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
@@ -2206,6 +2204,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global pt_level_str, min_frame_steps_str
     global Controller_Id
     global ScanStopRequested
+    global i2c
 
     max_inactivity_delay = 6 if HdrCaptureActive else 3
 
@@ -2426,6 +2425,7 @@ def load_session_data():
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
+    global auto_exp_wait_checkbox
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
@@ -2729,7 +2729,7 @@ def tscann8_init():
         i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
         i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
-    win = Tk()  # creating the main window and storing the window object in 'win'
+    win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     win.title('ALT-Scann 8')  # setting title of the window
     win.geometry('1100x810')  # setting the size of the window
     win.geometry('+50+50')  # setting the position of the window
