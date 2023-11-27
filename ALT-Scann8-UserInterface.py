@@ -31,18 +31,14 @@ from tkinter import filedialog
 
 import tkinter.messagebox
 import tkinter.simpledialog
-from tkinter import *
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, X, RAISED, SUNKEN
 from tkinter import Toplevel, Label, Button, Frame, LabelFrame, Canvas
 
 from PIL import ImageTk, Image
 
 import os
-import subprocess
 import time
 import json
-
-from enum import Enum
 
 from datetime import datetime
 import logging
@@ -61,7 +57,6 @@ try:
         # If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
         IsPiCamera2 = False
         import picamera
-        from io import BytesIO
 
     # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
     SimulatedRun = False
@@ -455,7 +450,7 @@ def set_new_folder():
 
     requested_dir = ""
 
-    # CurrentDir = tkinter.filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
+    # CurrentDir = filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
     CurrentDir = BaseDir
     # folder_frame_target_dir.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
@@ -491,9 +486,9 @@ def set_existing_folder():
     # Disable preview to make tkinter dialogs visible
     hide_preview()
     if not SimulatedRun:
-        CurrentDir = tk.filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
+        CurrentDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
     else:
-        CurrentDir = tk.filedialog.askdirectory(initialdir=CurrentDir,
+        CurrentDir = filedialog.askdirectory(initialdir=CurrentDir,
                                                 title="Select existing folder with snapshots for simulated run")
     if not CurrentDir:
         return
