@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.1"
-__date__ = "2023-11-27"
+__version__ = "1.8.2"
+__date__ = "2023-11-30"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -131,7 +131,7 @@ DeltaX = 0
 DeltaY = 0
 WinInitDone = False
 FolderProcess = 0
-LoggingMode = "WARNING"
+LoggingMode = "INFO"
 LogLevel = 0
 draw_capture_label = 0
 button_lock_counter = 0
@@ -243,12 +243,15 @@ VideoCaptureActive = False
 image_list = []
 # 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
 dry_run_iterations = 4
-# HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (0.9-56) are better
-hdr_min_exp = 1
-hdr_max_exp = 56
+# HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
+# Finally set to 4-104
+hdr_min_exp = 4
+hdr_max_exp = 104
+hdr_bracket_width = 100
 num_steps = 4
 step_value = 1
 exp_list = []
+rev_exp_list = []
 HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 
@@ -1229,7 +1232,6 @@ def fast_forward_loop():
 def capture_display_thread(queue, event, id):
     global message
 
-    # logging.info("I'll be updating the preview image outside of the main scanning loop, to optimize speed")
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
@@ -1255,13 +1257,12 @@ def capture_save_thread(queue, event, id):
     global CurrentDir
     global message
 
-    # logging.info("I'll be updating the preview image outside of the main scanning loop, to optimize speed")
     os.chdir(CurrentDir)
     logging.debug("Started capture_save_thread n.%i", id)
     while not event.is_set() or not queue.empty():
         message = queue.get()
         curtime = time.time()
-        logging.info("Thread %i: Retrieved message from capture save queue", id)
+        logging.debug("Thread %i: Retrieved message from capture save queue", id)
         if message == END_TOKEN:
             break
         # Invert image if button selected
@@ -1356,7 +1357,7 @@ def update_rpi_temp():
 
 
 def hdr_set_controls():
-    global hdr_capture_active, hdr_optimize_bracket_btn
+    global hdr_capture_active, hdr_optimize_bracket_btn, hdr_narrower_bracket_btn, hdr_wider_bracket_btn
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
 
     hdr_viewx4_active_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
@@ -1365,6 +1366,8 @@ def hdr_set_controls():
     hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_optimize_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_narrower_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_wider_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
 
 def switch_hdr_capture():
     global CurrentExposure
@@ -1590,23 +1593,36 @@ def register_frame():
 def capture_hdr():
     global CurrentFrame
     global capture_display_queue, capture_save_queue
-    global camera, exp_list, VideoCaptureActive
+    global camera, exp_list, rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
 
     if recalculate_hdr_exp_list:
         hdr_init()
         recalculate_hdr_exp_list = False
     image_list.clear()
-    idx=1
-    for exp in exp_list:
+    # session_frames should be equal to 1 for the first captured frame of the scan session.
+    # For HDR this means we need to unconditionally wait for exposure adaptation
+    # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
+    perform_dry_run = session_frames == 1
+    if session_frames % 2 == 1:
+        work_list = exp_list
+        idx = 1
+        idx_inc = 1
+    else:
+        work_list = rev_exp_list
+        idx=4
+        idx_inc = -1
+    for exp in work_list:
         logging.debug("capture_hdr: exp %.2f", exp)
         if IsPiCamera2:
-            camera.set_controls({"ExposureTime": int(exp*1000)})
+            if perform_dry_run:
+                camera.set_controls({"ExposureTime": int(exp*1000)})
             # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
             if VideoCaptureActive:
-                for i in range(1, dry_run_iterations):
-                    camera.capture_request()
-                    win.update()
+                if perform_dry_run:
+                    for i in range(1, dry_run_iterations):
+                        camera.capture_request()
+                        win.update()
                 request = camera.capture_request()
                 win.update()
                 img = request.make_image("main")
@@ -1614,11 +1630,15 @@ def capture_hdr():
                 captured_snapshot = img.copy()
                 request.release()
             else:
-                for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
-                    camera.capture_image("main")
-                    win.update()
+                if perform_dry_run:
+                    for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
+                        camera.capture_image("main")
+                        win.update()
                 captured_snapshot = camera.capture_image("main")
                 win.update()
+            # We skip dry run only for the first capture of each frame,
+            # as it is the same exposure as the last capture of the previous one
+            perform_dry_run = True
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((captured_snapshot, CurrentFrame, idx))
             capture_display_queue.put(queue_item)
@@ -1630,13 +1650,28 @@ def capture_hdr():
                 win.update()
             camera.capture('hdrpic-%05d.%i.jpg' % (CurrentFrame, idx), quality=100)
             win.update()
-        idx += 1
+        idx += idx_inc
+
+
+def narrower_hdr_bracket():
+    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
+    hdr_bracket_width -= 1
+    hdr_max_exp = hdr_min_exp + hdr_bracket_width
+    hdr_max_exp_str.set(hdr_max_exp)
+    hdr_init()
+
+def wider_hdr_bracket():
+    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
+    hdr_bracket_width += 1
+    hdr_max_exp = hdr_min_exp + hdr_bracket_width
+    hdr_max_exp_str.set(hdr_max_exp)
+    hdr_init()
 
 
 def adjust_hdr_bracket():
-    global camera, exp_list, VideoCaptureActive, HdrCaptureActive
+    global camera, VideoCaptureActive, HdrCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
-    global hdr_min_exp, hdr_max_exp
+    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
     global hdr_min_exp_str, hdr_max_exp_str
 
     if not HdrCaptureActive:
@@ -1665,9 +1700,9 @@ def adjust_hdr_bracket():
     else:
         CurrentExposure = int(camera.exposure_speed/1000)
 
-    hdr_min_exp = max (CurrentExposure-28, 1)
+    hdr_min_exp = max (CurrentExposure-40, 4)
     hdr_min_exp_str.set(hdr_min_exp)
-    hdr_max_exp = hdr_min_exp + 56
+    hdr_max_exp = hdr_min_exp + hdr_bracket_width
     hdr_max_exp_str.set(hdr_max_exp)
     hdr_init()
 
@@ -1716,7 +1751,7 @@ def capture(mode):
             if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
                     aux_exposure_str = "Auto (" + str(round((aux_current_exposure - 20000) / 2000)) + ")"
-                    logging.info("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
+                    logging.debug("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
                 win.update()
@@ -1728,7 +1763,7 @@ def capture(mode):
         if wait_loop_count > 0:
             total_wait_time_autoexp+=(time.time() - curtime)
             #print(f"AE match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
-            logging.info("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
+            logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     # Wait for auto white balance to adapt only if allowed
     if CurrentAwbAuto and AwbPause:
@@ -1750,7 +1785,7 @@ def capture(mode):
                 if (wait_loop_count % 10 == 0):
                     aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
                     #print(f"AWB Match: {aux_gains_str})")
-                    logging.info("AWB Match: %s", aux_gains_str)
+                    logging.debug("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
                 if ExpertMode:
                     colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
@@ -1766,7 +1801,7 @@ def capture(mode):
         if wait_loop_count > 0:
             total_wait_time_awb+=(time.time() - curtime)
             #print(f"AWB Match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
-            logging.info("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
+            logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     if not SimulatedRun:
         if IsPiCamera2:
@@ -1803,10 +1838,10 @@ def capture(mode):
                         # For PiCamera2, preview and save to file are handled in asynchronous threads
                         queue_item = tuple((captured_snapshot, CurrentFrame, 0))
                         capture_display_queue.put(queue_item)
-                        logging.info("Displaying frame %i", CurrentFrame)
+                        logging.debug("Displaying frame %i", CurrentFrame)
                         if mode == 'normal' or mode == 'manual':    # Do not save in preview mode, only display
                             capture_save_queue.put(queue_item)
-                            logging.info("Saving frame %i", CurrentFrame)
+                            logging.debug("Saving frame %i", CurrentFrame)
                             if mode == 'manual':  # In manual mode, increase CurrentFrame
                                 CurrentFrame += 1
                                 # Update number of captured frames
@@ -1910,17 +1945,17 @@ def capture_loop_simulated():
         ScanStopRequested = False
         curtime = time.time()
         if ExpertMode:
-            logging.info("Total session time: %s seg for %i frames (%i ms per frame)",
+            logging.debug("Total session time: %s seg for %i frames (%i ms per frame)",
                          str(round((curtime-session_start_time),1)),
                          session_frames,
                          round(((curtime-session_start_time)*1000/session_frames),1))
-            logging.info("Total time to display preview image: %s seg, (%i ms per frame)",
+            logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_preview_display),1)),
                          round((total_wait_time_preview_display*1000/session_frames),1))
-            logging.info("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
+            logging.debug("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_awb),1)),
                          round((total_wait_time_awb*1000/session_frames),1))
-            logging.info("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
+            logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
     if ScanOngoing:
@@ -2005,7 +2040,7 @@ def start_scan():
         if not SimulatedRun:
             send_arduino_command(CMD_START_SCAN)
 
-        # Invoke capture_loop a first time shen scan starts
+        # Invoke capture_loop a first time when scan starts
         win.after(5, capture_loop)
 
 def stop_scan():
@@ -2042,17 +2077,17 @@ def capture_loop():
         ScanStopRequested = False
         curtime = time.time()
         if ExpertMode and session_frames > 0:
-            logging.info("Total session time: %s seg for %i frames (%i ms per frame)",
+            logging.debug("Total session time: %s seg for %i frames (%i ms per frame)",
                          str(round((curtime-session_start_time),1)),
                          session_frames,
                          round(((curtime-session_start_time)*1000/session_frames),1))
-            logging.info("Total time to display preview image: %s seg, (%i ms per frame)",
+            logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_preview_display),1)),
                          round((total_wait_time_preview_display*1000/session_frames),1))
-            logging.info("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
+            logging.debug("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_awb),1)),
                          round((total_wait_time_awb*1000/session_frames),1))
-            logging.info("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
+            logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
     elif ScanOngoing:
@@ -2166,7 +2201,8 @@ def UpdatePlotterWindow(PTValue):
     plotter_canvas.create_line(plotter_width-6, plotter_height-(PrevPTValue/(MaxPT/plotter_height)), plotter_width-1, plotter_height-(PTValue/(MaxPT/plotter_height)), width=1, fill="blue")
 
     PrevPTValue = PTValue
-    MaxPT-=1 # Dynamic max
+    if MaxPT > 100:  # Do not allow below 100
+        MaxPT-=1 # Dynamic max
 
 
 # send_arduino_command: No response expected
@@ -2233,7 +2269,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
-        logging.info("Controller requested to reinit")
+        logging.debug("Controller requested to reinit")
         reinit_controller()
     elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
         last_frame_time = time.time() + max_inactivity_delay
@@ -2251,10 +2287,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             min_frame_steps_str.set(str(ArduinoParam2))
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
-        logging.info("Received rewind end event from Arduino")
+        logging.debug("Received rewind end event from Arduino")
     elif ArduinoTrigger == RSP_FAST_FORWARD_ENDED:  # FastForward ended, we can re-enable buttons
         FastForwardEndOutstanding = True
-        logging.info("Received fast forward end event from Arduino")
+        logging.debug("Received fast forward end event from Arduino")
     elif ArduinoTrigger == RSP_REWIND_ERROR:  # Error during Rewind
         RewindErrorOutstanding = True
         logging.warning("Received rewind error from Arduino")
@@ -2387,9 +2423,9 @@ def load_config_data():
     global CaptureStabilizationDelay, stabilization_delay_str
 
     for item in SessionData:
-        logging.info("%s=%s", item, str(SessionData[item]))
+        logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
-        logging.info("SessionData loaded from disk:")
+        logging.debug("SessionData loaded from disk:")
         if 'PreviewWarnAgain' in SessionData:
             PreviewWarnAgain = eval(SessionData["PreviewWarnAgain"])
         if 'TempInFahrenheit' in SessionData:
@@ -2442,7 +2478,7 @@ def load_session_data():
                                          message='ALT-Scann 8 was interrupted during the last session.\
                                          \r\nDo you want to continue from where it was stopped?')
         if confirm:
-            logging.info("SessionData loaded from disk:")
+            logging.debug("SessionData loaded from disk:")
             if 'CurrentDir' in SessionData:
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
@@ -2652,12 +2688,13 @@ def PiCam2_configure():
 
 
 def hdr_init():
-    global step_value, exp_list, hdr_min_exp, hdr_max_exp, num_steps, hdr_view_4_image
+    global step_value, exp_list, rev_exp_list, hdr_min_exp, hdr_max_exp, num_steps, hdr_view_4_image
 
     hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
     step_value = (hdr_max_exp - hdr_min_exp) / num_steps
     exp_list = numpy.arange(hdr_min_exp, hdr_max_exp, step_value).tolist()
     exp_list.sort()
+    rev_exp_list = list(reversed(exp_list))
 
 def tscann8_init():
     global win
@@ -2716,7 +2753,7 @@ def tscann8_init():
     else:
         BaseDir = homefolder
     CurrentDir = BaseDir
-    logging.info("BaseDir=%s",BaseDir)
+    logging.debug("BaseDir=%s",BaseDir)
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -2725,7 +2762,7 @@ def tscann8_init():
         i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
-    win.title('ALT-Scann 8')  # setting title of the window
+    win.title('ALT-Scann8 v' + __version__)  # setting title of the window
     win.geometry('1100x810')  # setting the size of the window
     win.geometry('+50+50')  # setting the position of the window
     # Prevent window resize
@@ -2737,7 +2774,7 @@ def tscann8_init():
         win.maxsize(1100, 950)
 
     if SimulatedRun:
-        win.wm_title(string='*** ALT-Scann 8 SIMULATED RUN * NOT OPERATIONAL ***')
+        win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
 
     reset_controller()
 
@@ -2875,7 +2912,7 @@ def build_ui():
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
     global hdr_min_exp_str, hdr_max_exp_str
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
-    global hdr_optimize_bracket_btn
+    global hdr_optimize_bracket_btn, hdr_narrower_bracket_btn, hdr_wider_bracket_btn
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3300,10 +3337,18 @@ def build_ui():
         hdr_max_exp_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
         hdr_max_exp_spinbox.bind("<FocusOut>", hdr_max_exp_spinbox_focus_out)
 
-        hdr_optimize_bracket_btn = Button(hdr_frame, text="Adjust bracket", width=12, height=1,
+        hdr_narrower_bracket_btn = Button(hdr_frame, text="-", width=1, height=1,
+                                                    command=narrower_hdr_bracket,
+                                                    state=DISABLED, font=("Arial", 7))
+        hdr_narrower_bracket_btn.grid(row=3, column=0, padx=2, pady=11, sticky=W)
+        hdr_optimize_bracket_btn = Button(hdr_frame, text="Adjust bracket", width=10, height=1,
                                                     command=adjust_hdr_bracket,
                                                     state=DISABLED, font=("Arial", 7))
         hdr_optimize_bracket_btn.grid(row=3, column=0, columnspan=2, padx=2, pady=11)
+        hdr_wider_bracket_btn = Button(hdr_frame, text="+", width=1, height=1,
+                                                    command=wider_hdr_bracket,
+                                                    state=DISABLED, font=("Arial", 7))
+        hdr_wider_bracket_btn.grid(row=3, column=1, padx=2, pady=11, sticky=E)
 
         # Integrated plotter
         if PlotterMode:
