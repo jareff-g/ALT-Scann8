@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.2"
-__date__ = "2023-11-30"
+__version__ = "1.8.3"
+__date__ = "2023-12-02"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -68,7 +68,7 @@ import threading
 import queue
 
 
-#  ######### Global variable definition (I know, too many. Need to go back to school) ##########
+#  ######### Global variable definition (I know, too many...) ##########
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -80,6 +80,9 @@ FocusZoomFactorY = 0.2
 FreeWheelActive = False
 BaseDir = '/home/juan/Vídeos'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
+FrameFilenamePattern = "picture-%05d.jpg"
+FrameHdrFilenamePattern = "picture-%05d.%1d.jpg"   # HDR frames using standard filename (2/12/2023)
+StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
@@ -1249,15 +1252,21 @@ def capture_display_thread(queue, event, id):
             draw_preview_image(message[0], message[2])
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
-            logging.debug("Display queue almost full: Dropping frame")
+            logging.warning("Display queue almost full: Skipping frame display")
     logging.debug("Exiting capture_display_thread")
 
 
 def capture_save_thread(queue, event, id):
     global CurrentDir
     global message
+    global ScanStopRequested
 
-    os.chdir(CurrentDir)
+    if os.path.isdir(CurrentDir):
+        os.chdir(CurrentDir)
+    else:
+        logging.error("Target dir %s unmounted: Stop scan session", CurrentDir)
+        ScanStopRequested = True    # If target dir does not exist, stop scan
+        return
     logging.debug("Started capture_save_thread n.%i", id)
     while not event.is_set() or not queue.empty():
         message = queue.get()
@@ -1270,10 +1279,11 @@ def capture_save_thread(queue, event, id):
             image_array = numpy.asarray(message[0])
             image_array = numpy.negative(image_array)
             message[0] = Image.fromarray(image_array)
-        if message[2] != 0:
-            message[0].save('hdrpic-%05d.%i.jpg' % (message[1],message[2]))
+        if message[2] > 1:  # Hdr frame 1 has standard filename
+            logging.debug("Saving HDR frame n.%i", message[2])
+            message[0].save(FrameHdrFilenamePattern % (message[1],message[2]), quality=95)
         else:
-            message[0].save('picture-%05d.jpg' % message[1], quality=95)
+            message[0].save(FrameFilenamePattern % message[1], quality=95)
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1648,7 +1658,10 @@ def capture_hdr():
             for i in range(1,dry_run_iterations):
                 camera.capture(None, format='jpeg')     # Not sure None will work here
                 win.update()
-            camera.capture('hdrpic-%05d.%i.jpg' % (CurrentFrame, idx), quality=100)
+            if idx == 1:
+                camera.capture(FrameFilenamePattern % (CurrentFrame), quality=100)
+            else:
+                camera.capture(FrameHdrFilenamePattern % (CurrentFrame, idx), quality=100)
             win.update()
         idx += idx_inc
 
@@ -1807,11 +1820,11 @@ def capture(mode):
         if IsPiCamera2:
             if PiCam2PreviewEnabled:
                 if mode == 'still':
-                    camera.switch_mode_and_capture_file(capture_config, 'still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
+                    camera.switch_mode_and_capture_file(capture_config, StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
                     # This one should not happen, will not allow PiCam2 scan in preview mode
-                    camera.switch_mode_and_capture_file(capture_config, 'picture-%05d.jpg' % CurrentFrame)
+                    camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
             else:
                 # Allow time to stabilize image, it can get too fast with PiCamera2
                 # Maybe we could refine this (shorter time, Arduino specific slowdown?)
@@ -1821,7 +1834,7 @@ def capture(mode):
                 time.sleep(CaptureStabilizationDelay)
                 if mode == 'still':
                     captured_snapshot = camera.capture_image("main")
-                    captured_snapshot.save('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill))
+                    captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
                     if HdrCaptureActive:
@@ -1850,13 +1863,13 @@ def capture(mode):
 
         else:
             if mode == 'still':
-                camera.capture('still-picture-%05d-%02d.jpg' % (CurrentFrame,CurrentStill), quality=100)
+                camera.capture(StillFrameFilenamePattern % (CurrentFrame,CurrentStill), quality=100)
                 CurrentStill += 1
             else:
                 if HdrCaptureActive:
                     capture_hdr()
                 else:
-                    camera.capture('picture-%05d.jpg' % CurrentFrame, quality=100)
+                    camera.capture(FrameFilenamePattern % CurrentFrame, quality=100)
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -2248,7 +2261,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         except IOError:
             ArduinoTrigger = 0
             # Log error to console
-            logging.debug("Non-critical IOError while checking incoming event from Arduino. Will check again.")
+            logging.warning("Non-critical IOError while checking incoming event from Arduino. Will check again.")
 
     if ScanOngoing and time.time() > last_frame_time:
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
