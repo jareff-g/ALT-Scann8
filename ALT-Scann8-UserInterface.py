@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.3"
-__date__ = "2023-12-02"
+__version__ = "1.8.4"
+__date__ = "2023-12-04
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2258,10 +2258,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
             ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
-        except IOError:
+        except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
-            logging.warning("Non-critical IOError while checking incoming event from Arduino. Will check again.")
+            logging.warning(f"Non-critical IOError ({e}) while checking incoming event from Arduino. Will check again.")
 
     if ScanOngoing and time.time() > last_frame_time:
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
