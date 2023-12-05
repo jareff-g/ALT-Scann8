@@ -1627,6 +1627,8 @@ def capture_hdr():
         if IsPiCamera2:
             if perform_dry_run:
                 camera.set_controls({"ExposureTime": int(exp*1000)})
+            else:
+                time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image only if no dry run
             # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
             if VideoCaptureActive:
                 if perform_dry_run:
@@ -1826,20 +1828,17 @@ def capture(mode):
                     # This one should not happen, will not allow PiCam2 scan in preview mode
                     camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
             else:
-                # Allow time to stabilize image, it can get too fast with PiCamera2
-                # Maybe we could refine this (shorter time, Arduino specific slowdown?)
-                # In principle, 100 ms seems OK. Tried with 50 and some frames were blurry
-                # Time passed since frame arrival notification is deducted from the delay (it can be relevant,
-                # if adaptation delay for AE and AWB is enabled)
-                time.sleep(CaptureStabilizationDelay)
+                time.sleep(CaptureStabilizationDelay)   # Allow time to stabilize image, it can get too fast with PiCamera2
                 if mode == 'still':
                     captured_snapshot = camera.capture_image("main")
                     captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
                     CurrentStill += 1
                 else:
                     if HdrCaptureActive:
+                        # Stabilization delay for HDR managed inside capture_hdr
                         capture_hdr()
                     else:
+                        time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
                         if VideoCaptureActive:
                             request = camera.capture_request()
                             img = request.make_image("main")
