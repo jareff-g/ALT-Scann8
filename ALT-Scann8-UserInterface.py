@@ -44,7 +44,9 @@ from datetime import datetime
 import logging
 import sys
 import getopt
-import numpy
+
+import cv2
+import numpy as np
 
 try:
     import smbus
@@ -251,10 +253,10 @@ dry_run_iterations = 4
 hdr_min_exp = 4
 hdr_max_exp = 104
 hdr_bracket_width = 100
-num_steps = 4
-step_value = 1
-exp_list = []
-rev_exp_list = []
+hdr_num_steps = 4
+hdr_step_value = 1
+hdr_exp_list = []
+hdr_rev_exp_list = []
 HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 
@@ -1246,8 +1248,8 @@ def capture_display_thread(queue, event, id):
         if (queue.qsize() <= 5):
             # Invert image if button selected
             if NegativeCaptureActive:
-                image_array = numpy.asarray(message[0])
-                image_array = numpy.negative(image_array)
+                image_array = np.asarray(message[0])
+                image_array = np.negative(image_array)
                 message[0] = Image.fromarray(image_array)
             draw_preview_image(message[0], message[2])
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
@@ -1276,8 +1278,8 @@ def capture_save_thread(queue, event, id):
             break
         # Invert image if button selected
         if NegativeCaptureActive:
-            image_array = numpy.asarray(message[0])
-            image_array = numpy.negative(image_array)
+            image_array = np.asarray(message[0])
+            image_array = np.negative(image_array)
             message[0] = Image.fromarray(image_array)
         if message[2] > 1:  # Hdr frame 1 has standard filename
             logging.debug("Saving HDR frame n.%i", message[2])
@@ -1603,7 +1605,7 @@ def register_frame():
 def capture_hdr():
     global CurrentFrame
     global capture_display_queue, capture_save_queue
-    global camera, exp_list, rev_exp_list, VideoCaptureActive
+    global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
 
     if recalculate_hdr_exp_list:
@@ -1615,11 +1617,11 @@ def capture_hdr():
     # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
     perform_dry_run = session_frames == 1
     if session_frames % 2 == 1:
-        work_list = exp_list
+        work_list = hdr_exp_list
         idx = 1
         idx_inc = 1
     else:
-        work_list = rev_exp_list
+        work_list = hdr_rev_exp_list
         idx=4
         idx_inc = -1
     for exp in work_list:
@@ -1720,6 +1722,54 @@ def adjust_hdr_bracket():
     hdr_max_exp = hdr_min_exp + hdr_bracket_width
     hdr_max_exp_str.set(hdr_max_exp)
     hdr_init()
+
+
+def adjust_hdr_bracket_experimental():
+    global hdr_num_steps, hdr_exp_list, hdr_rev_exp_list
+
+    if not HdrCaptureActive:
+        return
+
+    if IsPiCamera2:
+        # Set automatic exposure to capture the image on which to calculate bracket
+        camera.set_controls({"ExposureTime": 0})
+        for i in range(1, dry_run_iterations):  # Perform a few dummy captures to allow exposure stabilization
+            camera.capture_image("main")
+            win.update()
+        image = camera.capture_image("main")
+    else:
+        camera.shutter_speed = 0    # Set automatic exposure
+        for i in range(1, dry_run_iterations + 1):
+            camera.capture(None, format='jpeg')  # Not sure None will work here
+            win.update()
+        image = camera.capture(None, format='jpeg')  # Not sure None will work here
+
+    image_array = np.asarray(image)
+    # Convert the image to grayscale
+    gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
+
+    # Calculate the histogram
+    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
+
+    # Find the cumulative distribution function (CDF) of the histogram
+    cdf = hist.cumsum() / hist.sum()
+
+    # Find the exposure values for each snapshot based on percentiles
+    hdr_exp_list = []
+    for _ in range(hdr_num_steps):
+        lower_percentile = 0.25  # Adjust as needed
+        upper_percentile = 0.75  # Adjust as needed
+        lower_bound = np.argmax(cdf >= lower_percentile)
+        upper_bound = np.argmax(cdf >= upper_percentile)
+        exposure_value = (lower_bound + upper_bound) / 2
+        hdr_exp_list.append(exposure_value)
+
+    hdr_rev_exp_list = list(reversed(hdr_exp_list))
+    print(hdr_exp_list)
+    hdr_min_exp = hdr_exp_list[0]
+    hdr_min_exp_str.set(hdr_min_exp)
+    hdr_max_exp = hdr_exp_list[hdr_num_steps-1]
+    hdr_max_exp_str.set(hdr_max_exp)
 
 
 # 4 possible modes:
@@ -1977,8 +2027,8 @@ def capture_loop_simulated():
         if ext == '.jpg':
             raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
             if NegativeCaptureActive:
-                image_array = numpy.asarray(raw_simulated_capture_image)
-                image_array = numpy.negative(image_array)
+                image_array = np.asarray(raw_simulated_capture_image)
+                image_array = np.negative(image_array)
                 raw_simulated_capture_image = Image.fromarray(image_array)
             draw_preview_image(raw_simulated_capture_image, 0)
 
@@ -2700,13 +2750,13 @@ def PiCam2_configure():
 
 
 def hdr_init():
-    global step_value, exp_list, rev_exp_list, hdr_min_exp, hdr_max_exp, num_steps, hdr_view_4_image
+    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_steps, hdr_view_4_image
 
     hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
-    step_value = (hdr_max_exp - hdr_min_exp) / num_steps
-    exp_list = numpy.arange(hdr_min_exp, hdr_max_exp, step_value).tolist()
-    exp_list.sort()
-    rev_exp_list = list(reversed(exp_list))
+    hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_steps
+    hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
+    hdr_exp_list.sort()
+    hdr_rev_exp_list = list(reversed(hdr_exp_list))
 
 def tscann8_init():
     global win
