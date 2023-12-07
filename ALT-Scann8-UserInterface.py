@@ -2911,6 +2911,7 @@ def build_ui():
     global pt_level_spinbox, pt_level_str
     global PTLevel
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
+    global frame_extra_steps_spinbox
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
     global exposure_spinbox, exposure_str
     global wb_red_spinbox, wb_red_str
