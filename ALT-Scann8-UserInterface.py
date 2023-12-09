@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.4"
-__date__ = "2023-12-04"
+__version__ = "1.8.5"
+__date__ = "2023-12-09"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -45,7 +45,6 @@ import logging
 import sys
 import getopt
 
-import cv2
 import numpy as np
 
 try:
@@ -252,13 +251,16 @@ dry_run_iterations = 4
 # Finally set to 4-104
 hdr_min_exp = 4
 hdr_max_exp = 104
-hdr_bracket_width = 100
+hdr_bracket_width = 50
 hdr_num_steps = 4
 hdr_step_value = 1
 hdr_exp_list = []
 hdr_rev_exp_list = []
 HdrViewX4Active = False
 recalculate_hdr_exp_list = False
+force_adjust_hdr_bracket = False
+HdrBracketAuto = False
+hdr_auto_bracket_frames = 8    # Every n frames, bracket is recalculated
 
 # Persisted data
 # Persisted data
@@ -280,7 +282,11 @@ SessionData = {
     "PTLevelR8":  200,
     "PTLevel":  80,
     "PTLevelAuto": True,
-    "FrameStepsAuto": True
+    "FrameStepsAuto": True,
+    "HdrMinExp": hdr_min_exp,
+    "HdrMaxExp": hdr_max_exp,
+    "HdrBracketWidth": hdr_bracket_width,
+    "HdrBracketAuto": True
 }
 
 def exit_app():  # Exit Application
@@ -563,11 +569,12 @@ def exposure_selection(updown):
     exposure_spinbox.config(value=CurrentExposureStr)
 
 
-def exposure_spinbox_dbl_click(event):
+def exposure_spinbox_auto():
     global exposure_spinbox, exposure_str
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
     global auto_exp_wait_checkbox
+    global exposure_btn, exposure_spinbox
 
     if CurrentExposure != 0:  # Not in automatic mode, activate auto
         CurrentExposure = 0
@@ -592,8 +599,8 @@ def exposure_spinbox_dbl_click(event):
         SessionData["CurrentExposure"] = str(CurrentExposure)
 
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
-    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
     exposure_spinbox.config(value=CurrentExposureStr)
+    arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
 
 
 def auto_exposure_change_pause_selection():
@@ -653,7 +660,7 @@ def wb_blue_selection(updown):
             camera.awb_gains = (GainRed, GainBlue)
 
 
-def wb_spinbox_dbl_click(event):
+def wb_spinbox_auto():
     global colour_gains_red_value_label
     global wb_red_spinbox, wb_red_str
     global wb_blue_spinbox, wb_blue_str
@@ -702,8 +709,8 @@ def wb_spinbox_dbl_click(event):
                 camera.awb_mode = 'off'
                 camera.awb_gains = (GainRed, GainBlue)
 
-    wb_blue_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
-    wb_red_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
+    arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
+    arrange_widget_state(CurrentAwbAuto, [wb_red_btn, wb_red_spinbox])
 
 
 
@@ -868,16 +875,15 @@ def min_frame_steps_spinbox_focus_out(event):
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
-def min_frame_steps_spinbox_dbl_click(event):
-    global min_frame_steps_spinbox, min_frame_steps_str
+def min_frame_steps_spinbox_auto():
+    global min_frame_steps_spinbox, min_frame_steps_str, min_frame_steps_btn
     global MinFrameSteps, FrameSteps_auto
 
     FrameSteps_auto = not FrameSteps_auto
+
+    arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
+
     SessionData["FrameStepsAuto"] = FrameSteps_auto
-    if FrameSteps_auto:
-        min_frame_steps_spinbox.config(state='readonly')
-    else:
-        min_frame_steps_spinbox.config(state=NORMAL)
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
 
 
@@ -934,16 +940,15 @@ def pt_level_spinbox_focus_out(event):
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
-def pt_level_spinbox_dbl_click(event):
-    global pt_level_spinbox, pt_level_str
+def pt_level_spinbox_auto():
+    global pt_level_spinbox, pt_level_str, pt_level_btn
     global PTLevel, PTLevel_auto
 
     PTLevel_auto = not PTLevel_auto
+
+    arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
+
     SessionData["PTLevelAuto"] = PTLevel_auto
-    if PTLevel_auto:
-        pt_level_spinbox.config(state='readonly')
-    else:
-        pt_level_spinbox.config(state=NORMAL)
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
 
 
@@ -963,54 +968,100 @@ def scan_speed_spinbox_focus_out(event):
     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 
-def hdr_min_exp_selection(updown):
-    global hdr_min_exp_spinbox, hdr_min_exp_str, hdr_min_exp, hdr_max_exp, recalculate_hdr_exp_list
-
-    if not ExpertMode:
-        return
-
-    save_value = hdr_min_exp
-    hdr_min_exp = int(hdr_min_exp_str.get())
-    if (hdr_min_exp >= hdr_max_exp):
-        hdr_min_exp = hdr_max_exp - 1
-        hdr_min_exp_str.set(hdr_min_exp)
-    if save_value != hdr_min_exp:
-        recalculate_hdr_exp_list = True
-    SessionData["HdrMinExp"] = hdr_min_exp
-
-
-def hdr_max_exp_selection(updown):
-    global hdr_max_exp_spinbox, hdr_max_exp_str, hdr_max_exp, hdr_min_exp, recalculate_hdr_exp_list
-
-    if not ExpertMode:
-        return
-
-    save_value = hdr_max_exp
-    hdr_max_exp = int(hdr_max_exp_str.get())
-    if (hdr_max_exp <= hdr_min_exp):
-        hdr_max_exp = hdr_min_exp + 1
-        hdr_max_exp_str.set(hdr_max_exp)
-    if save_value != hdr_max_exp:
-        recalculate_hdr_exp_list = True
-    SessionData["HdrMaxExp"] = hdr_max_exp
-
-
-def hdr_min_exp_spinbox_focus_out(event):
+def hdr_check_min_exp(event):
     global hdr_min_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
+    global hdr_max_exp, hdr_max_exp_str
+    global hdr_bracket_width, hdr_bracket_width_str
+    global force_adjust_hdr_bracket
+
+    if not ExpertMode:
+        return
+
     save_value = hdr_min_exp
     hdr_min_exp = int(hdr_min_exp_str.get())
+    if hdr_min_exp < 1:
+        hdr_min_exp = 1
+    hdr_max_exp = hdr_min_exp + hdr_bracket_width
+    if hdr_max_exp > 1000:
+        hdr_bracket_width -= hdr_max_exp-1000  # Reduce bracked
+        hdr_max_exp = 1000
+        force_adjust_hdr_bracket = True
+    hdr_min_exp_str.set(hdr_min_exp)
+    hdr_max_exp_str.set(hdr_max_exp)
+    hdr_bracket_width_str.set(hdr_bracket_width)
     if save_value != hdr_min_exp:
         recalculate_hdr_exp_list = True
     SessionData["HdrMinExp"] = hdr_min_exp
+    SessionData["HdrMaxExp"] = hdr_max_exp
+    SessionData["HdrBracketWidth"] = hdr_max_exp
 
 
-def hdr_max_exp_spinbox_focus_out(event):
-    global hdr_max_exp_spinbox, hdr_max_exp_str, hdr_max_exp, recalculate_hdr_exp_list
+def hdr_check_max_exp(event):
+    global hdr_min_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
+    global hdr_max_exp, hdr_max_exp_str
+    global hdr_bracket_width, hdr_bracket_width_str
+    global force_adjust_hdr_bracket
+
+    if not ExpertMode:
+        return
+
     save_value = hdr_max_exp
     hdr_max_exp = int(hdr_max_exp_str.get())
+    if hdr_max_exp > 1000:
+        hdr_max_exp = 1000
+    if (hdr_max_exp > hdr_min_exp):
+        hdr_bracket_width = hdr_max_exp - hdr_min_exp
+        force_adjust_hdr_bracket = True
+    else:
+        hdr_min_exp = hdr_max_exp - hdr_bracket_width
+    if hdr_min_exp < 1:
+        hdr_min_exp = 1
+        hdr_bracket_width = hdr_max_exp - hdr_min_exp  # Reduce bracket
+        force_adjust_hdr_bracket = True
+    hdr_min_exp_str.set(hdr_min_exp)
+    hdr_max_exp_str.set(hdr_max_exp)
+    hdr_bracket_width_str.set(hdr_bracket_width)
     if save_value != hdr_max_exp:
         recalculate_hdr_exp_list = True
+    SessionData["HdrMinExp"] = hdr_min_exp
     SessionData["HdrMaxExp"] = hdr_max_exp
+    SessionData["HdrBracketWidth"] = hdr_max_exp
+
+
+def hdr_check_bracket_width(event):
+    global hdr_bracket_width_spinbox, hdr_bracket_width_str, hdr_bracket_width
+    global hdr_min_exp, hdr_min_exp_str
+    global hdr_max_exp, hdr_max_exp_str
+    global recalculate_hdr_exp_list
+    global force_adjust_hdr_bracket
+
+    if not ExpertMode:
+        return
+
+    save_value = hdr_bracket_width
+    hdr_bracket_width = int(hdr_bracket_width_str.get())
+
+    if (hdr_bracket_width < 4):
+        hdr_bracket_width = 4
+        hdr_bracket_width_str.set(hdr_bracket_width)
+    if (hdr_bracket_width > 200):
+        hdr_bracket_width = 200
+        hdr_bracket_width_str.set(hdr_bracket_width)
+
+    if save_value != hdr_bracket_width:
+        force_adjust_hdr_bracket = True
+        middle_exp = int((hdr_min_exp + (hdr_max_exp-hdr_min_exp))/2)
+        hdr_min_exp = int(middle_exp - (hdr_bracket_width/2))
+        if hdr_min_exp < 1:
+            hdr_min_exp = 1
+            hdr_max_exp = hdr_min_exp + hdr_bracket_width
+        else:
+            hdr_max_exp = int(middle_exp + (hdr_bracket_width/2))
+        hdr_min_exp_str.set(hdr_min_exp)
+        hdr_max_exp_str.set(hdr_max_exp)
+        SessionData["HdrMinExp"] = hdr_min_exp
+        SessionData["HdrMaxExp"] = hdr_max_exp
+        SessionData["HdrBracketWidth"] = hdr_bracket_width
 
 
 def button_status_change_except(except_button, active):
@@ -1369,7 +1420,8 @@ def update_rpi_temp():
 
 
 def hdr_set_controls():
-    global hdr_capture_active, hdr_optimize_bracket_btn, hdr_narrower_bracket_btn, hdr_wider_bracket_btn
+    global hdr_capture_active
+    global hdr_bracket_width_label, hdr_bracket_width_spinbox
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
 
     hdr_viewx4_active_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
@@ -1377,9 +1429,8 @@ def hdr_set_controls():
     hdr_min_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_optimize_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_narrower_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_wider_bracket_btn.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
 
 def switch_hdr_capture():
     global CurrentExposure
@@ -1607,15 +1658,25 @@ def capture_hdr():
     global capture_display_queue, capture_save_queue
     global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
+    global HdrBracketAuto
+
+    if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
+        adjust_hdr_bracket()
 
     if recalculate_hdr_exp_list:
-        hdr_init()
+        hdr_reinit()
+        perform_dry_run = True
         recalculate_hdr_exp_list = False
+    else:
+        perform_dry_run = False
+
     image_list.clear()
     # session_frames should be equal to 1 for the first captured frame of the scan session.
     # For HDR this means we need to unconditionally wait for exposure adaptation
     # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
-    perform_dry_run = session_frames == 1
+    if session_frames == 1:
+        perform_dry_run = True
+
     if session_frames % 2 == 1:
         work_list = hdr_exp_list
         idx = 1
@@ -1670,19 +1731,18 @@ def capture_hdr():
         idx += idx_inc
 
 
-def narrower_hdr_bracket():
-    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
-    hdr_bracket_width -= 1
-    hdr_max_exp = hdr_min_exp + hdr_bracket_width
-    hdr_max_exp_str.set(hdr_max_exp)
-    hdr_init()
+def adjust_hdr_bracket_auto():
+    global HdrCaptureActive, HdrBracketAuto, hdr_bracket_auto
+    global hdr_max_exp_spinbox, hdr_min_exp_spinbox
 
-def wider_hdr_bracket():
-    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
-    hdr_bracket_width += 1
-    hdr_max_exp = hdr_min_exp + hdr_bracket_width
-    hdr_max_exp_str.set(hdr_max_exp)
-    hdr_init()
+    if not HdrCaptureActive:
+        return
+
+    HdrBracketAuto = hdr_bracket_auto.get()
+
+    SessionData["HdrBracketAuto"] = str(HdrBracketAuto)
+
+    arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
 
 def adjust_hdr_bracket():
@@ -1690,86 +1750,53 @@ def adjust_hdr_bracket():
     global recalculate_hdr_exp_list, dry_run_iterations
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width
     global hdr_min_exp_str, hdr_max_exp_str
+    global PreviousCurrentExposure, HdrBracketAuto
+    global hdr_max_exp_spinbox, hdr_min_exp_spinbox
+    global save_bg, save_fg
+    global force_adjust_hdr_bracket
 
     if not HdrCaptureActive:
         return
 
-    if IsPiCamera2:
-        camera.set_controls({"ExposureTime": 0})    # Set automatic exposure
-        if VideoCaptureActive:
-            for i in range(1, dry_run_iterations + 1):
-                camera.capture_request()
-                win.update()
+    if SimulatedRun:
+        aux_current_exposure = 20
+    else:
+        if IsPiCamera2:
+            camera.set_controls({"ExposureTime": 0})    # Set automatic exposure
+            if VideoCaptureActive:
+                for i in range(1, dry_run_iterations + 1):
+                    camera.capture_request()
+                    win.update()
+            else:
+                for i in range(1, dry_run_iterations + 1):
+                    camera.capture_image("main")
+                    win.update()
         else:
+            camera.shutter_speed = 0    # Set automatic exposure
             for i in range(1, dry_run_iterations + 1):
-                camera.capture_image("main")
+                camera.capture(None, format='jpeg')  # Not sure None will work here
                 win.update()
-    else:
-        camera.shutter_speed = 0    # Set automatic exposure
-        for i in range(1, dry_run_iterations + 1):
-            camera.capture(None, format='jpeg')  # Not sure None will work here
-            win.update()
 
-    # Since we are in auto exposure mode, retrieve current value to start from there
-    if IsPiCamera2:
-        metadata = camera.capture_metadata()
-        CurrentExposure = int(metadata["ExposureTime"]/1000)
-    else:
-        CurrentExposure = int(camera.exposure_speed/1000)
+        # Since we are in auto exposure mode, retrieve current value to start from there
+        if IsPiCamera2:
+            metadata = camera.capture_metadata()
+            aux_current_exposure = int(metadata["ExposureTime"]/1000)
+        else:
+            aux_current_exposure = int(camera.exposure_speed/1000)
 
-    hdr_min_exp = max (CurrentExposure-40, 4)
-    hdr_min_exp_str.set(hdr_min_exp)
-    hdr_max_exp = hdr_min_exp + hdr_bracket_width
-    hdr_max_exp_str.set(hdr_max_exp)
-    hdr_init()
+    if aux_current_exposure != PreviousCurrentExposure or force_adjust_hdr_bracket:  # Adjust only if auto exposure changes
+        logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
+        force_adjust_hdr_bracket = False
+        PreviousCurrentExposure = aux_current_exposure
+        hdr_min_exp = max(aux_current_exposure-int(hdr_bracket_width/2), 1)
+        hdr_min_exp_str.set(hdr_min_exp)
+        hdr_max_exp = hdr_min_exp + hdr_bracket_width
+        hdr_max_exp_str.set(hdr_max_exp)
+        SessionData["HdrMinExp"] = hdr_min_exp
+        SessionData["HdrMaxExp"] = hdr_max_exp
+        recalculate_hdr_exp_list = True
+        logging.debug(f"Adjusting bracket: {hdr_min_exp}, {hdr_max_exp}")
 
-
-def adjust_hdr_bracket_experimental():
-    global hdr_num_steps, hdr_exp_list, hdr_rev_exp_list
-
-    if not HdrCaptureActive:
-        return
-
-    if IsPiCamera2:
-        # Set automatic exposure to capture the image on which to calculate bracket
-        camera.set_controls({"ExposureTime": 0})
-        for i in range(1, dry_run_iterations):  # Perform a few dummy captures to allow exposure stabilization
-            camera.capture_image("main")
-            win.update()
-        image = camera.capture_image("main")
-    else:
-        camera.shutter_speed = 0    # Set automatic exposure
-        for i in range(1, dry_run_iterations + 1):
-            camera.capture(None, format='jpeg')  # Not sure None will work here
-            win.update()
-        image = camera.capture(None, format='jpeg')  # Not sure None will work here
-
-    image_array = np.asarray(image)
-    # Convert the image to grayscale
-    gray = cv2.cvtColor(image_array, cv2.COLOR_BGR2GRAY)
-
-    # Calculate the histogram
-    hist = cv2.calcHist([gray], [0], None, [256], [0, 256])
-
-    # Find the cumulative distribution function (CDF) of the histogram
-    cdf = hist.cumsum() / hist.sum()
-
-    # Find the exposure values for each snapshot based on percentiles
-    hdr_exp_list = []
-    for _ in range(hdr_num_steps):
-        lower_percentile = 0.25  # Adjust as needed
-        upper_percentile = 0.75  # Adjust as needed
-        lower_bound = np.argmax(cdf >= lower_percentile)
-        upper_bound = np.argmax(cdf >= upper_percentile)
-        exposure_value = (lower_bound + upper_bound) / 2
-        hdr_exp_list.append(exposure_value)
-
-    hdr_rev_exp_list = list(reversed(hdr_exp_list))
-    print(hdr_exp_list)
-    hdr_min_exp = hdr_exp_list[0]
-    hdr_min_exp_str.set(hdr_min_exp)
-    hdr_max_exp = hdr_exp_list[hdr_num_steps-1]
-    hdr_max_exp_str.set(hdr_max_exp)
 
 
 # 4 possible modes:
@@ -1799,8 +1826,8 @@ def capture(mode):
 
     os.chdir(CurrentDir)
 
-    # Wait for auto exposure to adapt only if allowed
-    if CurrentExposure == 0 and ExposureAdaptPause:
+    # Wait for auto exposure to adapt only if allowed (and if not using HDR)
+    if CurrentExposure == 0 and ExposureAdaptPause and not HdrCaptureActive:
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -2507,6 +2534,30 @@ def load_config_data():
                 SharpnessValue = int(SessionData["SharpnessValue"])
                 sharpness_control_spinbox.config(text=str(SharpnessValue))
 
+def arrange_widget_state(auto_state, widget_list):
+    for widget in widget_list:
+        if isinstance(widget, tk.Button):
+            current_text = widget.cget("text")
+            new_text = current_text
+            if current_text.startswith("AUTO "):
+                if not auto_state:
+                    new_text = current_text[len("AUTO "):]  # Remove "AUTO " if it's at the beginning
+            else:
+                if auto_state:
+                    new_text = "AUTO " + current_text  # Add "AUTO " if it's not present
+            widget.config(text=new_text,
+                             relief=SUNKEN if auto_state else RAISED,
+                             bg='sea green' if auto_state else save_bg,
+                             fg='white' if auto_state else save_fg)
+        elif isinstance(widget, tk.Spinbox):
+            widget.config(state='readonly' if auto_state else NORMAL)
+        elif isinstance(widget, tk.Checkbutton):
+            if auto_state:
+                widget.select()
+            else:
+                widget.deselect()
+
+
 def load_session_data():
     global SessionData
     global CurrentExposure, CurrentExposureStr, ExposureAdaptPause
@@ -2522,17 +2573,18 @@ def load_session_data():
     global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps, frame_extra_steps_str
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
     global ScanSpeed, scan_speed_str
-    global exposure_spinbox, exposure_str
+    global exposure_str
     global wb_red_str, wb_blue_str
     global HqCaptureActive
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
-    global hdr_min_exp, hdr_max_exp
-    global hdr_min_exp_str, hdr_max_exp_str
-
+    global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
+    global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
+    global HdrBracketAuto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
+    global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2600,7 +2652,7 @@ def load_session_data():
                         CurrentExposure = int(float(CurrentExposureStr))
                         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                     exposure_str = CurrentExposureStr
-                    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
+                    arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
@@ -2632,11 +2684,10 @@ def load_session_data():
                 if 'FrameStepsAuto' in SessionData:
                     FrameSteps_auto = SessionData["FrameStepsAuto"]
                     min_frame_steps_str.set(str(MinFrameSteps))
+                    arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
                     if FrameSteps_auto:
-                        min_frame_steps_spinbox.config(state='readonly')
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
-                        min_frame_steps_spinbox.config(fg='black', state=NORMAL)
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
@@ -2648,16 +2699,16 @@ def load_session_data():
                     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
                 if 'FrameExtraSteps' in SessionData:
                     FrameExtraSteps = SessionData["FrameExtraSteps"]
-                    frame_fine_tune_str.set(str(FrameExtraSteps))
+                    FrameExtraSteps = min(FrameExtraSteps, 20)
+                    frame_extra_steps_str.set(str(FrameExtraSteps))
                     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
                 if 'PTLevelAuto' in SessionData:
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
+                    arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
                     if PTLevel_auto:
-                        pt_level_spinbox.config(state='readonly')
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
-                        pt_level_spinbox.config(fg='black', state=NORMAL)
                         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevel' in SessionData:
                     PTLevel = SessionData["PTLevel"]
@@ -2672,6 +2723,16 @@ def load_session_data():
                     ScanSpeed = SessionData["ScanSpeed"]
                     scan_speed_str.set(str(ScanSpeed))
                     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
+                if 'HdrBracketAuto' in SessionData:
+                    HdrBracketAuto = eval(SessionData["HdrBracketAuto"])
+                if 'HdrMinExp' in SessionData:
+                    hdr_min_exp = SessionData["HdrMinExp"]
+                if 'HdrMaxExp' in SessionData:
+                    hdr_max_exp = SessionData["HdrMaxExp"]
+                if 'HdrBracketWidth' in SessionData:
+                    hdr_bracket_width = SessionData["HdrBracketWidth"]
+                    hdr_bracket_width_str.set(str(hdr_bracket_width))
+                arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
 
         display_preview()
 
@@ -2753,10 +2814,16 @@ def hdr_init():
     global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_steps, hdr_view_4_image
 
     hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
+    hdr_reinit()
+
+def hdr_reinit():
+    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_steps, hdr_view_4_image
+
     hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_steps
     hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
     hdr_exp_list.sort()
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
+
 
 def tscann8_init():
     global win
@@ -2961,7 +3028,7 @@ def build_ui():
     global pt_level_spinbox, pt_level_str
     global PTLevel
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
-    global frame_extra_steps_spinbox
+    global frame_extra_steps_spinbox, frame_extra_steps_str
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
     global exposure_spinbox, exposure_str
     global wb_red_spinbox, wb_red_str
@@ -2975,7 +3042,10 @@ def build_ui():
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
     global hdr_min_exp_str, hdr_max_exp_str
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
-    global hdr_optimize_bracket_btn, hdr_narrower_bracket_btn, hdr_wider_bracket_btn
+    global min_frame_steps_btn, pt_level_btn
+    global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
+    global hdr_bracket_width_spinbox, hdr_bracket_width_label, hdr_bracket_width_str, hdr_bracket_width
+    global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -2995,7 +3065,7 @@ def build_ui():
 
     # Advance movie button (slow forward through filmgate)
     AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=8, height=3, command=advance_movie,
-                              activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     AdvanceMovie_btn.pack(side=LEFT, padx=(30, 0), pady=5)
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
@@ -3006,51 +3076,51 @@ def build_ui():
     sstep_area_frame.pack(side=LEFT, padx=(5, 0), pady=5)
     # Advance one single frame
     SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=8, height=1, command=single_step_movie,
-                            activebackground='green', activeforeground='white', wraplength=80)
+                            activebackground='#f0f0f0', wraplength=80)
     SingleStep_btn.pack(side=TOP)
     Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=8, height=1, command=capture_single_step,
-                            activebackground='green', activeforeground='white', wraplength=80)
+                            activebackground='#f0f0f0', wraplength=80)
     Snapshot_btn.pack(side=TOP)
 
     # Rewind movie (via upper path, outside of film gate)
     Rewind_btn = Button(bottom_area_frame, text="<<", font=("Arial", 16), width=2, height=2, command=rewind_movie,
-                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                        activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     Rewind_btn.pack(side=LEFT, padx=(5, 0), pady=5)
     # Fast Forward movie (via upper path, outside of film gate)
     FastForward_btn = Button(bottom_area_frame, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
-                             activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                             activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     FastForward_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Unlock reels button (to load film, rewind, etc)
-    Free_btn = Button(bottom_area_frame, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='green',
-                      activeforeground='white', wraplength=80, relief=RAISED)
+    Free_btn = Button(bottom_area_frame, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='#f0f0f0',
+                      wraplength=80, relief=RAISED)
     Free_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Switch Positive/negative modes
     PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=switch_negative_capture,
-                        activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                        activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     if ExperimentalMode and IsPiCamera2:
         # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
         hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
-                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                            activebackground='#f0f0f0', wraplength=80, relief=RAISED)
         hq_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)
         turbo_btn = Button(bottom_area_frame, text="Turbo On", width=8, height=3, command=switch_turbo_capture,
-                            activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                            activebackground='#f0f0f0', wraplength=80, relief=RAISED)
         turbo_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     if IsPiCamera2 or SimulatedRun:
         PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
-                           activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                           activebackground='#f0f0f0', wraplength=80, relief=RAISED)
         PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Activate focus zoom, to facilitate focusing the camera
     Focus_btn = Button(bottom_area_frame, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
-                       activebackground='green', activeforeground='white', wraplength=80, relief=RAISED)
+                       activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
     Focus_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
@@ -3063,32 +3133,32 @@ def build_ui():
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
     focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
-                            activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                            activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_plus_btn.grid(row=0, column=2)
     focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
-                             activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                             activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_minus_btn.grid(row=0, column=0)
     focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
-                          activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_lf_btn.grid(row=1, column=0)
     focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
-                          activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_up_btn.grid(row=0, column=1)
     focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
-                          activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_dn_btn.grid(row=1, column=1)
     focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
-                          activebackground='green', activeforeground='white', state=DISABLED, font=("Arial", 7))
+                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", 7))
     focus_rt_btn.grid(row=1, column=2)
 
     # Create vertical button column at right *************************************
     # Start scan button
     if SimulatedRun:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
-                           activebackground='green', activeforeground='white', wraplength=80)
+                           activebackground='#f0f0f0', wraplength=80)
     else:
-        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan, activebackground='green',
-                           activeforeground='white', wraplength=80)
+        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
+                           activebackground='#f0f0f0', wraplength=80)
     Start_btn.pack(side=TOP, padx=(5, 0), pady=(5, 0))
 
     # Create frame to select target folder
@@ -3102,10 +3172,10 @@ def build_ui():
     folder_frame_buttons = Frame(folder_frame, width=16, height=4, bd=2)
     folder_frame_buttons.pack()
     new_folder_btn = Button(folder_frame_buttons, text='New', width=5, height=1, command=set_new_folder,
-                            activebackground='green', activeforeground='white', wraplength=80, font=("Arial", 10))
+                            activebackground='#f0f0f0', wraplength=80, font=("Arial", 10))
     new_folder_btn.pack(side=LEFT)
     existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=5, height=1, command=set_existing_folder,
-                                 activebackground='green', activeforeground='white', wraplength=80, font=("Arial", 10))
+                                 activebackground='#f0f0f0', wraplength=80, font=("Arial", 10))
     existing_folder_btn.pack(side=LEFT)
 
     # Create frame to display number of scanned images, and frames per minute
@@ -3132,11 +3202,11 @@ def build_ui():
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=5)
     film_type_S8_btn = Button(film_type_buttons, text='S8', width=3, height=1, font=("Arial", 16, 'bold'),
-                              command=set_s8, activebackground='green', activeforeground='white',
+                              command=set_s8, activebackground='#f0f0f0',
                               relief=SUNKEN)
     film_type_S8_btn.pack(side=LEFT)
     film_type_R8_btn = Button(film_type_buttons, text='R8', width=3, height=1, font=("Arial", 16, 'bold'),
-                              command=set_r8, activebackground='green', activeforeground='white')
+                              command=set_r8, activebackground='#f0f0f0')
     film_type_R8_btn.pack(side=LEFT)
 
     # Create frame to display RPi temperature
@@ -3168,19 +3238,21 @@ def build_ui():
         expert_frame.pack(side=LEFT, padx=2, pady=2)
 
         # Exposure / white balance
-        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
+        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', pady=11,
                                     width=16, height=2, font=("Arial", 7))
         ### exp_wb_frame.pack(side=LEFT, padx=5, pady=5)
-        exp_wb_frame.grid(row=0, column=0, padx=4, pady=4, sticky=N)
+        exp_wb_frame.grid(row=0, rowspan=2, column=0, padx=4, pady=4, sticky=N)
 
         catch_up_delay_label = tk.Label(exp_wb_frame,
                                          text='Catch-up\ndelay',
                                          width=10, font=("Arial", 7))
         catch_up_delay_label.grid(row=0, column=2, padx=2, pady=1)
-        exposure_label = tk.Label(exp_wb_frame,
-                                         text='Exposure:',
-                                         width=12, font=("Arial", 7))
-        exposure_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        exposure_btn = Button(exp_wb_frame, text="Exposure:", width=12, height=1,
+                                                    command=exposure_spinbox_auto,
+                                                    activebackground='#f0f0f0',
+                                                    state=NORMAL, font=("Arial", 7))
+        exposure_btn.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+
         exposure_str = tk.StringVar(value=str(CurrentExposure))
 
         exposure_selection_aux = exp_wb_frame.register(exposure_selection)
@@ -3189,19 +3261,20 @@ def build_ui():
             command=(exposure_selection_aux, '%d'), width=8,
             textvariable=exposure_str, from_=-100, to=100, font=("Arial", 7))
         exposure_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
-        exposure_spinbox.bind("<Double - Button - 1>", exposure_spinbox_dbl_click)
 
         auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
-        auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
+        auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_exposure_change_pause_selection, font=("Arial", 7))
         auto_exp_wait_checkbox.grid(row=1, column=2, padx=2, pady=1)
+        arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
 
         # Automatic White Balance
-        wb_red_label = tk.Label(exp_wb_frame,
-                                         text='AWB Red:',
-                                         width=12, font=("Arial", 7))
-        wb_red_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        wb_red_btn = Button(exp_wb_frame, text="AWB Red:", width=12, height=1,
+                                                    command=wb_spinbox_auto,
+                                                    activebackground='#f0f0f0',
+                                                    state=NORMAL, font=("Arial", 7))
+        wb_red_btn.grid(row=2, column=0, padx=2, pady=1, sticky=E)
         wb_red_str = tk.StringVar(value=str(GainRed))
 
         wb_red_selection_aux = exp_wb_frame.register(wb_red_selection)
@@ -3210,12 +3283,12 @@ def build_ui():
             command=(wb_red_selection_aux, '%d'), width=8,
             textvariable=wb_red_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", 7))
         wb_red_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
-        wb_red_spinbox.bind("<Double - Button - 1>", wb_spinbox_dbl_click)
 
-        wb_blue_label = tk.Label(exp_wb_frame,
-                                         text='AWB Blue:',
-                                         width=12, font=("Arial", 7))
-        wb_blue_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        wb_blue_btn = Button(exp_wb_frame, text="AWB Blue:", width=12, height=1,
+                                                    command=wb_spinbox_auto,
+                                                    activebackground='#f0f0f0',
+                                                    state=NORMAL, font=("Arial", 7))
+        wb_blue_btn.grid(row=3, column=0, padx=2, pady=1, sticky=E)
         wb_blue_str = tk.StringVar(value=str(GainBlue))
 
         wb_blue_selection_aux = exp_wb_frame.register(wb_blue_selection)
@@ -3224,14 +3297,13 @@ def build_ui():
             command=(wb_blue_selection_aux, '%d'), width=8,
             textvariable=wb_blue_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", 7))
         wb_blue_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
-        wb_blue_spinbox.bind("<Double - Button - 1>", wb_spinbox_dbl_click)
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
-        awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
+        awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_white_balance_change_pause_selection, font=("Arial", 7))
         awb_red_wait_checkbox.grid(row=2, column=2, padx=2, pady=1)
-        awb_blue_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1,
+        awb_blue_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_white_balance_change_pause_selection, font=("Arial", 7))
         awb_blue_wait_checkbox.grid(row=3, column=2, padx=2, pady=1)
@@ -3270,12 +3342,15 @@ def build_ui():
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", 7))
         ### frame_alignment_frame.pack(side=LEFT, padx=5)
-        frame_alignment_frame.grid(row=0, column=2, padx=4, pady=4, ipady=6, sticky=NW)
+        frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, pady=4, sticky=NW)
         # Spinbox to select MinFrameSteps on Arduino
-        min_frame_steps_label = tk.Label(frame_alignment_frame,
-                                         text='Steps/frame:',
-                                         width=10, font=("Arial", 7))
-        min_frame_steps_label.grid(row=0, column=0, padx=2, pady=3, sticky=E)
+        # min_frame_steps_label = tk.Label(frame_alignment_frame, text='Steps/frame:', width=10, font=("Arial", 7))
+        # min_frame_steps_label.grid(row=0, column=0, padx=2, pady=3, sticky=E)
+        min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=12, height=1,
+                                                    command=min_frame_steps_spinbox_auto,
+                                                    activebackground='#f0f0f0',
+                                                    state=NORMAL, font=("Arial", 7))
+        min_frame_steps_btn.grid(row=0, column=0, padx=2, pady=3, sticky=E)
         min_frame_steps_str = tk.StringVar(value=str(MinFrameSteps))
         min_frame_steps_selection_aux = frame_alignment_frame.register(
             min_frame_steps_selection)
@@ -3285,12 +3360,15 @@ def build_ui():
             textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", 7))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
-        min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_dbl_click)
+        #min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_auto)
         # Spinbox to select PTLevel on Arduino
-        pt_level_label = tk.Label(frame_alignment_frame,
-                                  text='PT Level:',
-                                  width=10, font=("Arial", 7))
-        pt_level_label.grid(row=1, column=0, padx=2, pady=3, sticky=E)
+        # pt_level_label = tk.Label(frame_alignment_frame, text='PT Level:', width=10, font=("Arial", 7))
+        # pt_level_label.grid(row=1, column=0, padx=2, pady=3, sticky=E)
+        pt_level_btn = Button(frame_alignment_frame, text="PT Level:", width=12, height=1,
+                                                    command=pt_level_spinbox_auto,
+                                                    activebackground='#f0f0f0',
+                                                    state=NORMAL, font=("Arial", 7))
+        pt_level_btn.grid(row=1, column=0, padx=2, pady=3, sticky=E)
         pt_level_str = tk.StringVar(value=str(PTLevel))
         pt_level_selection_aux = frame_alignment_frame.register(
             pt_level_selection)
@@ -3300,7 +3378,7 @@ def build_ui():
             textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
         pt_level_spinbox.grid(row=1, column=1, padx=2, pady=3, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
-        pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_dbl_click)
+        # pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_auto)
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
@@ -3331,44 +3409,48 @@ def build_ui():
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
-        speed_quality_frame = LabelFrame(expert_frame, text="Speed / Quality", width=18, height=2,
+        speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18, height=2,
                                            font=("Arial", 7))
         ### speed_quality_frame.pack(side=LEFT, padx=5)
-        speed_quality_frame.grid(row=1, column=0, columnspan=2, padx=4, pady=4, sticky=W)
+        speed_quality_frame.grid(row=1, column=1, columnspan=2, padx=4, pady=4, sticky=W)
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame,
-                                         text='Scan speed:',
-                                         width=10, font=("Arial", 7))
-        scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+                                         text='Speed:',
+                                         width=7, font=("Arial", 7))
+        #scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+        scan_speed_label.pack(side=LEFT, padx=4)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
         scan_speed_selection_aux = speed_quality_frame.register(
             scan_speed_selection)
         scan_speed_spinbox = tk.Spinbox(
             speed_quality_frame,
-            command=(scan_speed_selection_aux, '%d'), width=8,
+            command=(scan_speed_selection_aux, '%d'), width=3,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", 7))
-        scan_speed_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+        #scan_speed_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+        scan_speed_spinbox.pack(side=LEFT, padx=4)
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
-                                         text='Stabilization delay (ms):',
-                                         width=20, font=("Arial", 7))
-        stabilization_delay_label.grid(row=0, column=2, padx=2, pady=1, sticky=E)
+                                         text='Delay (ms):',
+                                         width=10, font=("Arial", 7))
+        #stabilization_delay_label.grid(row=0, column=2, padx=2, pady=1, sticky=E)
+        stabilization_delay_label.pack(side=LEFT, padx=4)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
         stabilization_delay_spinbox = tk.Spinbox(
             speed_quality_frame,
-            command=(stabilization_delay_selection_aux, '%d'), width=8,
+            command=(stabilization_delay_selection_aux, '%d'), width=4,
             textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", 7))
-        stabilization_delay_spinbox.grid(row=0, column=3, padx=2, pady=1, sticky=W)
+        #stabilization_delay_spinbox.grid(row=0, column=3, padx=2, pady=1, sticky=W)
+        stabilization_delay_spinbox.pack(side=LEFT, padx=4)
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
-        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
+        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2, pady=7,
                                            font=("Arial", 7))
         hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky=N)
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
@@ -3385,33 +3467,32 @@ def build_ui():
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', width=16, font=("Arial", 7), state=DISABLED)
         hdr_min_exp_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
-        hdr_min_exp_selection_aux = hdr_frame.register(hdr_min_exp_selection)
-        hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_min_exp_selection_aux, '%d'), width=8,
+        hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
             textvariable=hdr_min_exp_str, from_=1, to=999, increment=1, font=("Arial", 7), state=DISABLED)
         hdr_min_exp_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
-        hdr_min_exp_spinbox.bind("<FocusOut>", hdr_min_exp_spinbox_focus_out)
+        hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', width=16, font=("Arial", 7), state=DISABLED)
         hdr_max_exp_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
-        hdr_max_exp_selection_aux = hdr_frame.register(hdr_max_exp_selection)
-        hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_max_exp_selection_aux, '%d'), width=8,
+        hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
             textvariable=hdr_max_exp_str, from_=2, to=1000, increment=1, font=("Arial", 7), state=DISABLED)
         hdr_max_exp_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
-        hdr_max_exp_spinbox.bind("<FocusOut>", hdr_max_exp_spinbox_focus_out)
+        hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
 
-        hdr_narrower_bracket_btn = Button(hdr_frame, text="-", width=1, height=1,
-                                                    command=narrower_hdr_bracket,
-                                                    state=DISABLED, font=("Arial", 7))
-        hdr_narrower_bracket_btn.grid(row=3, column=0, padx=2, pady=11, sticky=W)
-        hdr_optimize_bracket_btn = Button(hdr_frame, text="Adjust bracket", width=10, height=1,
-                                                    command=adjust_hdr_bracket,
-                                                    state=DISABLED, font=("Arial", 7))
-        hdr_optimize_bracket_btn.grid(row=3, column=0, columnspan=2, padx=2, pady=11)
-        hdr_wider_bracket_btn = Button(hdr_frame, text="+", width=1, height=1,
-                                                    command=wider_hdr_bracket,
-                                                    state=DISABLED, font=("Arial", 7))
-        hdr_wider_bracket_btn.grid(row=3, column=1, padx=2, pady=11, sticky=E)
+        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', width=16, font=("Arial", 7), state=DISABLED)
+        hdr_bracket_width_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
+        hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_bracket_width, '%d'), width=8,
+            textvariable=hdr_bracket_width_str, from_=4, to=200, increment=1, font=("Arial", 7), state=DISABLED)
+        hdr_bracket_width_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_spinbox.bind("<FocusOut>", hdr_check_bracket_width)
+
+        hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
+        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text=' Auto bracket', width=10, height=1,
+                                              variable=hdr_bracket_auto, onvalue=True, offvalue=False,
+                                              command=adjust_hdr_bracket_auto, font=("Arial", 7))
+        hdr_bracket_width_auto_checkbox.grid(row=4, column=0, padx=2, pady=1, sticky=W)
 
         # Integrated plotter
         if PlotterMode:
