@@ -11,6 +11,7 @@ Some of the changes done over original version:
 - Implement 'post-view' to replace standard preview mode in PiCamera2, which proved too slow and inaccurate compared to PiCamera legacy, not really usable for this kind of project.
 - Support for automatic exposure, with optional adjustable adaptation delay (enabled by default)
 - Support for automatic white balance, with optional adjustable adaptation delay (disabled by default)
+- Support for multi-exposure capture (4 snapshots with different exposures, automatic bracket calculation)
 - Fast-forward added, plus protection blocking FF/Rwnd if film present in filmgate
 - Settings saved when exiting, so that it is easier to continue from the same point if applications need to be restarted
 
