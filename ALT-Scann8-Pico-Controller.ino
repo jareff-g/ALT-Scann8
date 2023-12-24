@@ -1,0 +1,1160 @@
+/*
+ALT-Scann8 UI - Alternative software for T-Scann 8
+
+ALT-Scann8 is a fork of the application of T-Scann 8, By Torulf H.
+This file is an adaptation for RPi Pico, based on Arduino code I wrote, based on Torulf's code,
+
+  Licensed under a MIT LICENSE.
+
+More info in README.md file
+*/
+
+#define __author__      "Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
+#define __credits__     "Juan Remirez de Esparza"
+#define __license__     "MIT"
+#define __version__     "1.0"
+#define __maintainer__  "Juan Remirez de Esparza"
+#define __email__       "jremirez@hotmail.com"
+#define __status__      "Development"
+
+#include <Wire.h>
+#include <stdio.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+// ######### Variable section ##########
+// Handling of PT values dynamically
+int MaxPT = 0;
+int MinPT = 200;
+// These two vars are to keep max/min pt values for the recent past
+// Since keeping a sliding window will be too memory heavy (too manu samples) for Arduino, instead the max/min values
+// are decrease/increased each time a new sample is taken. Stored values are multiplied by 10, to have more resolution
+// (avoid decreasing/increasing too fast).
+// The idea is to see if we can make the PT level value automatically set by the software, so that it adapts to different 
+// part of the film (clear/dark around the holes) dynamically.
+unsigned int MaxPT_Dynamic = 0;
+unsigned int MinPT_Dynamic = 10000;
+
+
+enum {
+    PlotterInfo,
+    FrameSteps,
+    DebugInfo,
+    DebugInfoSingle,
+    None
+} DebugState = None;
+
+int MaxDebugRepetitions = 3;
+#define MAX_DEBUG_REPETITIONS_COUNT 30000
+
+boolean GreenLedOn = false;  
+int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / UnlockReels mode=20 / Slow Forward movie=30 / One step frame=40 / Rewind movie=60 / Fast Forward movie=61 / Set Perf Level=90
+// I2C commands (RPi to Arduino): Constant definition
+#define CMD_VERSION_ID 1
+#define CMD_GET_CNT_STATUS 2
+#define CMD_RESET_CONTROLLER 3
+#define CMD_START_SCAN 10
+#define CMD_TERMINATE 11
+#define CMD_GET_NEXT_FRAME 12
+#define CMD_SET_REGULAR_8 18
+#define CMD_SET_SUPER_8 19
+#define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_FILM_FORWARD 30
+#define CMD_SINGLE_STEP 40
+#define CMD_ADVANCE_FRAME 41
+#define CMD_ADVANCE_FRAME_FRACTION 42
+#define CMD_SET_PT_LEVEL 50
+#define CMD_SET_MIN_FRAME_STEPS 52
+#define CMD_SET_FRAME_FINE_TUNE 54
+#define CMD_SET_EXTRA_STEPS 56
+#define CMD_REWIND 60
+#define CMD_FAST_FORWARD 61
+#define CMD_INCREASE_WIND_SPEED 62
+#define CMD_DECREASE_WIND_SPEED 63
+#define CMD_UNCONDITIONAL_REWIND 64
+#define CMD_UNCONDITIONAL_FAST_FORWARD 65
+#define CMD_SET_SCAN_SPEED 70
+#define CMD_REPORT_PLOTTER_INFO 87
+// I2C responses (Arduino to RPi): Constant definition
+#define RSP_VERSION_ID 1
+#define RSP_FORCE_INIT 2
+#define RSP_FRAME_AVAILABLE 80
+#define RSP_SCAN_ERROR 81
+#define RSP_REWIND_ERROR 82
+#define RSP_FAST_FORWARD_ERROR 83
+#define RSP_REWIND_ENDED 84
+#define RSP_FAST_FORWARD_ENDED 85
+#define RSP_REPORT_AUTO_LEVELS 86
+#define RSP_REPORT_PLOTTER_INFO 87
+#define RSP_SCAN_ENDED 88
+
+// Immutable values
+#define S8_HEIGHT  4.01
+#define R8_HEIGHT  3.3
+#define NEMA_STEP_DEGREES  1.8
+#define NEMA_MICROSTEPS_IN_STEP  16
+
+// ######### Pin definition section ##########
+#define PIN_BACKLIGHT        1
+#define PIN_PT              28  // ADC2
+#define PIN_BUZZER          12
+#define PIN_TRACTION_STOP    4
+#define PIN_UV_LED           5
+#define PIN_GREEN_LED        6
+#define PIN_AUX1             7
+#define PIN_AUX2             8
+#define PIN_AUX3             9
+#define PIN_AUX4            10
+#define PIN_AUX5            11
+#define PIN_MOTOR_A_STEP    22
+#define PIN_MOTOR_A_NEUTRAL 26
+#define PIN_MOTOR_A_DIR     21
+#define PIN_MOTOR_B_STEP    19
+#define PIN_MOTOR_B_NEUTRAL 20
+#define PIN_MOTOR_B_DIR     18
+#define PIN_MOTOR_C_STEP    14
+#define PIN_MOTOR_C_NEUTRAL 13
+#define PIN_MOTOR_C_DIR     15
+// ALT-Scann8 uses I2C0 on GP16/GP17 to talk to RPi, I2C1 on GP2/GP3 to talk to the on-board screen
+#define PIN_I2C0_SDA        16
+#define PIN_I2C0_SCL        17
+#define PIN_I2C1_SDA         2
+#define PIN_I2C1_SCL         3
+
+// ######### Define I2C instances (to use instead of i2c_default in examples)
+#define i2c_RPi     i2c0
+#define I2C_Screen  i2c1
+
+// ######### Define Screen details
+#define SCREEN_WIDTH 128 // OLED display width, in pixels
+#define SCREEN_HEIGHT 64 // OLED display height, in pixels
+#define OLED_RESET     -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define SCREEN_ADDRESS 0x3C ///< See datasheet for Address; 0x3C 
+
+enum ScanResult{SCAN_NO_FRAME_DETECTED, SCAN_FRAME_DETECTED, SCAN_FRAME_DETECTION_ERROR, SCAN_TERMINATION_REQUESTED};
+
+enum ScanState{
+    Sts_Idle,
+    Sts_Scan,
+    Sts_UnlockReels,
+    Sts_Rewind,
+    Sts_FastForward,
+    Sts_SlowForward,
+    Sts_SingleStep
+}
+ScanState=Sts_Idle;
+
+// ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
+int UVLedBrightness = 255;                  // Brightness UV led, may need to be changed depending on LED type
+unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
+unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
+unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
+unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
+int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
+int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
+int PerforationMinLevel = 50;               // Phototransistor reported value, min level (originalyl hardcoded)
+int PerforationThresholdLevelR8 = 180;      // Default value for R8
+int PerforationThresholdLevelS8 = 90;       // Default value for S8
+int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
+int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
+float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
+int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
+int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
+int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
+// ------------------------------------------------------------------------------------------
+
+boolean ReelsUnlocked = false;
+boolean FrameDetected = false;  // Used for frame detection, in play ond single step modes
+boolean UVLedOn = false;
+int FilteredSignalLevel = 0;
+int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
+int OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
+int FrameStepsDone = 0;                     // Count steps
+// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// with dynamically calculated values
+unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
+int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
+
+int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
+
+boolean IsS8 = true;
+
+boolean TractionSwitchActive = true;  // When traction micro-switch is closed
+
+unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
+unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
+unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
+bool NoFilmDetected = false;
+
+byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
+
+int PT_SignalLevelRead;   // Raw signal level from phototransistor
+boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
+
+boolean Frame_Steps_Auto = true;
+
+boolean IntegratedPlotter = false;
+
+boolean display_connected = false;
+
+// Collect outgoing film frequency
+int collect_modulo = 10;
+int collect_timer = 50;
+int scan_collect_modulo = collect_modulo;
+int scan_collect_timer = collect_timer;
+
+// JRE - Support data variables
+#define QUEUE_SIZE 20
+typedef struct {
+    int Data[QUEUE_SIZE];
+    int Param[QUEUE_SIZE];
+    int Param2[QUEUE_SIZE];
+    int in;
+    int out;
+} Queue;
+
+volatile Queue CommandQueue;
+volatile Queue ResponseQueue;
+
+void SendToRPi(byte rsp, int param1, int param2)
+{
+    push_rsp(rsp, param1, param2);
+}
+
+// Find how to reset Pico
+// void(* resetFunc) (void) = 0;//declare reset function at address 0
+
+void setup() {
+    // Light embeeded led
+    pinMode(25, OUTPUT);
+    digitalWrite(25, HIGH);
+    //pinMode(LED_BUILTIN, OUTPUT);
+    //digitalWrite(LED_BUILTIN, HIGH);  
+
+    // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
+    Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
+
+    // Define I2C pins before initializing
+    Wire.setSDA(PIN_I2C0_SDA);
+    Wire.setSCL(PIN_I2C0_SCL);
+    // Wire1.setSDA(PIN_I2C1_SDA);
+    // Wire1.setSCL(PIN_I2C1_SCL);
+
+    Wire.begin(16);  // join I2c bus with address #16
+    //Wire.setClock(400000);  // Set the I2C clock frequency to 400 kHz
+    Wire.onReceive(receiveEvent); // register event
+    Wire.onRequest(sendEvent);
+    analogReadResolution(10); // Pico can go up to 12 but, but 10 bit is closer to Arduino values. Keep it for now
+    // Wire1.begin(0x3C);  // join I2c bus with address #0x3C
+    // Wire1.setClock(400000);  // Set the I2C clock frequency to 400 kHz
+    // Wire1.onReceive(receiveEvent_screen); // register event
+    // Wire1.onRequest(sendEvent_screen);
+    /* 
+    *  The following uses the default Wire instance (for Pico, this uses GP6 for SDA 
+    *  and GP7 for SCL). 
+    *  One can use other I2C combinations by using the following 2 lines instead:
+    *  
+    *  TwoWire myI2C(8,9);  //create instance for SDA=GPGP8 SCL=9 
+    *  Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &myI2C, OLED_RESET);
+    */
+    TwoWire myI2C(i2c1, 2, 3);
+    Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &myI2C, OLED_RESET);
+    // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+    if (!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
+      Serial.println(F("SSD1306 allocation failed"));
+      for (;;); // Don't proceed, loop forever
+    }
+    else display_connected = true;
+
+    if (display_connected) {
+      // Clear the buffer
+      display.clearDisplay();
+      display.setTextSize(1);             // Normal 1:1 pixel scale
+      display.setTextColor(SSD1306_WHITE);        // Draw white text
+      display.setCursor(40, 30);
+      display.println("HOWDY !");
+      display.display();
+    }
+
+    //--- set pinMode Stepper motors -----
+    pinMode(PIN_MOTOR_A_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_A_DIR, OUTPUT);
+    pinMode(PIN_MOTOR_B_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_B_DIR, OUTPUT);
+    pinMode(PIN_MOTOR_C_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_C_DIR, OUTPUT);
+    pinMode(PIN_MOTOR_A_NEUTRAL, OUTPUT);
+    pinMode(PIN_MOTOR_B_NEUTRAL, OUTPUT);
+    pinMode(PIN_MOTOR_C_NEUTRAL, OUTPUT);
+    //---- set pullups for I2C pins ------------
+    // Do not do this: I2C will not work
+    //pinMode(PIN_I2C0_SDA, INPUT_PULLUP);
+    //pinMode(PIN_I2C0_SCL, INPUT_PULLUP);
+    //pinMode(PIN_I2C1_SDA, INPUT_PULLUP);
+    //pinMode(PIN_I2C1_SCL, INPUT_PULLUP);
+    //---------------------------
+
+    // neutral position
+    digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
+
+    // set direction on stepper motors
+    digitalWrite(PIN_MOTOR_A_DIR, LOW);
+    digitalWrite(PIN_MOTOR_B_DIR, LOW);
+
+    digitalWrite(PIN_MOTOR_A_STEP, LOW);
+    digitalWrite(PIN_MOTOR_B_STEP, LOW);
+    digitalWrite(PIN_MOTOR_C_STEP, LOW);
+
+    // Initialize I2C slave for I2C0 (comm with RPi). Init queue pointers before defining callback
+    CommandQueue.in = 0;
+    CommandQueue.out = 0;
+    ResponseQueue.in = 0;
+    ResponseQueue.out = 0;
+
+    // i2c_slave_init (i2c0, 0x33, receiveEvent);    // Init pico as I2C slave, set callback for receive events
+
+    // Assign function to pins
+    pinMode(PIN_PT, INPUT);
+    pinMode(PIN_TRACTION_STOP, INPUT);
+    pinMode(PIN_BUZZER, OUTPUT); 
+    pinMode(PIN_UV_LED, OUTPUT); 
+    pinMode(PIN_BACKLIGHT, OUTPUT);
+    pinMode(PIN_GREEN_LED, OUTPUT);
+    pinMode(PIN_AUX1, OUTPUT);     // Aux1/2 are OUT, 3/4/5 are IN (Odd aux jumpers are OUT, even are IN ???)
+    pinMode(PIN_AUX2, OUTPUT);
+    pinMode(PIN_AUX3, INPUT_PULLUP);
+    pinMode(PIN_AUX4, INPUT_PULLUP);
+    pinMode(PIN_AUX5, INPUT_PULLUP);
+    pinMode(PIN_MOTOR_A_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_A_NEUTRAL, OUTPUT);
+    pinMode(PIN_MOTOR_A_DIR, OUTPUT);
+    pinMode(PIN_MOTOR_B_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_B_NEUTRAL, OUTPUT);
+    pinMode(PIN_MOTOR_B_DIR, OUTPUT);
+    pinMode(PIN_MOTOR_C_STEP, OUTPUT);
+    pinMode(PIN_MOTOR_C_NEUTRAL, OUTPUT);
+    pinMode(PIN_MOTOR_C_DIR, OUTPUT);
+
+    // Init PWM
+    analogWriteFreq(5000);
+    analogWriteRange(65535);
+    analogWriteResolution(16);
+    analogWrite(PIN_BUZZER,0);
+    analogWrite(PIN_UV_LED,0);
+    analogWrite(PIN_GREEN_LED,0);
+
+    // neutral position for Motor A
+    digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
+
+    // set direction on stepper motors
+    digitalWrite(PIN_MOTOR_A_DIR, LOW);
+    digitalWrite(PIN_MOTOR_B_DIR, LOW);
+
+    digitalWrite(PIN_MOTOR_A_STEP, LOW);
+    digitalWrite(PIN_MOTOR_B_STEP, LOW);
+    digitalWrite(PIN_MOTOR_C_STEP, LOW);
+
+    // tests
+    digitalWrite(PIN_AUX1, HIGH);
+    delay(1000);
+    digitalWrite(PIN_AUX1, LOW);
+    digitalWrite(PIN_BACKLIGHT, HIGH);
+    delay(1000);
+    digitalWrite(PIN_BACKLIGHT, LOW);
+}
+
+void loop() {
+    int param;
+
+    SendToRPi(RSP_FORCE_INIT, 0, 0);  // Request UI to resend init sequence, in case controller reloaded while UI active
+
+    while (1) {
+        if (dataInCmdQueue())
+            UI_Command = pop_cmd(&param);   // Get next command from queue if one exists
+        else
+            UI_Command = 0;
+
+        TractionSwitchActive = digitalRead(PIN_TRACTION_STOP);
+
+        ReportPlotterInfo();    // Regular report of plotter info
+
+        if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
+            // Set default state and direction of motors B and C (disabled, clockwise)
+            // In the original main loop this was done when UI_Command was NOT Single Step (49). Why???
+            // JRE 23-08-2022: Explanation: THis is done mainly for the slow forward function, so that
+            //    setting to high both the motors B and C they will move one step forward
+            if (UI_Command != CMD_SINGLE_STEP){  // In case we need the exact behavior of original code
+                digitalWrite(PIN_MOTOR_B_STEP, LOW);
+                digitalWrite(PIN_MOTOR_C_STEP, LOW);
+                digitalWrite(PIN_MOTOR_C_DIR, HIGH);
+                digitalWrite(PIN_MOTOR_B_DIR, HIGH);
+            }
+        }
+
+        switch (UI_Command) {   // Stateless commands
+            case CMD_RESET_CONTROLLER:
+                //machine.reset();
+                break;
+            case CMD_SET_PT_LEVEL:
+                DebugPrint(">PTLevel", param);
+                if (param >= 0 && param <= 900) {
+                    if (param == 0)
+                        PT_Level_Auto = true;     // zero means we go in automatic mode
+                    else {
+                        PT_Level_Auto = false;
+                        PerforationThresholdLevel = param;
+                        OriginalPerforationThresholdLevel = param;
+                    }
+                    DebugPrint(">PTLevel",param);
+                }
+                break;
+            case CMD_SET_MIN_FRAME_STEPS:
+                DebugPrint(">MinFSteps", param);
+                if (param == 0 || param >= 100 && param <= 600) {
+                    if (param == 0)
+                        Frame_Steps_Auto = true;     // zero means we go in automatic mode
+                    else {
+                        Frame_Steps_Auto = false;
+                        MinFrameSteps = param;
+                        if (IsS8)
+                            MinFrameStepsS8 = param;
+                        else
+                            MinFrameStepsR8 = param;
+                        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                        DebugPrint(">MinSteps",param);
+                    }
+                }
+                break;
+            case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
+                DebugPrint(">FineT", param);
+                if (param >= 5 and param <= 95)   // Añllowed valued between 5 adn 95%
+                    PerforationThresholdAutoLevelRatio = param;
+                break;
+            case CMD_SET_EXTRA_STEPS:
+                DebugPrint(">BoostPT", param);
+                if (param >= 1 && param <= 20)  // Also to move up we add extra steps
+                    FrameExtraSteps = param;
+                break;
+            case CMD_SET_SCAN_SPEED:
+                DebugPrint(">Speed", param);
+                ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
+                scan_collect_timer = collect_timer = 50 + (10-param) * 100;
+                scan_collect_modulo = collect_modulo = 10 + (10-param) * 3;
+                OriginalScanSpeed = ScanSpeed;
+                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
+                DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                break;
+            case CMD_REPORT_PLOTTER_INFO:
+                DebugPrint(">PlotterInfo", param);
+                IntegratedPlotter = param;
+                break;
+        }
+
+        switch (ScanState) {
+            case Sts_Idle:
+                switch (UI_Command) {
+                    case CMD_VERSION_ID:
+                        DebugPrintStr(">V_ID");
+                        SendToRPi(RSP_VERSION_ID, 2, 0);  // 1 - Arduino, 2 - RPi Pico
+                        break;
+                    case CMD_START_SCAN:
+                        DebugPrintStr(">Scan");
+                        ScanState = Sts_Scan;
+                        analogWrite(PIN_UV_LED, UVLedBrightness); // Turn on UV LED
+                        UVLedOn = true;
+                        delay(200);     // Wait for PT to stabilize after switching UV led on
+                        StartFrameTime = micros();
+                        FilmDetectedTime = millis();
+                        NoFilmDetected = false;
+                        ScanSpeed = OriginalScanSpeed;
+                        collect_modulo = scan_collect_modulo;
+                        collect_timer = scan_collect_timer;
+                        tone(PIN_BUZZER, 2000, 50);
+                        digitalWrite(PIN_BACKLIGHT,HIGH);
+                        break;
+                    case CMD_TERMINATE:  //Exit app
+                        if (UVLedOn) {
+                            analogWrite(PIN_UV_LED, 0); // Turn off UV LED
+                            UVLedOn = false;
+                        }
+                        break;
+                    case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
+                        ScanState = Sts_Scan;
+                        StartFrameTime = micros();
+                        ScanSpeed = OriginalScanSpeed;
+                        DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
+                        DebugPrintStr(">Next fr.");
+                        // Also send, if required, to RPi autocalculated threshold level every frame
+                        // Alternate reports for each value, otherwise I2C has I/O errors
+                        if (PT_Level_Auto || Frame_Steps_Auto)
+                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps);
+                        break;
+                    case CMD_SET_REGULAR_8:  // Select R8 film
+                        DebugPrintStr(">R8");
+                        IsS8 = false;
+                        MinFrameSteps = MinFrameStepsR8;
+                        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                        OriginalMinFrameSteps = MinFrameSteps;
+                        if (!PT_Level_Auto)
+                            PerforationThresholdLevel = PerforationThresholdLevelR8;
+                        OriginalPerforationThresholdLevel = PerforationThresholdLevelR8;
+                        break;
+                    case CMD_SET_SUPER_8:  // Select S8 film
+                        DebugPrintStr(">S8");
+                        IsS8 = true;
+                        MinFrameSteps = MinFrameStepsS8;
+                        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                        OriginalMinFrameSteps = MinFrameSteps;
+                        if (!PT_Level_Auto)
+                            PerforationThresholdLevel = PerforationThresholdLevelS8;
+                        OriginalPerforationThresholdLevel = PerforationThresholdLevelS8;
+                        break;
+                    case CMD_SWITCH_REEL_LOCK_STATUS:
+                        ScanState = Sts_UnlockReels;
+                        delay(50);
+                        break;
+                    case CMD_FILM_FORWARD:
+                        collect_modulo = 5;
+                        collect_timer = 10;
+                        ScanState = Sts_SlowForward;
+                        digitalWrite(PIN_BACKLIGHT,HIGH);
+                        delay(50);
+                        break;
+                    case CMD_SINGLE_STEP:
+                        DebugPrintStr(">SStep");
+                        ScanState = Sts_SingleStep;
+                        digitalWrite(PIN_BACKLIGHT,HIGH);
+                        delay(50);
+                        break;
+                    case CMD_REWIND: // Rewind
+                    case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
+                            DebugPrintStr("Rwnd err");
+                            SendToRPi(RSP_REWIND_ERROR, 0, 0);
+                            tone(PIN_BUZZER, 2000, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 1000, 100);
+                        }
+                        else {
+                            DebugPrintStr("Rwnd");
+                            ScanState = Sts_Rewind;
+                            delay (100);
+                            digitalWrite(PIN_MOTOR_A_NEUTRAL, LOW);
+                            digitalWrite(PIN_MOTOR_B_NEUTRAL, HIGH);
+                            digitalWrite(PIN_MOTOR_C_NEUTRAL, HIGH);
+                            tone(PIN_BUZZER, 2200, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 2200, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 2000, 200);
+                            RewindSpeed = 4000;
+                        }
+                        delay(50);
+                        break;
+                    case CMD_FAST_FORWARD:  // Fast Forward
+                    case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
+                        if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
+                            DebugPrintStr("FF err");
+                            SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0);
+                            tone(PIN_BUZZER, 2000, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 1000, 100);
+                        }
+                        else {
+                            DebugPrintStr(">FF");
+                            ScanState = Sts_FastForward;
+                            delay (100);
+                            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
+                            digitalWrite(PIN_MOTOR_B_NEUTRAL, HIGH);
+                            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+                            tone(PIN_BUZZER, 2000, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 2000, 100);
+                            delay (150);
+                            tone(PIN_BUZZER, 2200, 200);
+                            RewindSpeed = 4000;
+                        }
+                        break;
+                    case CMD_INCREASE_WIND_SPEED:  // Tune Rewind/FF speed delay up, allowing to slow down the rewind/ff speed
+                        if (TargetRewindSpeedLoop < 4000)
+                            TargetRewindSpeedLoop += 20;
+                        break;
+                    case CMD_DECREASE_WIND_SPEED:  // Tune Rewind/FF speed delay down, allowing to speed up the rewind/ff speed
+                        if (TargetRewindSpeedLoop > 200)
+                          TargetRewindSpeedLoop -= 20;
+                        break;
+                    case CMD_ADVANCE_FRAME:
+                        DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
+                        if (IsS8)
+                            capstan_advance(MinFrameStepsS8);
+                        else
+                            capstan_advance(MinFrameStepsR8);
+                        break;
+                    case CMD_ADVANCE_FRAME_FRACTION:
+                        DebugPrint(">Advance frame", param);
+                        capstan_advance(param);
+                        break;
+                }
+                break;
+            case Sts_Scan:
+                CollectOutgoingFilm();
+                if (UI_Command == CMD_START_SCAN) {
+                    DebugPrintStr("-Scan");
+                    ScanState = Sts_Idle; // Exit scan loop
+                    digitalWrite(PIN_BACKLIGHT,LOW);
+
+                }
+                else if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
+                    ScanState = Sts_Idle; // Exit scan loop
+                }
+                break;
+            case Sts_SingleStep:
+                if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
+                    digitalWrite(PIN_BACKLIGHT,LOW);
+                    ScanState = Sts_Idle;
+                }
+                break;
+            case Sts_UnlockReels:
+                if (UI_Command == CMD_SWITCH_REEL_LOCK_STATUS) { //request to lock reels again
+                    ReelsUnlocked = false;
+                    digitalWrite(PIN_MOTOR_B_NEUTRAL, LOW);
+                    digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+                    ScanState = Sts_Idle;
+                }
+                else {
+                    if (not ReelsUnlocked){
+                        ReelsUnlocked = true;
+                        digitalWrite(PIN_MOTOR_B_NEUTRAL, HIGH);
+                        digitalWrite(PIN_MOTOR_C_NEUTRAL, HIGH);
+                    }
+                    GetLevelPT();   // No need to know PT level here, but used to update plotter data
+                }
+                break;
+            case Sts_Rewind:
+                if (!RewindFilm(UI_Command)) {
+                    DebugPrintStr("-rwnd");
+                    ScanState = Sts_Idle;
+                }
+                break;
+            case Sts_FastForward:
+                if (!FastForwardFilm(UI_Command)) {
+                    DebugPrintStr("-FF");
+                    ScanState = Sts_Idle;
+                }
+                break;
+            case Sts_SlowForward:
+                if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
+                  digitalWrite(PIN_BACKLIGHT,LOW);
+                  delay(50);
+                  ScanState = Sts_Idle;
+                }
+                else {
+                  SlowForward();
+                }
+                break;
+        }
+
+        // ----- Speed on stepper motors ------------------ JRE: To be checked if needed, here or elsewhere
+        delayMicroseconds(1);
+    }
+}
+
+
+// ------ rewind the movie ------
+boolean RewindFilm(int UI_Command) {
+    boolean retvalue = true;
+    static boolean stopping = false;
+
+    if (UI_Command == CMD_REWIND) {
+        stopping = true;
+    }
+    else if (stopping) {
+        if (RewindSpeed < 4000) {
+            digitalWrite(PIN_MOTOR_A_STEP, HIGH);
+            delayMicroseconds(RewindSpeed);
+            digitalWrite(PIN_MOTOR_A_STEP, LOW);
+            RewindSpeed += round(max(1,RewindSpeed/400));
+        }
+        else {
+            retvalue = false;
+            stopping = false;
+            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
+            digitalWrite(PIN_MOTOR_B_NEUTRAL, LOW);
+            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+            delay (100);
+            SendToRPi(RSP_REWIND_ENDED, 0, 0);
+        }
+    }
+    else {
+        digitalWrite(PIN_MOTOR_A_STEP, HIGH);
+        delayMicroseconds(RewindSpeed);
+        digitalWrite(PIN_MOTOR_A_STEP, LOW);
+        if (RewindSpeed >= TargetRewindSpeedLoop) {
+            RewindSpeed -= round(max(1,RewindSpeed/400));
+        }
+    }
+    return(retvalue);
+}
+
+// ------ fast forward the movie ------
+boolean FastForwardFilm(int UI_Command) {
+    boolean retvalue = true;
+    static boolean stopping = false;
+
+    if (UI_Command == CMD_FAST_FORWARD) {
+        stopping = true;
+    }
+    else if (stopping) {
+        if (RewindSpeed < 4000) {
+            digitalWrite(PIN_MOTOR_C_STEP, HIGH);
+            delayMicroseconds(RewindSpeed);
+            digitalWrite(PIN_MOTOR_C_STEP, LOW);
+            RewindSpeed += round(max(1,RewindSpeed/400));
+        }
+        else {
+            retvalue = false;
+            stopping = false;
+            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
+            digitalWrite(PIN_MOTOR_B_NEUTRAL, LOW);
+            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+            delay (100);
+            SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
+        }
+    }
+    else {
+        digitalWrite(PIN_MOTOR_C_STEP, HIGH);
+        delayMicroseconds(RewindSpeed);
+        digitalWrite(PIN_MOTOR_C_STEP, LOW);
+        if (RewindSpeed >= TargetRewindSpeedLoop) {
+            RewindSpeed -= round(max(1,RewindSpeed/400));
+        }
+    }
+    return(retvalue);
+}
+
+// ------------- Collect outgoing film
+// Latest version, simpler, based on regular activation and motor activation frequency (to soften the pull)
+// Still, pinch roller (https://www.thingiverse.com/thing:5583753) and microswitch
+// (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
+// tension might not be enough for the capstan to pull the film.
+void CollectOutgoingFilm(void) {
+    static int loop_counter = 0;
+    static boolean CollectOngoing = true;
+
+    static unsigned long TimeToCollect = 0;
+    unsigned long CurrentTime = millis();
+
+    if (loop_counter % collect_modulo == 0) {
+        if (CurrentTime > TimeToCollect) {
+            TractionSwitchActive = digitalRead(PIN_TRACTION_STOP);
+            if (!TractionSwitchActive) {  //Motor allowed to turn
+                digitalWrite(PIN_MOTOR_C_STEP, LOW);
+                digitalWrite(PIN_MOTOR_C_STEP, HIGH);
+                digitalWrite(PIN_MOTOR_C_STEP, LOW);
+                TractionSwitchActive = digitalRead(PIN_TRACTION_STOP);
+            }
+            if (TractionSwitchActive)
+                TimeToCollect = CurrentTime + collect_timer;
+        }
+    }
+    loop_counter++;
+}
+
+// ------------- Centralized phototransistor level read ---------------
+int GetLevelPT() {
+    float ratio;
+
+    PT_SignalLevelRead = analogRead(PIN_PT);
+    MaxPT = max(PT_SignalLevelRead, MaxPT);
+    MinPT = min(PT_SignalLevelRead, MinPT);
+    MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
+    MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
+    if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
+    //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (PT_Level_Auto) {
+        ratio = (float)PerforationThresholdAutoLevelRatio/100;
+        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+    }
+
+    // If relevant diff between max/min dinamic it means we have film passing by
+    if (millis() - FilmDetectedTime > 12000)
+        NoFilmDetected = true;
+    else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
+        FilmDetectedTime = millis();
+
+    return(PT_SignalLevelRead);
+}
+
+// ------------ Reports info (PT level, steps/frame, etc) to Serial Plotter 10 times/sec ----------
+void ReportPlotterInfo() {
+    static unsigned long NextReport = 0;
+    static int Previous_PT_Signal = 0, PreviousFrameSteps = 0;
+    static char out[100];
+
+    if (millis() > NextReport) {
+        if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
+            NextReport = millis() + 20;
+            if (DebugState == PlotterInfo) {  // Plotter info to Arduino IDE
+                sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+                SerialPrintStr(out);
+            }
+            Previous_PT_Signal = PT_SignalLevelRead;
+            PreviousFrameSteps = LastFrameSteps;
+            if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
+                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
+        }
+    }
+}
+
+void SlowForward(){
+    static unsigned long LastMove = 0;
+    unsigned long CurrentTime = micros();
+    if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
+        GetLevelPT();   // No need to know PT level here, but used to update plotter data
+        CollectOutgoingFilm();
+        digitalWrite(PIN_MOTOR_B_STEP, HIGH);
+        LastMove = CurrentTime + 700;
+    }
+}
+
+// ------------- is there film loaded in filmgate? ---------------
+boolean FilmInFilmgate() {
+    int SignalLevel;
+    boolean retvalue = false;
+    int mini=800, maxi=0;
+
+    analogWrite(PIN_UV_LED, UVLedBrightness); // Turn on UV LED
+    UVLedOn = true;
+    delay(200);  // Give time to FT to stabilize
+
+
+    // MinFrameSteps used here as a reference, just to skip two frames in worst case
+    // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
+    for (int x = 0; x <= 300; x++) {
+        digitalWrite(PIN_MOTOR_B_STEP, LOW);
+        digitalWrite(PIN_MOTOR_B_STEP, HIGH);
+        SignalLevel = GetLevelPT();
+        if (SignalLevel > maxi) maxi = SignalLevel;
+        if (SignalLevel < mini) mini = SignalLevel;
+    }
+    digitalWrite(PIN_MOTOR_B_STEP, LOW);
+    analogWrite(PIN_UV_LED, 0); // Turn off UV LED
+    UVLedOn = false;
+
+    if (abs(maxi-mini) > 0.5*(MaxPT-MinPT))
+        retvalue = true;
+
+    return(retvalue);
+}
+
+void adjust_framesteps(int frame_steps) {
+    static int steps_per_frame_list[32];
+    static int idx = 0;
+    static int items_in_list = 0;
+    int total;
+
+    // Check if steps per frame are going beyond reasonable limits
+    if (frame_steps > int(OriginalMinFrameSteps*1.05) || frame_steps < int(OriginalMinFrameSteps*0.95)) {   // Allow 5% deviation
+        MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+        return; // Do not add invalid steps per frame to list
+    }
+
+    // We collect statistics even if not in auto mode
+    steps_per_frame_list[idx] = frame_steps;
+    idx = (idx + 1) % 32;
+    if (items_in_list < 32)
+        items_in_list++;
+
+    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
+        for (int i = 0; i < 32; i++)
+            total = total + steps_per_frame_list[i];
+        MinFrameSteps = int(total / 32) - 10;
+        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+    }
+}
+
+
+// ------------- is the film perforation in position to take picture? ---------------
+// Returns false if status should change to idle
+boolean IsHoleDetected() {
+    boolean hole_detected = false;
+    int PT_Level;
+  
+    PT_Level = GetLevelPT();
+
+    // ------------- Frame detection ----
+    // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
+    // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
+    // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
+    // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
+    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+        hole_detected = true;
+        GreenLedOn = true;
+        // Green led already handled during scan process (proportional to frame steps)
+        // analogWrite(PIN_GREEN_LED, 255); // Light green led
+    }
+
+    return(hole_detected);
+}
+
+void capstan_advance(int steps) {
+    for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
+        digitalWrite(PIN_MOTOR_B_STEP, LOW);
+        digitalWrite(PIN_MOTOR_B_STEP, HIGH);
+        if (steps > 1)
+            delayMicroseconds(1000);
+    }
+    digitalWrite(PIN_MOTOR_B_STEP, LOW);
+}
+
+// ----- This is the function to "ScanFilm" -----
+// Returns false when done
+ScanResult scan(int UI_Command) {
+    ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
+    static unsigned long TimeToScan = 0;
+    static int MaxFrameSteps = 0;
+    unsigned long CurrentTime = micros();
+
+    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeed) {
+        return (retvalue);
+    }
+    else {
+        TimeToScan = CurrentTime + ScanSpeed;
+
+        if (GreenLedOn) {  // If last time frame was detected ...
+            GreenLedOn = false;
+            analogWrite(PIN_GREEN_LED, 0); // ... Turn off green led
+        }
+
+        TractionSwitchActive = digitalRead(PIN_TRACTION_STOP);
+
+        if (FrameStepsDone > DecreaseSpeedFrameSteps)
+            ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+
+        FrameDetected = false;
+
+        // Check if film still presend (auto stop at end of reel)
+        if (NoFilmDetected) {
+            SendToRPi(RSP_SCAN_ENDED, 0, 0);
+            return(SCAN_TERMINATION_REQUESTED);
+        }
+
+        //-------------ScanFilm-----------
+        if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
+            retvalue = SCAN_TERMINATION_REQUESTED;
+            FrameDetected = false;
+            //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
+            LastFrameSteps = 0;
+            if (UVLedOn) {
+                analogWrite(PIN_UV_LED, 0); // Turn off UV LED
+                UVLedOn = false;
+            }
+        }
+        else {
+            FrameDetected = IsHoleDetected();
+            if (!FrameDetected) {
+                capstan_advance(1);
+                FrameStepsDone++;
+                if (FrameStepsDone > MaxFrameSteps)
+                  MaxFrameSteps = FrameStepsDone;
+            }
+        }
+
+        analogWrite(PIN_GREEN_LED, (FrameStepsDone*65535)/MaxFrameSteps);   // Green led proportional to frame steps done
+
+        if (FrameDetected) {
+            DebugPrintStr("Frame!");
+            if (FrameExtraSteps > 0)  // If positive, aditional steps after detection
+                capstan_advance(FrameExtraSteps);
+            LastFrameSteps = FrameStepsDone;
+            adjust_framesteps(LastFrameSteps);
+            FrameStepsDone = 0;
+            StartPictureSaveTime = micros();
+            // Tell UI (Raspberry PI) a new frame is available for processing
+            if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
+                tone(PIN_BUZZER, 2000, 35);
+            }
+            else {
+                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
+            }
+      
+            FrameDetected = false;
+            retvalue = SCAN_FRAME_DETECTED;
+            DebugPrint("FrmS",LastFrameSteps);
+            DebugPrint("FrmT",CurrentTime-StartFrameTime);
+            if (DebugState == FrameSteps)
+                SerialPrintInt(LastFrameSteps);
+        }
+        else if (FrameStepsDone > 2*MinFrameSteps) {
+            retvalue = SCAN_FRAME_DETECTION_ERROR;
+            // Tell UI (Raspberry PI) an error happened during scanning
+            SendToRPi(RSP_SCAN_ERROR, FrameStepsDone, 2*MinFrameSteps);
+            FrameStepsDone = 0;
+        }
+        return (retvalue);
+    }
+}
+
+// ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
+void receiveEvent(int byteCount) {
+    int IncomingIc, param = 0;
+
+  while (Wire.available()) {
+    int data = Wire.read();
+    Serial.print("ALT-Scann 8 - Received data from Raspberry Pi: ");
+    Serial.println(data);
+  }
+  return;
+    if (Wire.available())
+        IncomingIc = Wire.read();
+    if (Wire.available())
+        param =  Wire.read();
+    if (Wire.available())
+        param +=  256*Wire.read();
+    while (Wire.available())
+        Wire.read();
+
+    if (IncomingIc > 0) {
+        push_cmd(IncomingIc, param); // No error treatment for now
+    }
+}
+
+// -- Sending I2C command to Raspberry PI, take picture now -------
+void sendEvent() {
+    int cmd, p1, p2;
+    cmd = pop_rsp(&p1, &p2);
+    if (cmd != -1) {
+        BufferForRPi[0] = cmd;
+        BufferForRPi[1] = p1/256;
+        BufferForRPi[2] = p1%256;
+        BufferForRPi[3] = p2/256;
+        BufferForRPi[4] = p2%256;
+        Wire.write(BufferForRPi,5);
+    }
+    else {
+        BufferForRPi[0] = 0;
+        BufferForRPi[1] = 0;
+        BufferForRPi[2] = 0;
+        BufferForRPi[3] = 0;
+        BufferForRPi[4] = 0;
+        Wire.write(BufferForRPi,5);
+    }
+}
+
+boolean push(volatile Queue * queue, int IncomingIc, int param, int param2) {
+    boolean retvalue = false;
+    if ((queue -> in+1) % QUEUE_SIZE != queue -> out) {
+        queue -> Data[queue -> in] = IncomingIc;
+        queue -> Param[queue -> in] = param;
+        queue -> Param2[queue -> in] = param2;
+        queue -> in++;
+        queue -> in %= QUEUE_SIZE;
+        retvalue = true;
+    }
+    // else: Queue full: Should not happen. Not sure how this should be handled
+    return(retvalue);
+}
+
+int pop(volatile Queue * queue, int * param, int * param2) {
+    int retvalue = -1;  // default return value: -1 (error)
+    if (queue -> out != queue -> in) {
+        retvalue = queue -> Data[queue -> out];
+        if (param != NULL)
+            *param =  queue -> Param[queue -> out];
+        if (param2 != NULL)
+            *param2 =  queue -> Param2[queue -> out];
+        queue -> out++;
+        queue -> out %= QUEUE_SIZE;
+    }
+    // else: Queue empty: Nothing to do
+    return(retvalue);
+}
+
+void push_cmd(int cmd, int param) {
+    push(&CommandQueue, cmd, param, 0);
+}
+int pop_cmd(int * param) {
+    return(pop(&CommandQueue, param, NULL));
+}
+void push_rsp(int rsp, int param, int param2) {
+    push(&ResponseQueue, rsp, param, param2);
+}
+int pop_rsp(int * param, int * param2) {
+    return(pop(&ResponseQueue, param, param2));
+}
+
+boolean dataInCmdQueue(void) {
+    return (CommandQueue.out != CommandQueue.in);
+}
+
+boolean dataInRspQueue(void) {
+    return (ResponseQueue.out != ResponseQueue.in);
+}
+
+void DebugPrintAux(const char * str, unsigned long i) {
+    static char PreviousDebug[64];
+    static char AuxLine[64];
+    static char PrintLine[64];
+    static int CurrentRepetitions = 0;
+    boolean GoPrint = true;
+  
+    if (DebugState != DebugInfo && DebugState != DebugInfoSingle) return;
+
+    if (strlen(str) >= 50) {
+        Serial.println("Cannot print debug line, too long");
+        return;
+    }
+
+    if (i != -1)
+        sprintf(PrintLine,"%s=%u",str,i);
+    else
+        strcpy(PrintLine,str);
+  
+    if (strcmp(PrintLine,PreviousDebug) == 0) {
+        if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+            CurrentRepetitions++;
+        if (CurrentRepetitions > MaxDebugRepetitions) GoPrint = false;
+    }
+    else {
+        if (CurrentRepetitions > MaxDebugRepetitions) {
+            if (CurrentRepetitions < MAX_DEBUG_REPETITIONS_COUNT)
+                sprintf(AuxLine,"Previous line repeated %u times",CurrentRepetitions-MaxDebugRepetitions);
+            else
+                strcpy(AuxLine,"Previous line repeated more than 30,000 times");
+            Serial.println(AuxLine);
+        }
+        CurrentRepetitions = 0;
+    }
+    strcpy(PreviousDebug, PrintLine);
+
+    if (GoPrint) Serial.println(PrintLine);
+}
+
+void DebugPrintStr(const char * str) {
+    if (DebugState != DebugInfo) return;
+    DebugPrintAux(str,-1);
+}
+
+// Differentiated debug print function to debug specifics without printing all debug lines
+void DebugPrint(const char * str, unsigned long i) {
+    if (DebugState != DebugInfo) return;
+    DebugPrintAux(str,i);
+}
+
+
+void SerialPrintStr(const char * str) {
+    if (DebugState != DebugInfo) Serial.println(str);
+}
+
+void SerialPrintInt(int i) {
+    if (DebugState != DebugInfo) Serial.println(i);
+}
+
