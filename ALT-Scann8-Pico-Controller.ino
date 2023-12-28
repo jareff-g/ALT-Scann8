@@ -799,17 +799,34 @@ void ReportPlotterInfo() {
     static char out[100];
 
     if (millis() > NextReport) {
-        if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
-            NextReport = millis() + 20;
-            if (DebugState == PlotterInfo) {  // Plotter info to Arduino IDE
-                sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
-                SerialPrintStr(out);
-            }
-            Previous_PT_Signal = PT_SignalLevelRead;
-            PreviousFrameSteps = LastFrameSteps;
-            if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
-                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
-        }
+      if (Previous_PT_Signal != PT_SignalLevelRead || PreviousFrameSteps != LastFrameSteps) {
+          NextReport = millis() + 20;
+          if (DebugState == PlotterInfo) {  // Plotter info to Arduino IDE
+              sprintf(out,"PT:%i, Th:%i, FSD:%i, PTALR:%i, MinD:%i, MaxD:%i", PT_SignalLevelRead, PerforationThresholdLevel, FrameStepsDone, PerforationThresholdAutoLevelRatio, MinPT_Dynamic/10, MaxPT_Dynamic/10);
+              SerialPrintStr(out);
+          }
+          Previous_PT_Signal = PT_SignalLevelRead;
+          PreviousFrameSteps = LastFrameSteps;
+          if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
+              SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
+      }
+      if (display_connected) {
+        // Clear the buffer
+        display.clearDisplay();
+        display.drawFastHLine(127, 63, 64 - (PT_SignalLevelRead*64/MaxPT), SSD1306_INVERSE);
+        display.setTextSize(1);             // Normal 1:1 pixel scale
+        display.setTextColor(SSD1306_INVERSE);        // Draw white text
+        display.setCursor(5, 5);
+        sprintf(out,"FStepsDone: %u", FrameStepsDone);
+        display.println(out);
+        display.setCursor(5, 15);
+        sprintf(out,"PerfThres: %u", PerforationThresholdLevel);
+        display.println(out);
+        display.setCursor(5, 25);
+        sprintf(out,"MinFSteps: %u", MinFrameSteps);
+        display.println(out);
+        display.display();
+      }
     }
 }
 
