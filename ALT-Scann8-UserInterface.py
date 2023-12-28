@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.6"
+__version__ = "1.8.8"
 __date__ = "2023-12-28"
-__version_highlight__ = "Command line parameter to disable camera (for dev testing without a camera)"
+__version_highlight__ = "New UI element to display remaining time"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -145,6 +145,7 @@ PiCam2PreviewEnabled=False
 CaptureStabilizationDelay = 0.25
 PostviewCounter = 0
 FramesPerMinute = 0
+FramesToGo = 0
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
 TempInFahrenheit = False
@@ -2020,7 +2021,7 @@ def stop_scan_simulated():
 
 def capture_loop_simulated():
     global CurrentDir, CurrentFrame, CurrentExposure
-    global FramesPerMinute
+    global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str, frames_to_go_entry, time_to_go_time
     global NewFrameAvailable
     global ScanOngoing
     global preview_border_frame
@@ -2061,6 +2062,15 @@ def capture_loop_simulated():
                 image_array = np.negative(image_array)
                 raw_simulated_capture_image = Image.fromarray(image_array)
             draw_preview_image(raw_simulated_capture_image, 0)
+
+        # Update remaining time
+        FramesToGo = int(frames_to_go_str.get())
+        if FramesToGo > 0:
+            FramesToGo -= 1
+            frames_to_go_str.set(str(FramesToGo))
+            if FramesPerMinute != 0:
+                minutes_pending = FramesToGo // FramesPerMinute
+                time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
 
         CurrentFrame += 1
         session_frames += 1
@@ -2154,7 +2164,7 @@ def capture_loop():
     global CurrentFrame
     global CurrentExposure
     global SessionData
-    global FramesPerMinute
+    global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str
     global NewFrameAvailable
     global ScanProcessError, ScanProcessError_LastTime
     global ScanOngoing
@@ -2184,6 +2194,14 @@ def capture_loop():
                          round((total_wait_time_autoexp*1000/session_frames),1))
     elif ScanOngoing:
         if NewFrameAvailable:
+            # Update remaining time
+            FramesToGo = int(frames_to_go_str.get())
+            if FramesToGo > 0:
+                FramesToGo -= 1
+                frames_to_go_str.set(str(FramesToGo))
+                if FramesPerMinute != 0:
+                    minutes_pending = FramesToGo // FramesPerMinute
+                    time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
             CurrentFrame += 1
             session_frames += 1
             register_frame()
@@ -3050,6 +3068,7 @@ def build_ui():
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global hdr_bracket_width_spinbox, hdr_bracket_width_label, hdr_bracket_width_str, hdr_bracket_width
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
+    global frames_to_go_str, FramesToGo, time_to_go_str
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3198,6 +3217,16 @@ def build_ui():
     Scanned_Images_fpm = Label(scanned_images_fpm_frame, text=str(FramesPerMinute), font=("Arial", 8), width=8,
                                height=1)
     Scanned_Images_fpm.pack(side=LEFT)
+
+    # Create frame to display number of frames to go, and estimated time to finish
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4)
+    frames_to_go_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    frames_to_go_str = tk.StringVar(value=str(FramesToGo))
+    frames_to_go_entry = tk.Entry(frames_to_go_frame,textvariable=frames_to_go_str, width=8, font=("Arial", 8))
+    frames_to_go_entry.pack(side=TOP, padx=(5, 0), pady=(5, 5))
+    time_to_go_str = tk.StringVar(value='')
+    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", 8), width=20, height=1)
+    time_to_go_time.pack(side=TOP)
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1)
