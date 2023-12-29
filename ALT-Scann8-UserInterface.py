@@ -3225,7 +3225,7 @@ def build_ui():
     frames_to_go_entry = tk.Entry(frames_to_go_frame,textvariable=frames_to_go_str, width=8, font=("Arial", 8))
     frames_to_go_entry.pack(side=TOP, padx=(5, 0), pady=(5, 5))
     time_to_go_str = tk.StringVar(value='')
-    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", 8), width=20, height=1)
+    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", 8), width=22, height=1)
     time_to_go_time.pack(side=TOP)
 
     # Create frame to select S8/R8 film
