@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.9"
+__version__ = "1.8.10"
 __date__ = "2023-12-29"
 __version_highlight__ = "HDR: Change from 4 exposures to 3"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -252,7 +252,8 @@ image_list = []
 dry_run_iterations = 4
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
 # Finally set to 4-104
-hdr_min_exp = 4
+hdr_lower_exp = 8
+hdr_min_exp = hdr_lower_exp
 hdr_max_exp = 104
 hdr_bracket_width = 50
 hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
@@ -983,14 +984,14 @@ def hdr_check_min_exp(event):
 
     save_value = hdr_min_exp
     hdr_min_exp = int(hdr_min_exp_str.get())
-    if hdr_min_exp < 1:
-        hdr_min_exp = 1
+    if hdr_min_exp < hdr_lower_exp:
+        hdr_min_exp = hdr_lower_exp
     hdr_max_exp = hdr_min_exp + hdr_bracket_width
     if hdr_max_exp > 1000:
         hdr_bracket_width -= hdr_max_exp-1000  # Reduce bracked
         hdr_max_exp = 1000
         force_adjust_hdr_bracket = True
-    hdr_min_exp_str.set(hdr_min_exp)
+    hdr_min_exp_str.set(str(hdr_min_exp))
     hdr_max_exp_str.set(hdr_max_exp)
     hdr_bracket_width_str.set(hdr_bracket_width)
     if save_value != hdr_min_exp:
@@ -1018,11 +1019,11 @@ def hdr_check_max_exp(event):
         force_adjust_hdr_bracket = True
     else:
         hdr_min_exp = hdr_max_exp - hdr_bracket_width
-    if hdr_min_exp < 1:
-        hdr_min_exp = 1
+    if hdr_min_exp < hdr_lower_exp:
+        hdr_min_exp = hdr_lower_exp
         hdr_bracket_width = hdr_max_exp - hdr_min_exp  # Reduce bracket
         force_adjust_hdr_bracket = True
-    hdr_min_exp_str.set(hdr_min_exp)
+    hdr_min_exp_str.set(str(hdr_min_exp))
     hdr_max_exp_str.set(hdr_max_exp)
     hdr_bracket_width_str.set(hdr_bracket_width)
     if save_value != hdr_max_exp:
@@ -1056,12 +1057,12 @@ def hdr_check_bracket_width(event):
         force_adjust_hdr_bracket = True
         middle_exp = int((hdr_min_exp + (hdr_max_exp-hdr_min_exp))/2)
         hdr_min_exp = int(middle_exp - (hdr_bracket_width/2))
-        if hdr_min_exp < 1:
-            hdr_min_exp = 1
+        if hdr_min_exp < hdr_lower_exp:
+            hdr_min_exp = hdr_lower_exp
             hdr_max_exp = hdr_min_exp + hdr_bracket_width
         else:
             hdr_max_exp = int(middle_exp + (hdr_bracket_width/2))
-        hdr_min_exp_str.set(hdr_min_exp)
+        hdr_min_exp_str.set(str(hdr_min_exp))
         hdr_max_exp_str.set(hdr_max_exp)
         SessionData["HdrMinExp"] = hdr_min_exp
         SessionData["HdrMaxExp"] = hdr_max_exp
@@ -1689,7 +1690,7 @@ def capture_hdr():
         idx_inc = 1
     else:
         work_list = hdr_rev_exp_list
-        idx=4
+        idx = hdr_num_exposures
         idx_inc = -1
     for exp in work_list:
         logging.debug("capture_hdr: exp %.2f", exp)
@@ -1794,8 +1795,8 @@ def adjust_hdr_bracket():
         logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
         force_adjust_hdr_bracket = False
         PreviousCurrentExposure = aux_current_exposure
-        hdr_min_exp = max(aux_current_exposure-int(hdr_bracket_width/2), 1)
-        hdr_min_exp_str.set(hdr_min_exp)
+        hdr_min_exp = max(aux_current_exposure-int(hdr_bracket_width/2), hdr_lower_exp)
+        hdr_min_exp_str.set(str(hdr_min_exp))
         hdr_max_exp = hdr_min_exp + hdr_bracket_width
         hdr_max_exp_str.set(hdr_max_exp)
         SessionData["HdrMinExp"] = hdr_min_exp
@@ -3503,7 +3504,7 @@ def build_ui():
         hdr_min_exp_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
-            textvariable=hdr_min_exp_str, from_=1, to=999, increment=1, font=("Arial", 7), state=DISABLED)
+            textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", 7), state=DISABLED)
         hdr_min_exp_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
         hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
 
