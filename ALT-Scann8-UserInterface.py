@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.8"
-__date__ = "2023-12-28"
-__version_highlight__ = "New UI element to display remaining time"
+__version__ = "1.8.9"
+__date__ = "2023-12-29"
+__version_highlight__ = "HDR: Change from 4 exposures to 3"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -255,7 +255,7 @@ dry_run_iterations = 4
 hdr_min_exp = 4
 hdr_max_exp = 104
 hdr_bracket_width = 50
-hdr_num_steps = 4
+hdr_num_steps = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
 hdr_step_value = 1
 hdr_exp_list = []
 hdr_rev_exp_list = []
@@ -1359,6 +1359,8 @@ def draw_preview_image(preview_image, idx):
         preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
         PreviewAreaImage = ImageTk.PhotoImage(preview_image)
     elif HdrViewX4Active:
+        # if using View4X mode and there are 5 exposures, we do not display the 5th
+        # and if there are 3, 4th position will always be empty
         quarter_image = preview_image.resize((int(PreviewWidth/2), int(PreviewHeight/2)))
         if idx == 1:
             hdr_view_4_image.paste(quarter_image, (0, 0))
