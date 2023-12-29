@@ -255,7 +255,7 @@ dry_run_iterations = 4
 hdr_min_exp = 4
 hdr_max_exp = 104
 hdr_bracket_width = 50
-hdr_num_steps = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
+hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
 hdr_step_value = 1
 hdr_exp_list = []
 hdr_rev_exp_list = []
@@ -2835,15 +2835,15 @@ def PiCam2_configure():
 
 
 def hdr_init():
-    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_steps, hdr_view_4_image
+    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_exposures, hdr_view_4_image
 
     hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
     hdr_reinit()
 
 def hdr_reinit():
-    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_steps, hdr_view_4_image
+    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_exposures, hdr_view_4_image
 
-    hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_steps
+    hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_exposures
     hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
     hdr_exp_list.sort()
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
