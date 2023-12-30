@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.10"
-__date__ = "2023-12-29"
-__version_highlight__ = "HDR: Change from 4 exposures to 3"
+__version__ = "1.8.11"
+__date__ = "2023-12-30"
+__version_highlight__ = "HDR: New calculation of exposure list"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -255,6 +255,7 @@ dry_run_iterations = 4
 hdr_lower_exp = 8
 hdr_min_exp = hdr_lower_exp
 hdr_max_exp = 104
+hdr_best_exp = 0
 hdr_bracket_width = 50
 hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
 hdr_step_value = 1
@@ -290,7 +291,8 @@ SessionData = {
     "HdrMinExp": hdr_min_exp,
     "HdrMaxExp": hdr_max_exp,
     "HdrBracketWidth": hdr_bracket_width,
-    "HdrBracketAuto": True
+    "HdrBracketAuto": True,
+    "FramesToGo": FramesToGo
 }
 
 def exit_app():  # Exit Application
@@ -1755,7 +1757,7 @@ def adjust_hdr_bracket_auto():
 def adjust_hdr_bracket():
     global camera, VideoCaptureActive, HdrCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
-    global hdr_min_exp, hdr_max_exp, hdr_bracket_width
+    global hdr_min_exp, hdr_max_exp, hdr_best_exp, hdr_bracket_width
     global hdr_min_exp_str, hdr_max_exp_str
     global PreviousCurrentExposure, HdrBracketAuto
     global hdr_max_exp_spinbox, hdr_min_exp_spinbox
@@ -1795,7 +1797,8 @@ def adjust_hdr_bracket():
         logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
         force_adjust_hdr_bracket = False
         PreviousCurrentExposure = aux_current_exposure
-        hdr_min_exp = max(aux_current_exposure-int(hdr_bracket_width/2), hdr_lower_exp)
+        hdr_best_exp = aux_current_exposure
+        hdr_min_exp = max(hdr_best_exp-int(hdr_bracket_width/2), hdr_lower_exp)
         hdr_min_exp_str.set(str(hdr_min_exp))
         hdr_max_exp = hdr_min_exp + hdr_bracket_width
         hdr_max_exp_str.set(hdr_max_exp)
@@ -2035,6 +2038,7 @@ def capture_loop_simulated():
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
     global Scanned_Images_fpm
+    global SessionData
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2067,13 +2071,16 @@ def capture_loop_simulated():
             draw_preview_image(raw_simulated_capture_image, 0)
 
         # Update remaining time
-        FramesToGo = int(frames_to_go_str.get())
-        if FramesToGo > 0:
-            FramesToGo -= 1
-            frames_to_go_str.set(str(FramesToGo))
-            if FramesPerMinute != 0:
-                minutes_pending = FramesToGo // FramesPerMinute
-                time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
+        aux = frames_to_go_str.get()
+        if aux.isdigit():
+            FramesToGo = int(aux)
+            if FramesToGo > 0:
+                FramesToGo -= 1
+                frames_to_go_str.set(str(FramesToGo))
+                SessionData["FramesToGo"] = FramesToGo
+                if FramesPerMinute != 0:
+                    minutes_pending = FramesToGo // FramesPerMinute
+                    time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
 
         CurrentFrame += 1
         session_frames += 1
@@ -2198,13 +2205,16 @@ def capture_loop():
     elif ScanOngoing:
         if NewFrameAvailable:
             # Update remaining time
-            FramesToGo = int(frames_to_go_str.get())
-            if FramesToGo > 0:
-                FramesToGo -= 1
-                frames_to_go_str.set(str(FramesToGo))
-                if FramesPerMinute != 0:
-                    minutes_pending = FramesToGo // FramesPerMinute
-                    time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
+            aux = frames_to_go_str.get()
+            if aux.isdigit():
+                FramesToGo = int(aux)
+                if FramesToGo > 0:
+                    FramesToGo -= 1
+                    frames_to_go_str.set(str(FramesToGo))
+                    SessionData["FramesToGo"] = FramesToGo
+                    if FramesPerMinute != 0:
+                        minutes_pending = FramesToGo // FramesPerMinute
+                        time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
             CurrentFrame += 1
             session_frames += 1
             register_frame()
@@ -2361,7 +2371,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
-            logging.warning(f"Non-critical IOError ({e}) while checking incoming event from Arduino. Will check again.")
+            # When error is 121, not really an error, means Arduino has nothing to data available for us
+            if e.errno != 121:
+                logging.warning(f"Non-critical IOError ({e}) while checking incoming event from Arduino. Will check again.")
 
     if ScanOngoing and time.time() > last_frame_time:
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
@@ -2586,7 +2598,7 @@ def load_session_data():
     global SessionData
     global CurrentExposure, CurrentExposureStr, ExposureAdaptPause
     global CurrentDir
-    global CurrentFrame
+    global CurrentFrame, FramesToGo
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
     global hq_btn, hdr_btn, turbo_btn
@@ -2609,6 +2621,7 @@ def load_session_data():
     global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
     global HdrBracketAuto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
+    global frames_to_go_str
 
     if PersistedDataLoaded:
         win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
@@ -2626,6 +2639,9 @@ def load_session_data():
             if 'CurrentFrame' in SessionData:
                 CurrentFrame = int(SessionData["CurrentFrame"])
                 Scanned_Images_number_label.config(text=SessionData["CurrentFrame"])
+            if 'FramesToGo' in SessionData:
+                FramesToGo = int(SessionData["FramesToGo"])
+                frames_to_go_str.set(str(FramesToGo))
             if 'FilmType' in SessionData:
                 if SessionData["FilmType"] == "R8":
                     set_r8()
@@ -2842,11 +2858,19 @@ def hdr_init():
     hdr_reinit()
 
 def hdr_reinit():
-    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_num_exposures, hdr_view_4_image
+    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_min_exp, hdr_max_exp, hdr_best_exp, hdr_num_exposures, hdr_view_4_image
 
-    hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_exposures
-    hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
+    if hdr_num_exposures == 3:
+        hdr_exp_list.clear()
+        hdr_exp_list += [hdr_min_exp, hdr_best_exp, hdr_max_exp]
+    elif hdr_num_exposures == 5:
+        hdr_exp_list.clear()
+        hdr_exp_list += [hdr_min_exp, hdr_min_exp + int((hdr_best_exp-hdr_min_exp)/2), hdr_best_exp, hdr_best_exp + int((hdr_max_exp-hdr_best_exp)/2), hdr_max_exp]
+
+    #hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_exposures
+    #hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
     hdr_exp_list.sort()
+    logging.debug("hdr_exp_list=%s",hdr_exp_list)
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
 
 
