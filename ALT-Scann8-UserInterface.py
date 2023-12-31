@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.11"
-__date__ = "2023-12-30"
+__version__ = "1.8.12"
+__date__ = "2023-12-31"
 __version_highlight__ = "HDR: New calculation of exposure list"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -2764,7 +2764,7 @@ def load_session_data():
                     scan_speed_str.set(str(ScanSpeed))
                     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
                 if 'HdrBracketAuto' in SessionData:
-                    HdrBracketAuto = eval(SessionData["HdrBracketAuto"])
+                    HdrBracketAuto = SessionData["HdrBracketAuto"]
                 if 'HdrMinExp' in SessionData:
                     hdr_min_exp = SessionData["HdrMinExp"]
                 if 'HdrMaxExp' in SessionData:
