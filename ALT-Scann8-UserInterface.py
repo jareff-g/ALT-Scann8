@@ -471,9 +471,7 @@ def set_new_folder():
 
     requested_dir = ""
 
-    # CurrentDir = filedialog.askdirectory(initialdir=BaseDir, title="Select parent folder first")
     CurrentDir = BaseDir
-    # folder_frame_target_dir.config(text=CurrentDir)
     # Disable preview to make tkinter dialogs visible
     hide_preview()
     while requested_dir == "" or requested_dir is None:
@@ -1350,7 +1348,6 @@ def capture_save_thread(queue, event, id):
 def draw_preview_image(preview_image, idx):
     global draw_capture_label
     global preview_border_frame
-    # global PreviewAreaImage
     global win
     global total_wait_time_preview_display
     global hdr_view_4_image
@@ -2460,13 +2457,6 @@ def on_form_event(dummy):
         PreviewWinY = PreviewWinY + DeltaY
         display_preview()
 
-    """
-    # Uncomment to have the details of each event
-    for key in dir(event):
-        if not key.startswith('_'):
-            logging.debug("%s=%s", key, getattr(event, key))
-    """
-
 
 def preview_do_not_warn_again_selection():
     global preview_warn_again
@@ -2851,8 +2841,7 @@ def PiCam2_configure():
     # is already HighQuality, so not much to worry about
     # camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})
     # No preview by default
-    camera.options['quality'] = 100  # jpeg quality: values from 0 to 100. Reply from David Plowman in PiCam2 list
-    #camera.options['quality'] = 60  # jpeg quality: Test with 60%
+    camera.options['quality'] = 100  # jpeg quality: values from 0 to 100. Reply from David Plowman in PiCam2 list. Test with 60?
     camera.start(show_preview=False)
 
 
@@ -2872,8 +2861,6 @@ def hdr_reinit():
         hdr_exp_list.clear()
         hdr_exp_list += [hdr_min_exp, hdr_min_exp + int((hdr_best_exp-hdr_min_exp)/2), hdr_best_exp, hdr_best_exp + int((hdr_max_exp-hdr_best_exp)/2), hdr_max_exp]
 
-    #hdr_step_value = (hdr_max_exp - hdr_min_exp) / hdr_num_exposures
-    #hdr_exp_list = np.arange(hdr_min_exp, hdr_max_exp, hdr_step_value).tolist()
     hdr_exp_list.sort()
     logging.debug("hdr_exp_list=%s",hdr_exp_list)
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
@@ -2885,8 +2872,6 @@ def tscann8_init():
     global CurrentExposure
     global TopWinX
     global TopWinY
-    # global preview_border_frame
-    # global draw_capture_label
     global i2c
     global WinInitDone
     global CurrentDir
@@ -2894,7 +2879,6 @@ def tscann8_init():
     global ZoomSize
     global capture_config
     global preview_config
-    # global draw_capture_label
     global PreviewWinX, PreviewWinY
     global LogLevel
     global capture_display_queue, capture_display_event
@@ -2973,15 +2957,6 @@ def tscann8_init():
 
     WinInitDone = True
 
-    """
-    # Create a frame to add a border to the preview
-    preview_border_frame = Frame(win, width=844, height=634, bg='dark grey')
-    preview_border_frame.pack()
-    preview_border_frame.place(x=38, y=38)
-    # Also a label to draw images when preview is not used
-    draw_capture_label = tk.Label(preview_border_frame)
-    """
-
     if not SimulatedRun and not CameraDisabled:
         if IsPiCamera2:
             # Change preview coordinated for PiCamere2 to avoid confusion with overlay mode in PiCamera legacy
@@ -3024,8 +2999,6 @@ def tscann8_init():
             camera.shutter_speed = CurrentExposure
 
     # Enable events on windows movements, to allow preview to follow
-    # lblText = tk.Label(win, text='')
-    # lblText.pack()
     if not SimulatedRun and not IsPiCamera2:
         win.bind('<Configure>', on_form_event)
 
@@ -3409,8 +3382,6 @@ def build_ui():
         ### frame_alignment_frame.pack(side=LEFT, padx=5)
         frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, pady=4, sticky=NW)
         # Spinbox to select MinFrameSteps on Arduino
-        # min_frame_steps_label = tk.Label(frame_alignment_frame, text='Steps/frame:', width=10, font=("Arial", 7))
-        # min_frame_steps_label.grid(row=0, column=0, padx=2, pady=3, sticky=E)
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=12, height=1,
                                                     command=min_frame_steps_spinbox_auto,
                                                     activebackground='#f0f0f0',
@@ -3425,10 +3396,7 @@ def build_ui():
             textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", 7))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
-        #min_frame_steps_spinbox.bind("<Double - Button - 1>", min_frame_steps_spinbox_auto)
         # Spinbox to select PTLevel on Arduino
-        # pt_level_label = tk.Label(frame_alignment_frame, text='PT Level:', width=10, font=("Arial", 7))
-        # pt_level_label.grid(row=1, column=0, padx=2, pady=3, sticky=E)
         pt_level_btn = Button(frame_alignment_frame, text="PT Level:", width=12, height=1,
                                                     command=pt_level_spinbox_auto,
                                                     activebackground='#f0f0f0',
@@ -3443,7 +3411,6 @@ def build_ui():
             textvariable=pt_level_str, from_=0, to=900, font=("Arial", 7))
         pt_level_spinbox.grid(row=1, column=1, padx=2, pady=3, sticky=W)
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
-        # pt_level_spinbox.bind("<Double - Button - 1>", pt_level_spinbox_auto)
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
@@ -3483,7 +3450,6 @@ def build_ui():
         scan_speed_label = tk.Label(speed_quality_frame,
                                          text='Speed:',
                                          width=7, font=("Arial", 7))
-        #scan_speed_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
         scan_speed_label.pack(side=LEFT, padx=4)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
         scan_speed_selection_aux = speed_quality_frame.register(
@@ -3492,7 +3458,6 @@ def build_ui():
             speed_quality_frame,
             command=(scan_speed_selection_aux, '%d'), width=3,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", 7))
-        #scan_speed_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
         scan_speed_spinbox.pack(side=LEFT, padx=4)
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
@@ -3501,7 +3466,6 @@ def build_ui():
         stabilization_delay_label = tk.Label(speed_quality_frame,
                                          text='Delay (ms):',
                                          width=10, font=("Arial", 7))
-        #stabilization_delay_label.grid(row=0, column=2, padx=2, pady=1, sticky=E)
         stabilization_delay_label.pack(side=LEFT, padx=4)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
@@ -3510,7 +3474,6 @@ def build_ui():
             speed_quality_frame,
             command=(stabilization_delay_selection_aux, '%d'), width=4,
             textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", 7))
-        #stabilization_delay_spinbox.grid(row=0, column=3, padx=2, pady=1, sticky=W)
         stabilization_delay_spinbox.pack(side=LEFT, padx=4)
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
@@ -3570,7 +3533,6 @@ def build_ui():
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", 7))
             experimental_frame.pack(side=LEFT, ipadx=5, fill=Y, padx=2, pady=2)
-            #experimental_frame.place(x=900, y=790)
 
             # Sharpness, control to allow playing with the values and see the results
             sharpness_control_label = tk.Label(experimental_frame,
