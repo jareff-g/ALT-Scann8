@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.12"
-__date__ = "2023-12-31"
-__version_highlight__ = "HDR: New calculation of exposure list"
+__version__ = "1.8.13"
+__date__ = "2024-01-01"
+__version_highlight__ = "HDR: Fix inconsistent state of widgets"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1004,7 +1004,7 @@ def hdr_check_min_exp(event):
 
 
 def hdr_check_max_exp(event):
-    global hdr_min_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
+    global hdr_max_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
     global hdr_max_exp, hdr_max_exp_str
     global hdr_bracket_width, hdr_bracket_width_str
     global force_adjust_hdr_bracket
@@ -1440,18 +1440,21 @@ def hdr_set_controls():
     hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
 
 def switch_hdr_capture():
     global CurrentExposure
     global SimulatedRun
-    global hdr_capture_active, HdrCaptureActive
+    global hdr_capture_active, HdrCaptureActive, HdrBracketAuto
+    global hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox
 
     HdrCaptureActive = hdr_capture_active.get()
     SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
 
     hdr_set_controls()
-
-    if not HdrCaptureActive:    # If disabling HDR, need to set standard exposure as set in UI
+    if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
+        arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
+    else:    # If disabling HDR, need to set standard exposure as set in UI
         if CurrentExposure == 0:  # Automatic mode
             SessionData["CurrentExposure"] = str(CurrentExposure)
             if not SimulatedRun and not CameraDisabled:
@@ -1748,8 +1751,7 @@ def adjust_hdr_bracket_auto():
         return
 
     HdrBracketAuto = hdr_bracket_auto.get()
-
-    SessionData["HdrBracketAuto"] = str(HdrBracketAuto)
+    SessionData["HdrBracketAuto"] = HdrBracketAuto
 
     arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
@@ -2586,7 +2588,7 @@ def arrange_widget_state(auto_state, widget_list):
                              bg='sea green' if auto_state else save_bg,
                              fg='white' if auto_state else save_fg)
         elif isinstance(widget, tk.Spinbox):
-            widget.config(state='readonly' if auto_state else NORMAL)
+            widget.config(state='readonly' if auto_state else 'normal')
         elif isinstance(widget, tk.Checkbutton):
             if auto_state:
                 widget.select()
@@ -2619,7 +2621,7 @@ def load_session_data():
     global hdr_viewx4_active_checkbox, HdrViewX4Active
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
     global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
-    global HdrBracketAuto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
+    global HdrBracketAuto, hdr_bracket_auto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global frames_to_go_str
 
@@ -2765,6 +2767,7 @@ def load_session_data():
                     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
                 if 'HdrBracketAuto' in SessionData:
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
+                    hdr_bracket_auto.set(HdrBracketAuto)
                 if 'HdrMinExp' in SessionData:
                     hdr_min_exp = SessionData["HdrMinExp"]
                 if 'HdrMaxExp' in SessionData:
@@ -2772,7 +2775,9 @@ def load_session_data():
                 if 'HdrBracketWidth' in SessionData:
                     hdr_bracket_width = SessionData["HdrBracketWidth"]
                     hdr_bracket_width_str.set(str(hdr_bracket_width))
-                arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
+                hdr_set_controls()
+                if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
+                    arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
         display_preview()
 
