@@ -142,7 +142,7 @@ draw_capture_label = 0
 button_lock_counter = 0
 
 PiCam2PreviewEnabled=False
-CaptureStabilizationDelay = 0.25
+CaptureStabilizationDelay = 0.1 # 100 ms
 PostviewCounter = 0
 FramesPerMinute = 0
 FramesToGo = 0
@@ -2684,7 +2684,6 @@ def load_session_data():
                         CurrentExposure = int(float(CurrentExposureStr))
                         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                     exposure_str = CurrentExposureStr
-                    arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
@@ -2716,7 +2715,6 @@ def load_session_data():
                 if 'FrameStepsAuto' in SessionData:
                     FrameSteps_auto = SessionData["FrameStepsAuto"]
                     min_frame_steps_str.set(str(MinFrameSteps))
-                    arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
                     if FrameSteps_auto:
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
@@ -2737,7 +2735,6 @@ def load_session_data():
                 if 'PTLevelAuto' in SessionData:
                     PTLevel_auto = SessionData["PTLevelAuto"]
                     pt_level_str.set(str(PTLevel))
-                    arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
                     if PTLevel_auto:
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
@@ -2765,11 +2762,15 @@ def load_session_data():
                 if 'HdrBracketWidth' in SessionData:
                     hdr_bracket_width = SessionData["HdrBracketWidth"]
                     hdr_bracket_width_str.set(str(hdr_bracket_width))
-                hdr_set_controls()
-                if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
-                    arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
         display_preview()
+    # Update widget state whether or not config loaded (to honor app default values)
+    arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
+    arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
+    arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
+    hdr_set_controls()
+    if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
+        arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
 
 def reinit_controller():
