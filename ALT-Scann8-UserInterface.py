@@ -3379,7 +3379,6 @@ def build_ui():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", 7))
-        ### frame_alignment_frame.pack(side=LEFT, padx=5)
         frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, pady=4, sticky=NW)
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=12, height=1,
@@ -3650,16 +3649,16 @@ def main(argv):
 
     build_ui()
 
-    load_persisted_data_from_disk()
+    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
 
     load_config_data()
+    load_session_data()
 
     if IsPiCamera2:     # Warning only for PiCamera2
         if PreviewWarnAgain:  # schedule hiding preview in 2 seconds to make warning visible
             win.after(2000, hide_preview)
             display_preview_warning()
 
-    load_session_data()
 
     ALT_scann_init_done = True
 
