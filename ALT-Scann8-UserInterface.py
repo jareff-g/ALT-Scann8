@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.15"
-__date__ = "2024-01-01"
+__version__ = "1.8.16"
+__date__ = "2024-01-02"
 __version_highlight__ = "Picamera legacy code removal"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -33,7 +33,7 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, X, RAISED, SUNKEN
-from tkinter import Toplevel, Label, Button, Frame, LabelFrame, Canvas
+from tkinter import Label, Button, Frame, LabelFrame, Canvas
 
 from PIL import ImageTk, Image
 
@@ -47,6 +47,12 @@ import sys
 import getopt
 
 import numpy as np
+
+try:
+    import psutil
+    check_disk_space = True
+except ImportError:
+    check_disk_space = False
 
 try:
     import smbus
@@ -86,6 +92,7 @@ NegativeCaptureActive = False
 HdrCaptureActive = False
 HqCaptureActive = False
 AdvanceMovieActive = False
+RetreatMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
 RewindErrorOutstanding = False
 RewindEndOutstanding = False
@@ -165,6 +172,7 @@ CMD_SET_REGULAR_8 = 18
 CMD_SET_SUPER_8 = 19
 CMD_SWITCH_REEL_LOCK_STATUS = 20
 CMD_FILM_FORWARD = 30
+CMD_FILM_BACKWARD = 31
 CMD_SINGLE_STEP = 40
 CMD_ADVANCE_FRAME = 41
 CMD_ADVANCE_FRAME_FRACTION = 42
@@ -1006,7 +1014,7 @@ def hdr_check_bracket_width(event):
 
 
 def button_status_change_except(except_button, active):
-    global Free_btn, SingleStep_btn, Snapshot_btn, AdvanceMovie_btn
+    global Free_btn, SingleStep_btn, Snapshot_btn, AdvanceMovie_btn, RetreatMovie_btn
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
@@ -1028,6 +1036,8 @@ def button_status_change_except(except_button, active):
         Snapshot_btn.config(state=DISABLED if active else NORMAL)
     if except_button != AdvanceMovie_btn:
         AdvanceMovie_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != RetreatMovie_btn:
+        RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Rewind_btn:
         Rewind_btn.config(state=DISABLED if active else NORMAL)
     if except_button != FastForward_btn:
@@ -1058,6 +1068,7 @@ def advance_movie():
     global AdvanceMovieActive
     global save_bg, save_fg
     global SimulatedRun
+    global AdvanceMovie_btn
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
@@ -1073,6 +1084,28 @@ def advance_movie():
 
     # Enable/Disable related buttons
     button_status_change_except(AdvanceMovie_btn, AdvanceMovieActive)
+
+
+def retreat_movie():
+    global RetreatMovieActive
+    global save_bg, save_fg
+    global SimulatedRun
+    global RetreatMovie_btn
+
+    # Update button text
+    if not RetreatMovieActive:  # Advance movie is about to start...
+        RetreatMovie_btn.config(text='Stop movie', bg='red',
+                                fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+    else:
+        RetreatMovie_btn.config(text='Movie backward', bg=save_bg,
+                                fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+    RetreatMovieActive = not RetreatMovieActive
+    # Send instruction to Arduino
+    if not SimulatedRun:
+        send_arduino_command(CMD_FILM_BACKWARD)
+
+    # Enable/Disable related buttons
+    button_status_change_except(RetreatMovie_btn, RetreatMovieActive)
 
 
 def rewind_movie():
@@ -1334,6 +1367,20 @@ def update_rpi_temp():
         RPiTemp = int(int(temp_str) / 100) / 10
     else:
         RPiTemp = 64.5
+
+def disk_space_available():
+    global CurrentDir
+
+    if not check_disk_space:
+        return True
+    disk_usage = psutil.disk_usage(CurrentDir)
+    available_space_mb = disk_usage.free / (1024 ** 2)
+
+    if available_space_mb < 500:
+        logging.debug(f"Disk space running out, only {available_space_mb} MB available")
+        return False
+    else:
+        return True
 
 
 def hdr_set_controls():
@@ -2110,6 +2157,10 @@ def capture_loop():
                 FramesPerMinute = FPM_CalculatedValue
                 Scanned_Images_fpm.config(text=str(int(FPM_CalculatedValue)))
             win.update()
+            if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
+                logging.error("No disk space available, stopping scan process.")
+                if ScanOngoing:
+                    ScanStopRequested = True  # Stop in next capture loop
         elif ScanProcessError:
             if ScanProcessError_LastTime != 0:
                 if time.time() - ScanProcessError_LastTime <= 5:     # Second error in less than 5 seconds: Stop
@@ -2826,6 +2877,7 @@ def build_ui():
     global hdr_bracket_width_spinbox, hdr_bracket_width_label, hdr_bracket_width_str, hdr_bracket_width
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
+    global RetreatMovie_btn
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win, width=850, height=650)
@@ -3338,6 +3390,12 @@ def build_ui():
             manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
                                      state=DISABLED, font=("Arial", 7))
             manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
+
+            # Retreat movie button (slow backward through filmgate)
+            RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=14, height=1, command=retreat_movie,
+                                      activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", 7))
+            RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, pady=4, sticky='')
+
 
 
 def get_controller_version():
