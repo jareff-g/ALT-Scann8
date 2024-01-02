@@ -232,8 +232,6 @@ last_click_time = 0
 
 ALT_Scann8_controller_detected = False
 
-PreviewWarnAgain = True
-
 FPM_LastMinuteFrameTimes = list()
 FPM_StartTime = time.ctime()
 FPM_CalculatedValue = -1
@@ -365,6 +363,7 @@ def set_focus_zoom():
         focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
 
 def adjust_focus_zoom():
+    global ZoomSize
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
                                            (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
@@ -372,14 +371,14 @@ def adjust_focus_zoom():
 
 def set_focus_up():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosY > 0.05:
+    if FocusZoomPosY >= 0.05:
         FocusZoomPosY = round(FocusZoomPosY - 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom up (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
 
 def set_focus_left():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosX > 0.05:
+    if FocusZoomPosX >= 0.05:
         FocusZoomPosX = round(FocusZoomPosX - 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom left (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -387,7 +386,7 @@ def set_focus_left():
 
 def set_focus_right():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosX < (1-(FocusZoomFactorX - 0.05)):
+    if FocusZoomPosX <= (1-(FocusZoomFactorX - 0.05)):
         FocusZoomPosX = round(FocusZoomPosX + 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom right (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -395,7 +394,7 @@ def set_focus_right():
 
 def set_focus_down():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosY < (1-(FocusZoomFactorY - 0.05)):
+    if FocusZoomPosY <= (1-(FocusZoomFactorY - 0.05)):
         FocusZoomPosY = round(FocusZoomPosY + 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom down (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -2309,7 +2308,6 @@ def load_persisted_data_from_disk():
 def load_config_data():
     global SessionData
     global PostviewModule
-    global PreviewWarnAgain
     global TempInFahrenheit
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
@@ -2321,8 +2319,6 @@ def load_config_data():
         logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
         logging.debug("SessionData loaded from disk:")
-        if 'PreviewWarnAgain' in SessionData:
-            PreviewWarnAgain = eval(SessionData["PreviewWarnAgain"])
         if 'TempInFahrenheit' in SessionData:
             TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
             if TempInFahrenheit:
@@ -2603,7 +2599,7 @@ def PiCam2_configure():
                                            raw={"size": (2028, 1520)},
                                            transform=Transform(hflip=True))
 
-    preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
+    preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     camera.set_controls({"ExposureTime": CurrentExposure})
