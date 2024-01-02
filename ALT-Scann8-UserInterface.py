@@ -33,7 +33,7 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, X, RAISED, SUNKEN
-from tkinter import Toplevel, Label, Button, Frame, LabelFrame, Canvas
+from tkinter import Label, Button, Frame, LabelFrame, Canvas
 
 from PIL import ImageTk, Image
 
