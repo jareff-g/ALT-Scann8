@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.14"
+__version__ = "1.8.15"
 __date__ = "2024-01-01"
-__version_highlight__ = "Code cleanup"
+__version_highlight__ = "Picamera legacy code removal"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -50,21 +50,14 @@ import numpy as np
 
 try:
     import smbus
-    try:
-        from picamera2 import Picamera2, Preview
-        from libcamera import Transform
-        # Global variable to isolate camera specific code (Picamera vs PiCamera2)
-        IsPiCamera2 = True
-    except ImportError:
-        # If PiCamera2 cannot be imported, it will default to PiCamera legacy, so no need to change this
-        IsPiCamera2 = False
-        import picamera
-
+    from picamera2 import Picamera2, Preview
+    from libcamera import Transform
+    # Global variable to isolate camera specific code (Picamera vs PiCamera2)
+    IsPiCamera2 = True
     # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
     SimulatedRun = False
 except ImportError:
     SimulatedRun = True
-    IsPiCamera2 = False
 
 import threading
 import queue
@@ -239,8 +232,6 @@ last_click_time = 0
 
 ALT_Scann8_controller_detected = False
 
-PreviewWarnAgain = True
-
 FPM_LastMinuteFrameTimes = list()
 FPM_StartTime = time.ctime()
 FPM_CalculatedValue = -1
@@ -306,7 +297,7 @@ def exit_app():  # Exit Application
         send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
         # Close preview if required
         if not CameraDisabled:
-            if not IsPiCamera2 or PiCam2PreviewEnabled:
+            if PiCam2PreviewEnabled:
                 camera.stop_preview()
             camera.close()
     # Write session data upon exit
@@ -349,19 +340,13 @@ def set_focus_zoom():
     if not FocusZoomActive:
         Focus_btn.config(text='Focus Zoom OFF', bg='red', fg='white', relief=SUNKEN)
         if not SimulatedRun and not CameraDisabled:
-            if IsPiCamera2:
-                camera.set_controls(
-                    {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
-                                   (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
-            else:
-                camera.crop = (FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)  # Activate camera zoom
+            camera.set_controls(
+                {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
+                               (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
     else:
         Focus_btn.config(text='Focus Zoom ON', bg=save_bg, fg=save_fg, relief=RAISED)
         if not SimulatedRun and not CameraDisabled:
-            if IsPiCamera2:
-                camera.set_controls({"ScalerCrop": (0, 0) + (ZoomSize[0], ZoomSize[1])})
-            else:
-                camera.crop = (0.0, 0.0, 835, 720)  # Remove camera zoom
+            camera.set_controls({"ScalerCrop": (0, 0) + (ZoomSize[0], ZoomSize[1])})
 
     time.sleep(.2)
     FocusZoomActive = not FocusZoomActive
@@ -378,24 +363,22 @@ def set_focus_zoom():
         focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
 
 def adjust_focus_zoom():
+    global ZoomSize
     if not SimulatedRun and not CameraDisabled:
-        if IsPiCamera2:
-            camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
-                                               (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
-        else:
-            camera.crop = (FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)  # Activate camera zoom
+        camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
+                                           (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
 
 
 def set_focus_up():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosY > 0.05:
+    if FocusZoomPosY >= 0.05:
         FocusZoomPosY = round(FocusZoomPosY - 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom up (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
 
 def set_focus_left():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosX > 0.05:
+    if FocusZoomPosX >= 0.05:
         FocusZoomPosX = round(FocusZoomPosX - 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom left (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -403,7 +386,7 @@ def set_focus_left():
 
 def set_focus_right():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosX < (1-(FocusZoomFactorX - 0.05)):
+    if FocusZoomPosX <= (1-(FocusZoomFactorX - 0.05)):
         FocusZoomPosX = round(FocusZoomPosX + 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom right (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -411,7 +394,7 @@ def set_focus_right():
 
 def set_focus_down():
     global FocusZoomPosX, FocusZoomPosY
-    if FocusZoomPosY < (1-(FocusZoomFactorY - 0.05)):
+    if FocusZoomPosY <= (1-(FocusZoomFactorY - 0.05)):
         FocusZoomPosY = round(FocusZoomPosY + 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom down (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
@@ -452,17 +435,6 @@ def set_focus_minus():
         logging.debug("Zoom plus (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
 
 
-# A couple of helper funtcions to hide/display preview when needed (displaying popups with picamera legacy)
-def hide_preview():
-    if not SimulatedRun and not IsPiCamera2 and not CameraDisabled:
-        camera.stop_preview()
-
-
-def display_preview():
-    if not SimulatedRun and not IsPiCamera2 and not CameraDisabled:
-        camera.start_preview(fullscreen=False, window=(PreviewWinX, PreviewWinY, 840, 720))
-
-
 def set_new_folder():
     global CurrentDir, CurrentFrame
     global SimulatedRun
@@ -472,8 +444,6 @@ def set_new_folder():
     requested_dir = ""
 
     CurrentDir = BaseDir
-    # Disable preview to make tkinter dialogs visible
-    hide_preview()
     while requested_dir == "" or requested_dir is None:
         requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
         if requested_dir is None:
@@ -490,8 +460,6 @@ def set_new_folder():
     else:
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
 
-    display_preview()
-
     folder_frame_target_dir.config(text=CurrentDir)
     Scanned_Images_number_label.config(text=str(CurrentFrame))
     SessionData["CurrentDir"] = str(CurrentDir)
@@ -502,8 +470,6 @@ def set_existing_folder():
     global CurrentDir, CurrentFrame
     global SimulatedRun
 
-    # Disable preview to make tkinter dialogs visible
-    hide_preview()
     if not SimulatedRun:
         CurrentDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
     else:
@@ -526,8 +492,6 @@ def set_existing_folder():
         CurrentFrame = int(current_frame_str)
         Scanned_Images_number_label.config(text=current_frame_str)
         SessionData["CurrentFrame"] = str(CurrentFrame)
-
-    display_preview()
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -565,10 +529,7 @@ def exposure_selection(updown):
     exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
 
     if not SimulatedRun and not CameraDisabled:
-        if IsPiCamera2:
-            camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
-        else:
-            camera.shutter_speed = int(CurrentExposure)
+        camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
 
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
     exposure_spinbox.config(value=CurrentExposureStr)
@@ -586,18 +547,12 @@ def exposure_spinbox_auto():
         CurrentExposureStr = "Auto"
         SessionData["CurrentExposure"] = str(CurrentExposure)
         if not SimulatedRun and not CameraDisabled:
-            if IsPiCamera2:
-                camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
-            else:
-                camera.shutter_speed = int(CurrentExposure)
+            camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
     else:
         if not SimulatedRun and not CameraDisabled:
             # Since we are in auto exposure mode, retrieve current value to start from there
-            if IsPiCamera2:
-                metadata = camera.capture_metadata()
-                CurrentExposure = metadata["ExposureTime"]
-            else:
-                CurrentExposure = camera.exposure_speed
+            metadata = camera.capture_metadata()
+            CurrentExposure = metadata["ExposureTime"]
         else:
             CurrentExposure = 3500  # Arbitrary Value for Simulated run
         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
@@ -632,12 +587,8 @@ def wb_red_selection(updown):
     SessionData["GainRed"] = GainRed
 
     if not SimulatedRun and not CurrentAwbAuto and not CameraDisabled:
-        if IsPiCamera2:
-            # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
-        else:
-            # camera.awb_mode = 'off'
-            camera.awb_gains = (GainRed, GainBlue)
+        # camera.set_controls({"AwbEnable": 0})
+        camera.set_controls({"ColourGains": (GainRed, GainBlue)})
 
 
 
@@ -657,12 +608,8 @@ def wb_blue_selection(updown):
     SessionData["GainBlue"] = GainBlue
 
     if not SimulatedRun and not CurrentAwbAuto and not CameraDisabled:
-        if IsPiCamera2:
-            # camera.set_controls({"AwbEnable": 0})
-            camera.set_controls({"ColourGains": (GainRed, GainBlue)})
-        else:
-            # camera.awb_mode = 'off'
-            camera.awb_gains = (GainRed, GainBlue)
+        # camera.set_controls({"AwbEnable": 0})
+        camera.set_controls({"ColourGains": (GainRed, GainBlue)})
 
 
 def wb_spinbox_auto():
@@ -689,30 +636,19 @@ def wb_spinbox_auto():
         awb_red_wait_checkbox.config(state=NORMAL)
         awb_blue_wait_checkbox.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
-            if IsPiCamera2:
-                camera.set_controls({"AwbEnable": 1})
-            else:
-                camera.awb_mode = 'auto'
+            camera.set_controls({"AwbEnable": 1})
     else:
         awb_red_wait_checkbox.config(state=DISABLED)
         awb_blue_wait_checkbox.config(state=DISABLED)
         if not SimulatedRun and not CameraDisabled:
-            if IsPiCamera2:
-                # Retrieve current gain values from Camera
-                metadata = camera.capture_metadata()
-                camera_colour_gains = metadata["ColourGains"]
-                GainRed = camera_colour_gains[0]
-                GainBlue = camera_colour_gains[1]
-                colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
-                colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
-                camera.set_controls({"AwbEnable": 0})
-            else:
-                GainRed = camera.awb_gains[0]
-                GainBlue = camera.awb_gains[1]
-                colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
-                colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
-                camera.awb_mode = 'off'
-                camera.awb_gains = (GainRed, GainBlue)
+            # Retrieve current gain values from Camera
+            metadata = camera.capture_metadata()
+            camera_colour_gains = metadata["ColourGains"]
+            GainRed = camera_colour_gains[0]
+            GainBlue = camera_colour_gains[1]
+            colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
+            colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
+            camera.set_controls({"AwbEnable": 0})
 
     arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
     arrange_widget_state(CurrentAwbAuto, [wb_red_btn, wb_red_spinbox])
@@ -1098,9 +1034,7 @@ def button_status_change_except(except_button, active):
         FastForward_btn.config(state=DISABLED if active else NORMAL)
     if except_button != PosNeg_btn:
         PosNeg_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Focus_btn and not IsPiCamera2:
-        Focus_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != Start_btn and (not IsPiCamera2 or not PiCam2PreviewEnabled):
+    if except_button != Start_btn and not PiCam2PreviewEnabled:
         Start_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Exit_btn:
         Exit_btn.config(state=DISABLED if active else NORMAL)
@@ -1109,15 +1043,14 @@ def button_status_change_except(except_button, active):
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
     hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
-    if ExperimentalMode and IsPiCamera2:
+    if ExperimentalMode:
         if except_button != hq_btn:
             hq_btn.config(state=DISABLED if active else NORMAL)
         if except_button != turbo_btn:
             turbo_btn.config(state=DISABLED if active else NORMAL)
 
-    if IsPiCamera2:
-        if except_button != PiCam2_preview_btn and except_button != Free_btn:
-            PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != PiCam2_preview_btn and except_button != Free_btn:
+        PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
 
 
 
@@ -1153,15 +1086,6 @@ def rewind_movie():
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
-        """ # Since algorithm to detect film in filmgate is nto secured, this warning is no longer needed
-        # Disable preview to make tkinter dialogs visible
-        hide_preview()
-        answer = tk.messagebox.askyesno(title='Security check ',
-                                        message='Have you routed the film via the upper path?')
-        display_preview()
-        if not answer:
-            return()
-        """
         RewindMovieActive = True
         # Update button text
         Rewind_btn.config(text='Stop\n<<', bg='red', fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
@@ -1170,11 +1094,9 @@ def rewind_movie():
         # Invoke rewind_loop to continue processing until error or end event
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
-        hide_preview()
         confirm = tk.messagebox.askyesno(title='Error during rewind',
                                          message='It seems there is film loaded via filmgate. \
                                          \r\nAre you sure you want to proceed?')
-        display_preview()
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
@@ -1228,15 +1150,6 @@ def fast_forward_movie():
 
     # Before proceeding, get confirmation from user that fild is correctly routed
     if not FastForwardActive:  # Ask only when rewind is not ongoing
-        """ # Since algorithm to detect film in filmgate is nto secured, this warning is no longer needed
-        # Disable preview to make tkinter dialogs visible
-        hide_preview()
-        answer = tk.messagebox.askyesno(title='Security check ',
-                                        message='Have you routed the film via the upper path?')
-        display_preview()
-        if not answer:
-            return ()
-        """
         FastForwardActive = True
         # Update button text
         FastForward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
@@ -1245,11 +1158,9 @@ def fast_forward_movie():
         # Invoke fast_forward_loop a first time when fast-forward starts
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
-        hide_preview()
         confirm = tk.messagebox.askyesno(title='Error during fast forward',
                                          message='It seems there is film loaded via filmgate. \
                                          \r\nAre you sure you want to proceed?')
-        display_preview()
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
@@ -1398,7 +1309,7 @@ def single_step_movie():
     if not SimulatedRun:
         send_arduino_command(CMD_SINGLE_STEP)
 
-        if IsPiCamera2 and not CameraDisabled:
+        if not CameraDisabled:
             # If no camera preview, capture frame in memory and display it
             # Single step is not a critical operation, waiting 100ms for it to happen should be enough
             # No need to implement confirmation from Arduino, as we have for regular capture during scan
@@ -1455,15 +1366,12 @@ def switch_hdr_capture():
         if CurrentExposure == 0:  # Automatic mode
             SessionData["CurrentExposure"] = str(CurrentExposure)
             if not SimulatedRun and not CameraDisabled:
-                if IsPiCamera2:
-                    camera.controls.ExposureTime = int(
-                        CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
-                else:
-                    camera.shutter_speed = int(CurrentExposure)
+                camera.controls.ExposureTime = int(
+                    CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
         else:
             if not SimulatedRun:
                 # Since we are in auto exposure mode, retrieve current value to start from there
-                if IsPiCamera2 and not CameraDisabled:
+                if not CameraDisabled:
                     metadata = camera.capture_metadata()
                     CurrentExposure = metadata["ExposureTime"]
                 else:
@@ -1486,7 +1394,7 @@ def switch_hq_capture():
     global hq_btn
 
     HqCaptureActive = not HqCaptureActive
-    if IsPiCamera2 and not CameraDisabled:
+    if not CameraDisabled:
         PiCam2_configure()
     SessionData["HqCaptureActive"] = str(HqCaptureActive)
     hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
@@ -1502,7 +1410,7 @@ def switch_turbo_capture():
     global turbo_btn
 
     VideoCaptureActive = not VideoCaptureActive
-    if IsPiCamera2 and not CameraDisabled:
+    if not CameraDisabled:
         PiCam2_configure()
     SessionData["VideoCaptureActive"] = str(VideoCaptureActive)
     turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
@@ -1524,16 +1432,8 @@ def switch_negative_capture():
                       fg='white' if NegativeCaptureActive else save_fg)
 
     if not SimulatedRun and not CameraDisabled:
-        if IsPiCamera2:
-            # Do nothing for PiCamera2, image turns negative at save time
-            logging.debug("Negative mode " + "On" if NegativeCaptureActive else "Off")
-        else:
-            if NegativeCaptureActive:
-                camera.image_effect = 'negative'
-                camera.awb_gains = (1.7, 1.9)
-            else:
-                camera.image_effect = 'none'
-                camera.awb_gains = (3.5, 1.0)
+        # Do nothing for PiCamera2, image turns negative at save time
+        logging.debug("Negative mode " + "On" if NegativeCaptureActive else "Off")
 
 
 # Function to enable 'real' preview with PiCamera2
@@ -1549,7 +1449,7 @@ def PiCamera2_preview():
     global PiCam2_preview_btn, Start_btn
 
     PiCam2PreviewEnabled = not PiCam2PreviewEnabled
-    if not SimulatedRun and IsPiCamera2 and not CameraDisabled:
+    if not SimulatedRun and not CameraDisabled:
         if (PiCam2PreviewEnabled):
             camera.stop_preview()
             camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
@@ -1696,47 +1596,36 @@ def capture_hdr():
         idx_inc = -1
     for exp in work_list:
         logging.debug("capture_hdr: exp %.2f", exp)
-        if IsPiCamera2:
-            if perform_dry_run:
-                camera.set_controls({"ExposureTime": int(exp*1000)})
-            else:
-                time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image only if no dry run
-            # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
-            if VideoCaptureActive:
-                if perform_dry_run:
-                    for i in range(1, dry_run_iterations):
-                        camera.capture_request()
-                        win.update()
-                request = camera.capture_request()
-                win.update()
-                img = request.make_image("main")
-                img = img.convert('RGB')
-                captured_snapshot = img.copy()
-                request.release()
-            else:
-                if perform_dry_run:
-                    for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
-                        camera.capture_image("main")
-                        win.update()
-                captured_snapshot = camera.capture_image("main")
-                win.update()
-            # We skip dry run only for the first capture of each frame,
-            # as it is the same exposure as the last capture of the previous one
-            perform_dry_run = True
-            # For PiCamera2, preview and save to file are handled in asynchronous threads
-            queue_item = tuple((captured_snapshot, CurrentFrame, idx))
-            capture_display_queue.put(queue_item)
-            capture_save_queue.put(queue_item)
+        if perform_dry_run:
+            camera.set_controls({"ExposureTime": int(exp*1000)})
         else:
-            camera.shutter_speed = exp*1000
-            for i in range(1,dry_run_iterations):
-                camera.capture(None, format='jpeg')     # Not sure None will work here
-                win.update()
-            if idx == 1:
-                camera.capture(FrameFilenamePattern % (CurrentFrame), quality=100)
-            else:
-                camera.capture(FrameHdrFilenamePattern % (CurrentFrame, idx), quality=100)
+            time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image only if no dry run
+        # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
+        if VideoCaptureActive:
+            if perform_dry_run:
+                for i in range(1, dry_run_iterations):
+                    camera.capture_request()
+                    win.update()
+            request = camera.capture_request()
             win.update()
+            img = request.make_image("main")
+            img = img.convert('RGB')
+            captured_snapshot = img.copy()
+            request.release()
+        else:
+            if perform_dry_run:
+                for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
+                    camera.capture_image("main")
+                    win.update()
+            captured_snapshot = camera.capture_image("main")
+            win.update()
+        # We skip dry run only for the first capture of each frame,
+        # as it is the same exposure as the last capture of the previous one
+        perform_dry_run = True
+        # For PiCamera2, preview and save to file are handled in asynchronous threads
+        queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+        capture_display_queue.put(queue_item)
+        capture_save_queue.put(queue_item)
         idx += idx_inc
 
 
@@ -1769,28 +1658,19 @@ def adjust_hdr_bracket():
     if SimulatedRun or CameraDisabled:
         aux_current_exposure = 20
     else:
-        if IsPiCamera2:
-            camera.set_controls({"ExposureTime": 0})    # Set automatic exposure, 7 shots allowed to catch up
-            if VideoCaptureActive:
-                for i in range(1, dry_run_iterations * 2):
-                    camera.capture_request()
-                    win.update()
-            else:
-                for i in range(1, dry_run_iterations * 2):
-                    camera.capture_image("main")
-                    win.update()
+        camera.set_controls({"ExposureTime": 0})    # Set automatic exposure, 7 shots allowed to catch up
+        if VideoCaptureActive:
+            for i in range(1, dry_run_iterations * 2):
+                camera.capture_request()
+                win.update()
         else:
-            camera.shutter_speed = 0    # Set automatic exposure
-            for i in range(1, dry_run_iterations + 1):
-                camera.capture(None, format='jpeg')  # Not sure None will work here
+            for i in range(1, dry_run_iterations * 2):
+                camera.capture_image("main")
                 win.update()
 
         # Since we are in auto exposure mode, retrieve current value to start from there
-        if IsPiCamera2:
-            metadata = camera.capture_metadata()
-            aux_current_exposure = int(metadata["ExposureTime"]/1000)
-        else:
-            aux_current_exposure = int(camera.exposure_speed/1000)
+        metadata = camera.capture_metadata()
+        aux_current_exposure = int(metadata["ExposureTime"]/1000)
 
     if aux_current_exposure != PreviousCurrentExposure or force_adjust_hdr_bracket:  # Adjust only if auto exposure changes
         logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
@@ -1840,11 +1720,8 @@ def capture(mode):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
-            if IsPiCamera2:
-                metadata = camera.capture_metadata()
-                aux_current_exposure = metadata["ExposureTime"]
-            else:
-                aux_current_exposure = camera.exposure_speed
+            metadata = camera.capture_metadata()
+            aux_current_exposure = metadata["ExposureTime"]
             # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000, then to 4000
             # Finally changed to allow a percentage of the value used previously
             # As we initialize this percentage to 50%, we start with double the original value
@@ -1871,14 +1748,10 @@ def capture(mode):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
-            if IsPiCamera2:
-                metadata = camera.capture_metadata()
-                camera_colour_gains = metadata["ColourGains"]
-                aux_gain_red = camera_colour_gains[0]
-                aux_gain_blue = camera_colour_gains[1]
-            else:
-                aux_gain_red = camera.awb_gains[0]
-                aux_gain_blue = camera.awb_gains[1]
+            metadata = camera.capture_metadata()
+            camera_colour_gains = metadata["ColourGains"]
+            aux_gain_red = camera_colour_gains[0]
+            aux_gain_blue = camera_colour_gains[1]
             # Same as for exposure, difference allowed is a percentage of the maximum value
             #if abs(aux_gain_red-PreviousGainRed) >= 0.5 or abs(aux_gain_blue-PreviousGainBlue) >= 0.5:
             if abs(aux_gain_red-PreviousGainRed) >= (MatchWaitMargin * Tolerance_AWB/100) or \
@@ -1905,56 +1778,44 @@ def capture(mode):
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     if not SimulatedRun:
-        if IsPiCamera2:
-            if PiCam2PreviewEnabled:
-                if mode == 'still':
-                    camera.switch_mode_and_capture_file(capture_config, StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
-                    CurrentStill += 1
-                else:
-                    # This one should not happen, will not allow PiCam2 scan in preview mode
-                    camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
-            else:
-                time.sleep(CaptureStabilizationDelay)   # Allow time to stabilize image, it can get too fast with PiCamera2
-                if mode == 'still':
-                    captured_snapshot = camera.capture_image("main")
-                    captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
-                    CurrentStill += 1
-                else:
-                    if HdrCaptureActive:
-                        # Stabilization delay for HDR managed inside capture_hdr
-                        capture_hdr()
-                    else:
-                        time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
-                        if VideoCaptureActive:
-                            request = camera.capture_request()
-                            img = request.make_image("main")
-                            img = img.convert('RGB')
-                            captured_snapshot = img.copy()
-                            request.release()
-                        else:
-                            captured_snapshot = camera.capture_image("main")
-                        # For PiCamera2, preview and save to file are handled in asynchronous threads
-                        queue_item = tuple((captured_snapshot, CurrentFrame, 0))
-                        capture_display_queue.put(queue_item)
-                        logging.debug("Displaying frame %i", CurrentFrame)
-                        if mode == 'normal' or mode == 'manual':    # Do not save in preview mode, only display
-                            capture_save_queue.put(queue_item)
-                            logging.debug("Saving frame %i", CurrentFrame)
-                            if mode == 'manual':  # In manual mode, increase CurrentFrame
-                                CurrentFrame += 1
-                                # Update number of captured frames
-                                Scanned_Images_number_label.config(text=str(CurrentFrame))
-
-
-        else:
+        if PiCam2PreviewEnabled:
             if mode == 'still':
-                camera.capture(StillFrameFilenamePattern % (CurrentFrame,CurrentStill), quality=100)
+                camera.switch_mode_and_capture_file(capture_config, StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
+                CurrentStill += 1
+            else:
+                # This one should not happen, will not allow PiCam2 scan in preview mode
+                camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
+        else:
+            time.sleep(CaptureStabilizationDelay)   # Allow time to stabilize image, it can get too fast with PiCamera2
+            if mode == 'still':
+                captured_snapshot = camera.capture_image("main")
+                captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
                 CurrentStill += 1
             else:
                 if HdrCaptureActive:
+                    # Stabilization delay for HDR managed inside capture_hdr
                     capture_hdr()
                 else:
-                    camera.capture(FrameFilenamePattern % CurrentFrame, quality=100)
+                    time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
+                    if VideoCaptureActive:
+                        request = camera.capture_request()
+                        img = request.make_image("main")
+                        img = img.convert('RGB')
+                        captured_snapshot = img.copy()
+                        request.release()
+                    else:
+                        captured_snapshot = camera.capture_image("main")
+                    # For PiCamera2, preview and save to file are handled in asynchronous threads
+                    queue_item = tuple((captured_snapshot, CurrentFrame, 0))
+                    capture_display_queue.put(queue_item)
+                    logging.debug("Displaying frame %i", CurrentFrame)
+                    if mode == 'normal' or mode == 'manual':    # Do not save in preview mode, only display
+                        capture_save_queue.put(queue_item)
+                        logging.debug("Saving frame %i", CurrentFrame)
+                        if mode == 'manual':  # In manual mode, increase CurrentFrame
+                            CurrentFrame += 1
+                            # Update number of captured frames
+                            Scanned_Images_number_label.config(text=str(CurrentFrame))
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -2118,9 +1979,7 @@ def start_scan():
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
         if BaseDir == CurrentDir or not os.path.isdir(CurrentDir):
-            hide_preview()
             tk.messagebox.showerror("Error!", "Please specify a folder where to store the captured images.")
-            display_preview()
             return
 
         Start_btn.config(text="STOP Scan", bg='red', fg='white', relief=SUNKEN)
@@ -2433,88 +2292,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     win.after(10, arduino_listen_loop)
 
 
-def on_form_event(dummy):
-    global TopWinX
-    global TopWinY
-    global DeltaX
-    global DeltaY
-    global PreviewWinX
-    global PreviewWinY
-    global SimulatedRun
-    global WinInitDone
-
-    if not WinInitDone:
-        return
-
-    if not SimulatedRun and not IsPiCamera2 and not CameraDisabled:  # Only required for PiCamera legacy
-        new_win_x = win.winfo_x()
-        new_win_y = win.winfo_y()
-        DeltaX = new_win_x - TopWinX
-        DeltaY = new_win_y - TopWinY
-        TopWinX = new_win_x
-        TopWinY = new_win_y
-        PreviewWinX = PreviewWinX + DeltaX
-        PreviewWinY = PreviewWinY + DeltaY
-        display_preview()
-
-
-def preview_do_not_warn_again_selection():
-    global preview_warn_again
-    global PreviewWarnAgain
-    global warn_again_from_toplevel
-
-    PreviewWarnAgain = preview_warn_again.get()
-    SessionData["PreviewWarnAgain"] = str(PreviewWarnAgain)
-
-
-def close_preview_warning():
-    global preview_warning
-
-    preview_warning.destroy()
-    preview_warning.quit()
-
-
-def display_preview_warning():
-    global win
-    global preview_warning
-    global preview_warn_again
-    global PreviewWarnAgain
-    global warn_again_from_toplevel
-
-    if not PreviewWarnAgain:
-        return
-
-    hide_preview()
-    warn_again_from_toplevel = tk.BooleanVar()
-    preview_warning = Toplevel(win)
-    preview_warning.title('*** PiCamera2 Preview warning ***')
-    preview_warning.geometry('500x400')
-    preview_warning.geometry('+250+250')  # setting the position of the window
-    preview_label = Label(preview_warning, text='\rThe preview mode provided by PiCamera2 for use in '
-                                                'X-Window environment is not really usable for '
-                                                'ALT-Scann 8 during the film scanning process.\r\n'
-                                                'Compared to the preview provided by PiCamera legacy it is:\r'
-                                                '- Much slower (due to context switch between preview/capture)\r'
-                                                '- Very imprecise (preview does not match captured image)\r\n'
-                                                'PiCamera2 preview mode can and should still be used in some '
-                                                'cases (typically for the focus procedure), however for the '
-                                                'scanning process the image just captured is displayed instead\r\n',
-                                                wraplength=450, justify=LEFT)
-    preview_warn_again = tk.BooleanVar(value=PreviewWarnAgain)
-    preview_btn = Button(preview_warning, text="OK", width=2, height=1, command=close_preview_warning)
-    preview_checkbox = tk.Checkbutton(preview_warning, text='Do not show this warning again', height=1,
-                                      variable=preview_warn_again, onvalue=False, offvalue=True,
-                                      command=preview_do_not_warn_again_selection)
-
-    preview_label.pack(side=TOP)
-    preview_btn.pack(side=TOP, pady=10)
-    preview_checkbox.pack(side=LEFT)
-
-    preview_warning.mainloop()
-
-    display_preview()
-
-
 def load_persisted_data_from_disk():
     global PersistedDataFilename
     global SessionData
@@ -2531,7 +2308,6 @@ def load_persisted_data_from_disk():
 def load_config_data():
     global SessionData
     global PostviewModule
-    global PreviewWarnAgain
     global TempInFahrenheit
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
@@ -2543,8 +2319,6 @@ def load_config_data():
         logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
         logging.debug("SessionData loaded from disk:")
-        if 'PreviewWarnAgain' in SessionData:
-            PreviewWarnAgain = eval(SessionData["PreviewWarnAgain"])
         if 'TempInFahrenheit' in SessionData:
             TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
             if TempInFahrenheit:
@@ -2616,7 +2390,6 @@ def load_session_data():
     global frames_to_go_str
 
     if PersistedDataLoaded:
-        win.after(2000, hide_preview)   # hide preview in 2 seconds to give time for initialization to complete
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
                                          message='ALT-Scann 8 was interrupted during the last session.\
                                          \r\nDo you want to continue from where it was stopped?')
@@ -2661,7 +2434,7 @@ def load_session_data():
             if 'HdrMaxExp' in SessionData:
                 hdr_max_exp = SessionData["HdrMaxExp"]
                 hdr_max_exp_str.set(hdr_max_exp)
-            if ExperimentalMode and IsPiCamera2:
+            if ExperimentalMode:
                 if 'HqCaptureActive' in SessionData:
                     HqCaptureActive = eval(SessionData["HqCaptureActive"])
                     hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
@@ -2763,7 +2536,6 @@ def load_session_data():
                     hdr_bracket_width = SessionData["HdrBracketWidth"]
                     hdr_bracket_width_str.set(str(hdr_bracket_width))
 
-        display_preview()
     # Update widget state whether or not config loaded (to honor app default values)
     arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
     arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
@@ -2827,7 +2599,7 @@ def PiCam2_configure():
                                            raw={"size": (2028, 1520)},
                                            transform=Transform(hflip=True))
 
-    preview_config = camera.create_preview_configuration({"size": (840, 720)}, transform=Transform(hflip=True))
+    preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     camera.set_controls({"ExposureTime": CurrentExposure})
@@ -2959,49 +2731,28 @@ def tscann8_init():
     WinInitDone = True
 
     if not SimulatedRun and not CameraDisabled:
-        if IsPiCamera2:
-            # Change preview coordinated for PiCamere2 to avoid confusion with overlay mode in PiCamera legacy
-            PreviewWinX = 250
-            PreviewWinY = 150
-            camera = Picamera2()
-            PiCam2_configure()
-            ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
-            # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
-            # displayed in the preview area by a dedicated thread, so that time consumed in this task
-            # does not impact the scan process speed
-            capture_display_queue = queue.Queue(maxsize=10)
-            capture_display_event = threading.Event()
-            capture_save_queue = queue.Queue(maxsize=10)
-            capture_save_event = threading.Event()
-            display_thread = threading.Thread(target=capture_display_thread, args=(capture_display_queue, capture_display_event,0))
-            save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
-            save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
-            save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
-            display_thread.start()
-            save_thread_1.start()
-            save_thread_2.start()
-            save_thread_3.start()
-            logging.debug("Threads initialized")
-        else:
-            camera = picamera.PiCamera()
-            # From version 3.0 of UI (and implicitly for PiCamera legacy) Torulf recommends not to use mode 3 anymore,
-            # even for HQ Camera
-            camera.sensor_mode = 2
-            # settings resolution higher for HQ camera 2028, 1520
-            camera.resolution = (2028, 1520)  # not supported in picamera2
-            camera.iso = 100  # not supported in picamera2
-            # New from Torulf in UI 3.0: "Have chosen to lower the sharpness, as it mostly emphasizes scratches on the film."
-            #camera.sharpness = 100
-            camera.sharpness = SharpnessValue
-            camera.hflip = True
-            camera.awb_mode = 'auto'
-            # camera.awb_gains = (3.5, 1.0)
-            camera.start_preview(fullscreen=False, window=(90, 75, 840, 720))
-            camera.shutter_speed = CurrentExposure
-
-    # Enable events on windows movements, to allow preview to follow
-    if not SimulatedRun and not IsPiCamera2:
-        win.bind('<Configure>', on_form_event)
+        # Change preview coordinated for PiCamere2 to avoid confusion with overlay mode in PiCamera legacy
+        PreviewWinX = 250
+        PreviewWinY = 150
+        camera = Picamera2()
+        PiCam2_configure()
+        ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
+        # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
+        # displayed in the preview area by a dedicated thread, so that time consumed in this task
+        # does not impact the scan process speed
+        capture_display_queue = queue.Queue(maxsize=10)
+        capture_display_event = threading.Event()
+        capture_save_queue = queue.Queue(maxsize=10)
+        capture_save_event = threading.Event()
+        display_thread = threading.Thread(target=capture_display_thread, args=(capture_display_queue, capture_display_event,0))
+        save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
+        save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
+        save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
+        display_thread.start()
+        save_thread_1.start()
+        save_thread_2.start()
+        save_thread_3.start()
+        logging.debug("Threads initialized")
 
     logging.debug("ALT-Scann 8 initialized")
 
@@ -3130,7 +2881,7 @@ def build_ui():
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
-    if ExperimentalMode and IsPiCamera2:
+    if ExperimentalMode:
         # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
         hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED)
@@ -3142,15 +2893,14 @@ def build_ui():
         turbo_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    if IsPiCamera2 or SimulatedRun:
-        PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
-                           activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-        PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
+                       activebackground='#f0f0f0', wraplength=80, relief=RAISED)
+    PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Activate focus zoom, to facilitate focusing the camera
     Focus_btn = Button(bottom_area_frame, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    Focus_btn.config(state=DISABLED if IsPiCamera2 else NORMAL)
+    Focus_btn.config(state=DISABLED)
     Focus_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Focus zoom control (in out, up, down, left, right)
@@ -3655,20 +3405,14 @@ def main(argv):
     load_config_data()
     load_session_data()
 
-    if IsPiCamera2:     # Warning only for PiCamera2
-        if PreviewWarnAgain:  # schedule hiding preview in 2 seconds to make warning visible
-            win.after(2000, hide_preview)
-            display_preview_warning()
-
-
     ALT_scann_init_done = True
 
     temperature_loop()
 
     # Main Loop
-    win.mainloop()  # running the loop that works as a trigger
+    win.mainloop()  # running3 the loop that works as a trigger
 
-    if IsPiCamera2 and not CameraDisabled:
+    if not SimulatedRun and not CameraDisabled:
         capture_display_event.set()
         capture_save_event.set()
         capture_display_queue.put(END_TOKEN)
