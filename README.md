@@ -32,3 +32,9 @@ Added features
 __Important notes:__ 
 - Always use both ALT-Scann8 modules (UI + Arduino) toghether, do not mix with T-Scann8 original software. At this point in time (October 2023) the interface between both has changed a lot and is no longer compatible.
 - ALT-Scann8 behavior in some areas is not neccesarily the same as T-Scann 8. For better performance, I reccomend to use a pich roller (details in [T-Scann 8 mods page](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods) in the wiki) to help the capstan keep traction. 
+
+## Join Our Community on Discord
+
+[![Discord](https://img.shields.io/badge/Join%20Discord-Chat%20Now-blue.svg)](https://discord.gg/gJmNvHcQ)
+
+Feel free to join our Discord server to discuss and get support!
