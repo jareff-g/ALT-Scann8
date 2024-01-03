@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.16"
-__date__ = "2024-01-02"
+__version__ = "1.8.17"
+__date__ = "2024-01-03"
 __version_highlight__ = "Picamera legacy code removal"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -2905,14 +2905,16 @@ def build_ui():
 
     # Frame for single step/snapshot
     sstep_area_frame = Frame(bottom_area_frame, width=50, height=50)
-    sstep_area_frame.pack(side=LEFT, padx=(5, 0), pady=5)
+    # sstep_area_frame.pack(side=LEFT, padx=(5, 0), pady=5)
+    sstep_area_frame.pack_forget()
     # Advance one single frame
     SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=8, height=1, command=single_step_movie,
                             activebackground='#f0f0f0', wraplength=80)
     SingleStep_btn.pack(side=TOP)
     Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=8, height=1, command=capture_single_step,
                             activebackground='#f0f0f0', wraplength=80)
-    Snapshot_btn.pack(side=TOP)
+    #Snapshot_btn.pack(side=TOP)
+    Snapshot_btn.pack_forget()
 
     # Rewind movie (via upper path, outside of film gate)
     Rewind_btn = Button(bottom_area_frame, text="<<", font=("Arial", 16), width=2, height=2, command=rewind_movie,
@@ -2922,11 +2924,6 @@ def build_ui():
     FastForward_btn = Button(bottom_area_frame, text=">>", font=("Arial", 16), width=2, height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     FastForward_btn.pack(side=LEFT, padx=(5, 0), pady=5)
-
-    # Unlock reels button (to load film, rewind, etc)
-    Free_btn = Button(bottom_area_frame, text="Unlock Reels", width=8, height=3, command=set_free_mode, activebackground='#f0f0f0',
-                      wraplength=80, relief=RAISED)
-    Free_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Switch Positive/negative modes
     PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=switch_negative_capture,
@@ -3395,6 +3392,12 @@ def build_ui():
             RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=14, height=1, command=retreat_movie,
                                       activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", 7))
             RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, pady=4, sticky='')
+
+            # Unlock reels button (to load film, rewind, etc)
+            Free_btn = Button(experimental_frame, text="Unlock Reels", width=14, height=1, command=set_free_mode,
+                              activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", 7))
+            Free_btn.grid(row=4, column=0, columnspan=2, padx=4, pady=4, sticky='')
+
 
 
 
