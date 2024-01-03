@@ -250,7 +250,7 @@ void setup() {
     ResponseQueue.out = 0;
 
     // Unlock reels at start up, then lock on demand
-    UnlockReels();
+    SetReelsAsNeutral(HIGH, HIGH, HIGH);
 }
 
 void loop() {
@@ -348,7 +348,7 @@ void loop() {
                         SendToRPi(RSP_VERSION_ID, 1, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
                     case CMD_START_SCAN:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan");
                         digitalWrite(MotorC_Neutral, LOW);       // Engage, just in case
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -371,7 +371,7 @@ void loop() {
                         }
                         break;
                     case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
@@ -407,7 +407,7 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_FORWARD:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
@@ -416,16 +416,15 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_BACKWARD:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, HIGH);
+                        digitalWrite(MotorB_Direction, LOW);    // Set as anti-clockwise, only for this function
                         collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowBackward;
-                        digitalWrite(MotorC_Neutral, HIGH);     // Disengage, to allow moving back
-                        digitalWrite(MotorB_Direction, LOW);    // Set as anti-clockwise, only for this function
                         delay(50);
                         break;
                     case CMD_SINGLE_STEP:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">SStep");
                         ScanState = Sts_SingleStep;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -433,7 +432,6 @@ void loop() {
                         break;
                     case CMD_REWIND: // Rewind
                     case CMD_UNCONDITIONAL_REWIND: // Rewind unconditional
-                        LockReels();
                         if (FilmInFilmgate() and UI_Command == CMD_REWIND) { // JRE 13 Aug 22: Cannot rewind, there is film loaded
                             DebugPrintStr("Rwnd err");
                             SendToRPi(RSP_REWIND_ERROR, 0, 0);
@@ -445,9 +443,7 @@ void loop() {
                             DebugPrintStr("Rwnd");
                             ScanState = Sts_Rewind;
                             delay (100);
-                            digitalWrite(MotorA_Neutral, LOW);
-                            // digitalWrite(MotorB_Neutral, HIGH); // No need, film does not go through during Rwnd
-                            digitalWrite(MotorC_Neutral, HIGH);
+                            SetReelsAsNeutral(LOW, HIGH, HIGH);
                             tone(A2, 2200, 100);
                             delay (150);
                             tone(A2, 2200, 100);
@@ -459,7 +455,6 @@ void loop() {
                         break;
                     case CMD_FAST_FORWARD:  // Fast Forward
                     case CMD_UNCONDITIONAL_FAST_FORWARD:  // Fast Forward unconditional
-                        LockReels();
                         if (FilmInFilmgate() and UI_Command == CMD_FAST_FORWARD) { // JRE 13 Aug 22: Cannot fast forward, there is film loaded
                             DebugPrintStr("FF err");
                             SendToRPi(RSP_FAST_FORWARD_ERROR, 0, 0);
@@ -471,9 +466,7 @@ void loop() {
                             DebugPrintStr(">FF");
                             ScanState = Sts_FastForward;
                             delay (100);
-                            digitalWrite(MotorA_Neutral, HIGH);
-                            // digitalWrite(MotorB_Neutral, HIGH); // No need, film does not go through during FF
-                            digitalWrite(MotorC_Neutral, LOW);
+                            SetReelsAsNeutral(HIGH, HIGH, LOW);
                             tone(A2, 2000, 100);
                             delay (150);
                             tone(A2, 2000, 100);
@@ -491,19 +484,19 @@ void loop() {
                           TargetRewindSpeedLoop -= 20;
                         break;
                     case CMD_ADVANCE_FRAME:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
                         if (IsS8)
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
-                        UnlockReels();
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
-                        LockReels();
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
                         capstan_advance(param);
-                        UnlockReels();
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                 }
                 break;
@@ -512,17 +505,17 @@ void loop() {
                 if (UI_Command == CMD_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
                     ScanState = Sts_Idle; // Exit scan loop
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_SingleStep:
                 if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
                     ScanState = Sts_Idle;
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_UnlockReels:
@@ -545,21 +538,21 @@ void loop() {
                 if (!RewindFilm(UI_Command)) {
                     DebugPrintStr("-rwnd");
                     ScanState = Sts_Idle;
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_FastForward:
                 if (!FastForwardFilm(UI_Command)) {
                     DebugPrintStr("-FF");
                     ScanState = Sts_Idle;
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_SlowForward:
                 if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
                     delay(50);
                     ScanState = Sts_Idle;
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
                     SlowForward();
@@ -570,7 +563,7 @@ void loop() {
                     digitalWrite(MotorB_Direction, HIGH);    // Slow backward finished, set as clockwise again
                     delay(50);
                     ScanState = Sts_Idle;
-                    UnlockReels();
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
                     SlowBackward();
@@ -585,19 +578,11 @@ void loop() {
     }
 }
 
+void SetReelsAsNeutral(boolean ReelA, boolean ReelB, boolean ReelC) {
+    digitalWrite(MotorA_Neutral, ReelA);  // No need to unlock reel A, it is always unlocked (except in Rewind)
+    digitalWrite(MotorB_Neutral, ReelB);
+    digitalWrite(MotorC_Neutral, ReelC);
 
-// ------ unlock reels -------
-void UnlockReels() {
-    digitalWrite(MotorA_Neutral, HIGH);  // No need to unlock reel A, it is always unlocked (except in Rewind)
-    digitalWrite(MotorB_Neutral, HIGH);
-    digitalWrite(MotorC_Neutral, HIGH);
-}
-
-// ------ lock reels -------
-void LockReels() {
-    // digitalWrite(MotorA_Neutral, HIGH);  // No need to lock reel A, it is always unlocked (except in Rewind)
-    digitalWrite(MotorB_Neutral, LOW);
-    digitalWrite(MotorC_Neutral, LOW);
 }
 
 // ------ rewind the movie ------
