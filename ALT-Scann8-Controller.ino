@@ -350,7 +350,6 @@ void loop() {
                     case CMD_START_SCAN:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan");
-                        digitalWrite(MotorC_Neutral, LOW);       // Engage, just in case
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         ScanState = Sts_Scan;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
@@ -411,7 +410,6 @@ void loop() {
                         collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
-                        digitalWrite(MotorC_Neutral, LOW);       // Engage, just in case
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         delay(50);
                         break;

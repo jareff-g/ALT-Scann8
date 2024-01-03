@@ -61,6 +61,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_SUPER_8 19
 #define CMD_SWITCH_REEL_LOCK_STATUS 20
 #define CMD_FILM_FORWARD 30
+#define CMD_FILM_BACKWARD 31
 #define CMD_SINGLE_STEP 40
 #define CMD_ADVANCE_FRAME 41
 #define CMD_ADVANCE_FRAME_FRACTION 42
@@ -141,6 +142,7 @@ enum ScanState{
     Sts_Rewind,
     Sts_FastForward,
     Sts_SlowForward,
+    Sts_SlowBackward,
     Sts_SingleStep
 }
 ScanState=Sts_Idle;
@@ -384,6 +386,7 @@ void loop() {
 
         ReportPlotterInfo();    // Regular report of plotter info
 
+        /*
         if (ScanState != Sts_Scan && ScanState != Sts_SingleStep) {
             // Set default state and direction of motors B and C (disabled, clockwise)
             // In the original main loop this was done when UI_Command was NOT Single Step (49). Why???
@@ -396,6 +399,7 @@ void loop() {
                 digitalWrite(PIN_MOTOR_B_DIR, HIGH);
             }
         }
+        */
 
         switch (UI_Command) {   // Stateless commands
             case CMD_RESET_CONTROLLER:
@@ -464,7 +468,9 @@ void loop() {
                         SendToRPi(RSP_VERSION_ID, 2, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
                     case CMD_START_SCAN:
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan");
+                        digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         ScanState = Sts_Scan;
                         analogWrite(PIN_UV_LED, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
@@ -485,6 +491,7 @@ void loop() {
                         }
                         break;
                     case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
                         ScanSpeed = OriginalScanSpeed;
@@ -520,15 +527,28 @@ void loop() {
                         delay(50);
                         break;
                     case CMD_FILM_FORWARD:
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
+                        digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
+                        digitalWrite(PIN_BACKLIGHT,HIGH);
+                        delay(50);
+                        break;
+                    case CMD_FILM_BACKWARD:
+                        SetReelsAsNeutral(HIGH, LOW, HIGH);
+                        digitalWrite(MotorB_Direction, LOW);    // Set as anti-clockwise, only for this function
+                        collect_modulo = 5;
+                        collect_timer = 10;
+                        ScanState = Sts_SlowBackward;
                         digitalWrite(PIN_BACKLIGHT,HIGH);
                         delay(50);
                         break;
                     case CMD_SINGLE_STEP:
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">SStep");
                         ScanState = Sts_SingleStep;
+                        digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         digitalWrite(PIN_BACKLIGHT,HIGH);
                         delay(50);
                         break;
@@ -545,9 +565,7 @@ void loop() {
                             DebugPrintStr("Rwnd");
                             ScanState = Sts_Rewind;
                             delay (100);
-                            digitalWrite(PIN_MOTOR_A_NEUTRAL, LOW);
-                            digitalWrite(PIN_MOTOR_B_NEUTRAL, HIGH);
-                            digitalWrite(PIN_MOTOR_C_NEUTRAL, HIGH);
+                            SetReelsAsNeutral(LOW, HIGH, HIGH);
                             tone(PIN_BUZZER, 2200, 100);
                             delay (150);
                             tone(PIN_BUZZER, 2200, 100);
@@ -570,9 +588,7 @@ void loop() {
                             DebugPrintStr(">FF");
                             ScanState = Sts_FastForward;
                             delay (100);
-                            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
-                            digitalWrite(PIN_MOTOR_B_NEUTRAL, HIGH);
-                            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+                            SetReelsAsNeutral(HIGH, HIGH, LOW);
                             tone(PIN_BUZZER, 2000, 100);
                             delay (150);
                             tone(PIN_BUZZER, 2000, 100);
@@ -590,15 +606,19 @@ void loop() {
                           TargetRewindSpeedLoop -= 20;
                         break;
                     case CMD_ADVANCE_FRAME:
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", IsS8 ? MinFrameStepsS8 : MinFrameStepsR8);
                         if (IsS8)
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
                         capstan_advance(param);
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                 }
                 break;
@@ -607,17 +627,19 @@ void loop() {
                 if (UI_Command == CMD_START_SCAN) {
                     DebugPrintStr("-Scan");
                     ScanState = Sts_Idle; // Exit scan loop
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                     digitalWrite(PIN_BACKLIGHT,LOW);
-
                 }
                 else if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
                     ScanState = Sts_Idle; // Exit scan loop
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_SingleStep:
                 if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
                     digitalWrite(PIN_BACKLIGHT,LOW);
                     ScanState = Sts_Idle;
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_UnlockReels:
@@ -640,22 +662,36 @@ void loop() {
                 if (!RewindFilm(UI_Command)) {
                     DebugPrintStr("-rwnd");
                     ScanState = Sts_Idle;
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_FastForward:
                 if (!FastForwardFilm(UI_Command)) {
                     DebugPrintStr("-FF");
                     ScanState = Sts_Idle;
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_SlowForward:
                 if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
-                  digitalWrite(PIN_BACKLIGHT,LOW);
-                  delay(50);
-                  ScanState = Sts_Idle;
+                    digitalWrite(PIN_BACKLIGHT,LOW);
+                    delay(50);
+                    ScanState = Sts_Idle;
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
-                  SlowForward();
+                    SlowForward();
+                }
+                break;
+            case Sts_SlowBackward:
+                if (UI_Command == CMD_FILM_BACKWARD) { // Stop slow forward
+                    digitalWrite(MotorB_Direction, HIGH);    // Slow backward finished, set as clockwise again
+                    delay(50);
+                    ScanState = Sts_Idle;
+                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                }
+                else {
+                    SlowBackward();
                 }
                 break;
         }
@@ -665,6 +701,12 @@ void loop() {
     }
 }
 
+void SetReelsAsNeutral(boolean ReelA, boolean ReelB, boolean ReelC) {
+    digitalWrite(MotorA_Neutral, ReelA);  // No need to unlock reel A, it is always unlocked (except in Rewind)
+    digitalWrite(MotorB_Neutral, ReelB);
+    digitalWrite(MotorC_Neutral, ReelC);
+
+}
 
 // ------ rewind the movie ------
 boolean RewindFilm(int UI_Command) {
@@ -684,9 +726,7 @@ boolean RewindFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
-            digitalWrite(PIN_MOTOR_B_NEUTRAL, LOW);
-            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+            SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_REWIND_ENDED, 0, 0);
         }
@@ -720,9 +760,7 @@ boolean FastForwardFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            digitalWrite(PIN_MOTOR_A_NEUTRAL, HIGH);
-            digitalWrite(PIN_MOTOR_B_NEUTRAL, LOW);
-            digitalWrite(PIN_MOTOR_C_NEUTRAL, LOW);
+            SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
         }
@@ -836,6 +874,20 @@ void SlowForward(){
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
         GetLevelPT();   // No need to know PT level here, but used to update plotter data
         CollectOutgoingFilm();
+        digitalWrite(PIN_MOTOR_B_STEP, LOW);
+        digitalWrite(PIN_MOTOR_B_STEP, HIGH);
+        LastMove = CurrentTime + 700;
+    }
+}
+
+void SlowBackward(){
+    static unsigned long LastMove = 0;
+    unsigned long CurrentTime = micros();
+    if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
+        GetLevelPT();   // No need to know PT level here, but used to update plotter data
+        // We have no traction sensor on the A reel, so no way to safely implement collect film of that one
+        // Film must be collected manually
+        digitalWrite(PIN_MOTOR_B_STEP, LOW);
         digitalWrite(PIN_MOTOR_B_STEP, HIGH);
         LastMove = CurrentTime + 700;
     }
