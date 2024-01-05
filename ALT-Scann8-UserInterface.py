@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.17"
-__date__ = "2024-01-03"
-__version_highlight__ = "Picamera legacy code removal"
+__version__ = "1.8.18"
+__date__ = "2024-01-05"
+__version_highlight__ = "Fixed bug at startup due to UI rearrangement"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1028,16 +1028,12 @@ def button_status_change_except(except_button, active):
         button_lock_counter -= 1
     if button_lock_counter > 1 or (not active and button_lock_counter > 0):
         return
-    if except_button != Free_btn:
-        Free_btn.config(state=DISABLED if active else NORMAL)
     if except_button != SingleStep_btn:
         SingleStep_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Snapshot_btn:
         Snapshot_btn.config(state=DISABLED if active else NORMAL)
     if except_button != AdvanceMovie_btn:
         AdvanceMovie_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != RetreatMovie_btn:
-        RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Rewind_btn:
         Rewind_btn.config(state=DISABLED if active else NORMAL)
     if except_button != FastForward_btn:
@@ -1054,12 +1050,16 @@ def button_status_change_except(except_button, active):
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
     hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
     if ExperimentalMode:
+        if except_button != RetreatMovie_btn:
+            RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
+        if except_button != Free_btn:
+            Free_btn.config(state=DISABLED if active else NORMAL)
         if except_button != hq_btn:
             hq_btn.config(state=DISABLED if active else NORMAL)
         if except_button != turbo_btn:
             turbo_btn.config(state=DISABLED if active else NORMAL)
 
-    if except_button != PiCam2_preview_btn and except_button != Free_btn:
+    if except_button != PiCam2_preview_btn:
         PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
 
 
