@@ -181,8 +181,10 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
-int collect_modulo = 10;
-int collect_timer = 50;
+int default_collect_modulo = 5;
+int default_collect_timer = 10;
+int collect_modulo = default_collect_modulo;
+int collect_timer = default_collect_timer;
 int scan_collect_modulo = collect_modulo;
 int scan_collect_timer = collect_timer;
 
@@ -328,8 +330,8 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                scan_collect_timer = collect_timer = 50 + (10-param) * 100;
-                scan_collect_modulo = collect_modulo = 10 + (10-param) * 3;
+                scan_collect_modulo = collect_modulo = default_collect_modulo + (10-param) * 10;
+                scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
                 DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
@@ -673,7 +675,7 @@ void CollectOutgoingFilm(void) {
             if (!TractionSwitchActive) {  //Motor allowed to turn
                 digitalWrite(MotorC_Stepper, LOW);
                 digitalWrite(MotorC_Stepper, HIGH);
-                digitalWrite(MotorC_Stepper, LOW);
+                // digitalWrite(MotorC_Stepper, LOW);
                 TractionSwitchActive = digitalRead(TractionStopPin);
             }
             if (TractionSwitchActive)
