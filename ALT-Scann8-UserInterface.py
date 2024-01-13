@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.20"
+__version__ = "1.8.21"
 __date__ = "2024-01-13"
-__version_highlight__ = "Fixed bug at startup due to UI rearrangement"
+__version_highlight__ = "Take-up reel working now + wider HDR bracket adjustment"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -257,6 +257,8 @@ hdr_min_exp = hdr_lower_exp
 hdr_max_exp = 104
 hdr_best_exp = 0
 hdr_bracket_width = 50
+hdr_min_bracket_width = 4
+hdr_max_bracket_width = 400
 hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster that 4)
 hdr_step_value = 1
 hdr_exp_list = []
@@ -991,11 +993,11 @@ def hdr_check_bracket_width(event):
     save_value = hdr_bracket_width
     hdr_bracket_width = int(hdr_bracket_width_str.get())
 
-    if (hdr_bracket_width < 4):
-        hdr_bracket_width = 4
+    if (hdr_bracket_width < hdr_min_bracket_width):
+        hdr_bracket_width = hdr_min_bracket_width
         hdr_bracket_width_str.set(hdr_bracket_width)
-    if (hdr_bracket_width > 200):
-        hdr_bracket_width = 200
+    if (hdr_bracket_width > hdr_max_bracket_width):
+        hdr_bracket_width = hdr_max_bracket_width
         hdr_bracket_width_str.set(hdr_bracket_width)
 
     if save_value != hdr_bracket_width:
@@ -3317,7 +3319,7 @@ def build_ui():
         hdr_bracket_width_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_bracket_width, '%d'), width=8,
-            textvariable=hdr_bracket_width_str, from_=4, to=200, increment=1, font=("Arial", 7), state=DISABLED)
+            textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width,, increment=1, font=("Arial", 7), state=DISABLED)
         hdr_bracket_width_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
         hdr_bracket_width_spinbox.bind("<FocusOut>", hdr_check_bracket_width)
 
