@@ -3319,7 +3319,7 @@ def build_ui():
         hdr_bracket_width_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_bracket_width, '%d'), width=8,
-            textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width,, increment=1, font=("Arial", 7), state=DISABLED)
+            textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", 7), state=DISABLED)
         hdr_bracket_width_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
         hdr_bracket_width_spinbox.bind("<FocusOut>", hdr_check_bracket_width)
 
