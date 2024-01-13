@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.19"
-__date__ = "2024-01-07"
+__version__ = "1.8.20"
+__date__ = "2024-01-13"
 __version_highlight__ = "Fixed bug at startup due to UI rearrangement"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -168,6 +168,7 @@ CMD_RESET_CONTROLLER = 3
 CMD_START_SCAN = 10
 CMD_TERMINATE = 11
 CMD_GET_NEXT_FRAME = 12
+CMD_STOP_SCAN = 13
 CMD_SET_REGULAR_8 = 18
 CMD_SET_SUPER_8 = 19
 CMD_SWITCH_REEL_LOCK_STATUS = 20
@@ -2053,7 +2054,7 @@ def start_scan():
         session_start_time = time.time()
         session_frames = 0
 
-        # Send command to Arduino to stop/start scan (as applicable, Arduino keeps its own status)
+        # Send command to Arduino to start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun:
             send_arduino_command(CMD_START_SCAN)
 
@@ -2069,6 +2070,11 @@ def stop_scan():
         Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
 
     ScanOngoing = False
+
+    # Send command to Arduino to stop scan (as applicable, Arduino keeps its own status)
+    if not SimulatedRun:
+        logging.debug("Sending CMD_STOP_SCAN")
+        send_arduino_command(CMD_STOP_SCAN)
 
     # Enable/Disable related buttons
     button_status_change_except(Start_btn, ScanOngoing)

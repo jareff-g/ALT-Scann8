@@ -45,7 +45,7 @@ enum {
     DebugInfo,
     DebugInfoSingle,
     None
-} DebugState = None;
+} DebugState = DebugInfo;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -59,6 +59,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
 #define CMD_GET_NEXT_FRAME 12
+#define CMD_STOP_SCAN 13
 #define CMD_SET_REGULAR_8 18
 #define CMD_SET_SUPER_8 19
 #define CMD_SWITCH_REEL_LOCK_STATUS 20
@@ -181,12 +182,10 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 // Collect outgoing film frequency
-int default_collect_modulo = 5;
-int default_collect_timer = 10;
-int collect_modulo = default_collect_modulo;
+int default_collect_timer = 1000;
 int collect_timer = default_collect_timer;
-int scan_collect_modulo = collect_modulo;
 int scan_collect_timer = collect_timer;
+bool scan_process_ongoing = false;
 
 // JRE - Support data variables
 #define QUEUE_SIZE 20
@@ -330,7 +329,6 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                scan_collect_modulo = collect_modulo = default_collect_modulo + (10-param) * 10;
                 scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
                 OriginalScanSpeed = ScanSpeed;
                 DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
@@ -340,7 +338,21 @@ void loop() {
                 DebugPrint(">PlotterInfo", param);
                 IntegratedPlotter = param;
                 break;
+            case CMD_STOP_SCAN:
+                DebugPrintStr(">Scan stop");
+                FrameDetected = false;
+                LastFrameSteps = 0;
+                if (UVLedOn) {
+                    analogWrite(11, 0); // Turn off UV LED
+                    UVLedOn = false;
+                }
+                scan_process_ongoing = false;
+                SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                break;
         }
+
+        if (scan_process_ongoing)
+            CollectOutgoingFilm();
 
         switch (ScanState) {
             case Sts_Idle:
@@ -351,17 +363,17 @@ void loop() {
                         break;
                     case CMD_START_SCAN:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
-                        DebugPrintStr(">Scan");
+                        DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         ScanState = Sts_Scan;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
+                        scan_process_ongoing = true;
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         FilmDetectedTime = millis();
                         NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = scan_collect_modulo;
                         collect_timer = scan_collect_timer;
                         tone(A2, 2000, 50);
                         break;
@@ -409,7 +421,6 @@ void loop() {
                         break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
-                        collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -418,7 +429,6 @@ void loop() {
                     case CMD_FILM_BACKWARD:
                         SetReelsAsNeutral(HIGH, LOW, HIGH);
                         digitalWrite(MotorB_Direction, LOW);    // Set as anti-clockwise, only for this function
-                        collect_modulo = 5;
                         collect_timer = 10;
                         ScanState = Sts_SlowBackward;
                         delay(50);
@@ -501,15 +511,9 @@ void loop() {
                 }
                 break;
             case Sts_Scan:
-                CollectOutgoingFilm();
-                if (UI_Command == CMD_START_SCAN) {
-                    DebugPrintStr("-Scan");
+                if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
                     ScanState = Sts_Idle; // Exit scan loop
-                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
-                }
-                else if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
-                    ScanState = Sts_Idle; // Exit scan loop
-                    SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                    //SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 break;
             case Sts_SingleStep:
@@ -663,26 +667,27 @@ boolean FastForwardFilm(int UI_Command) {
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(void) {
-    static int loop_counter = 0;
     static boolean CollectOngoing = true;
 
     static unsigned long TimeToCollect = 0;
     unsigned long CurrentTime = millis();
 
-    if (loop_counter % collect_modulo == 0) {
-        if (CurrentTime > TimeToCollect) {
-            TractionSwitchActive = digitalRead(TractionStopPin);
-            if (!TractionSwitchActive) {  //Motor allowed to turn
-                digitalWrite(MotorC_Stepper, LOW);
-                digitalWrite(MotorC_Stepper, HIGH);
-                // digitalWrite(MotorC_Stepper, LOW);
-                TractionSwitchActive = digitalRead(TractionStopPin);
-            }
-            if (TractionSwitchActive)
-                TimeToCollect = CurrentTime + collect_timer;
-        }
+    if (CurrentTime < TimeToCollect && TimeToCollect - CurrentTime < collect_timer) {
+        return;
     }
-    loop_counter++;
+    else {
+        TractionSwitchActive = digitalRead(TractionStopPin);
+        if (!TractionSwitchActive) {  //Motor allowed to turn
+            digitalWrite(MotorC_Stepper, LOW);
+            digitalWrite(MotorC_Stepper, HIGH);
+            // digitalWrite(MotorC_Stepper, LOW);
+            TractionSwitchActive = digitalRead(TractionStopPin);
+        }
+        if (TractionSwitchActive)
+            TimeToCollect = CurrentTime + collect_timer;
+        else
+            TimeToCollect = CurrentTime + 5;
+    }
 }
 
 // ------------- Centralized phototransistor level read ---------------
@@ -879,22 +884,10 @@ ScanResult scan(int UI_Command) {
         }
 
         //-------------ScanFilm-----------
-        if (UI_Command == CMD_START_SCAN) {   // UI Requesting to end current scan
-            retvalue = SCAN_TERMINATION_REQUESTED;
-            FrameDetected = false;
-            //DecreaseSpeedFrameSteps = 260; // JRE 20/08/2022 - Disabled, added option to set manually from UI
-            LastFrameSteps = 0;
-            if (UVLedOn) {
-                analogWrite(11, 0); // Turn off UV LED
-                UVLedOn = false;
-            }
-        }
-        else {
-            FrameDetected = IsHoleDetected();
-            if (!FrameDetected) {
-                capstan_advance(1);
-                FrameStepsDone++;
-            }
+        FrameDetected = IsHoleDetected();
+        if (!FrameDetected) {
+            capstan_advance(1);
+            FrameStepsDone++;
         }
 
         if (FrameDetected) {
