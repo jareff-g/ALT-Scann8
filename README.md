@@ -1,3 +1,9 @@
+## Join Our Community on Discord
+
+[![Discord](https://img.shields.io/badge/Join%20Discord-Chat%20Now-blue.svg)](https://discord.gg/r2UGkH7qg2)
+
+Feel free to join our Discord server to discuss and get support!
+
 # ALT-Scann 8 User Interface
 
 The application is an alternate user interface for [T-Scann 8](http://tscann8.torulf.com/index.html), the Super8/Regular8 film scanner designed by Torulf Holmström.  It is a fork of the original UI ('T-Scann8-UserInterface v2.1') from Torulf, licensed under a [Creative Commons Attribution-NonCommercial 4.0 International License](http://creativecommons.org/licenses/by-nc/4.0/). ALT-Scann8-UI is licensed under a MIT License by Juan Remirez de Esparza.
@@ -32,9 +38,3 @@ Added features
 __Important notes:__ 
 - Always use both ALT-Scann8 modules (UI + Arduino) toghether, do not mix with T-Scann8 original software. At this point in time (October 2023) the interface between both has changed a lot and is no longer compatible.
 - ALT-Scann8 behavior in some areas is not neccesarily the same as T-Scann 8. For better performance, I reccomend to use a pich roller (details in [T-Scann 8 mods page](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods) in the wiki) to help the capstan keep traction. 
-
-## Join Our Community on Discord
-
-[![Discord](https://img.shields.io/badge/Join%20Discord-Chat%20Now-blue.svg)](https://discord.gg/gJmNvHcQ)
-
-Feel free to join our Discord server to discuss and get support!
