@@ -2934,7 +2934,7 @@ def build_ui():
     bottom_area_frame.pack(side=TOP, padx=5, pady=5, anchor=NW, fill=X)
 
     # Advance movie button (slow forward through filmgate)
-    AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=8, height=3, command=advance_movie,
+    AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=10, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     AdvanceMovie_btn.pack(side=LEFT, padx=(15, 0), pady=5)
     # Once first button created, get default colors, to revert when we change them
@@ -2964,7 +2964,7 @@ def build_ui():
     FastForward_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=8, height=3, command=switch_negative_capture,
+    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=10, height=3, command=switch_negative_capture,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
 
@@ -3218,7 +3218,7 @@ def build_ui():
                                            font=("Arial", FontSize-1))
         frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, sticky=NW)
         # Spinbox to select MinFrameSteps on Arduino
-        min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=12, height=1,
+        min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
                                                     activebackground='#f0f0f0',
                                                     state=NORMAL, font=("Arial", FontSize-1))
@@ -3233,7 +3233,7 @@ def build_ui():
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         # Spinbox to select PTLevel on Arduino
-        pt_level_btn = Button(frame_alignment_frame, text="PT Level:", width=12, height=1,
+        pt_level_btn = Button(frame_alignment_frame, text="PT Level:", width=14, height=1,
                                                     command=pt_level_spinbox_auto,
                                                     activebackground='#f0f0f0',
                                                     state=NORMAL, font=("Arial", FontSize-1))
