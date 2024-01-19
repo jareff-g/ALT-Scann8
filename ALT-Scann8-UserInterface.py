@@ -210,7 +210,7 @@ ExpertMode = True
 ExperimentalMode = False
 PlotterMode = False
 plotter_canvas = None
-plotter_width=200
+plotter_width=240
 plotter_height=190
 PrevPTValue = 0
 MaxPT = 100
@@ -2725,7 +2725,7 @@ def tscann8_init():
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
     global ForceSmallSize, ForceBigSize, FontSize, BigSize
-    global plotter_height
+    global plotter_width, plotter_height
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2783,6 +2783,7 @@ def tscann8_init():
         PreviewHeight = int(PreviewWidth/(4/3))
         app_width = PreviewWidth + 200
         app_height = PreviewHeight + 130
+        plotter_width += 50
     else:
         BigSize = False
         FontSize = 8
@@ -2790,7 +2791,7 @@ def tscann8_init():
         PreviewHeight = int(PreviewWidth/(4/3))
         app_width = PreviewWidth + 160
         app_height = PreviewHeight + 100
-        plotter_height = 150
+        plotter_height -= 40
     if ExpertMode:
         app_height += 220 if BigSize else 190
     if PlotterMode:
@@ -2926,7 +2927,7 @@ def build_ui():
                                  width=PreviewWidth, height=PreviewHeight)
     draw_capture_canvas.pack(side=TOP, anchor=N)
     # Create a frame to contain the top area (preview + Right buttons) ***************
-    top_right_area_frame = Frame(top_area_frame, width=PreviewWidth, height=PreviewHeight)
+    top_right_area_frame = Frame(top_area_frame)
     top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(0, 0), fill=Y)
 
     # Frame for standard widgets at the bottom ***************************************
@@ -3018,6 +3019,11 @@ def build_ui():
     focus_rt_btn.grid(row=1, column=2)
 
     # Create vertical button column at right *************************************
+    # Application Exit button
+    Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
+                      activeforeground='white', wraplength=80, font=("Arial", FontSize))
+    Exit_btn.grid(row=0, column=0, padx=4, pady=(20,3), sticky='W')
+
     # Start scan button
     if SimulatedRun:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
@@ -3025,28 +3031,28 @@ def build_ui():
     else:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
                            activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
-    Start_btn.pack(side=TOP, pady=(5, 0))
+    Start_btn.grid(row=0, column=1, pady=(20,3))
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=16, height=8, font=("Arial", FontSize-2))
-    folder_frame.pack(side=TOP, pady=(5, 0))
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=50, height=8, font=("Arial", FontSize-2))
+    folder_frame.grid(row=1, column=0, columnspan=2, padx=4, pady=4)
 
-    folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=22, height=3, font=("Arial", FontSize-3),
-                                    wraplength=120)
+    folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=50 if BigSize else 55, height=3, font=("Arial", FontSize-3),
+                                    wraplength=200)
     folder_frame_target_dir.pack(side=TOP)
 
     folder_frame_buttons = Frame(folder_frame, width=16, height=4, bd=2)
     folder_frame_buttons.pack()
-    new_folder_btn = Button(folder_frame_buttons, text='New', width=5, height=1, command=set_new_folder,
+    new_folder_btn = Button(folder_frame_buttons, text='New', width=10, height=1, command=set_new_folder,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize-2))
     new_folder_btn.pack(side=LEFT)
-    existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=5, height=1, command=set_existing_folder,
+    existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=10, height=1, command=set_existing_folder,
                                  activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize-2))
     existing_folder_btn.pack(side=LEFT)
 
     # Create frame to display number of scanned images, and frames per minute
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
-    scanned_images_frame.pack(side=TOP, pady=5)
+    scanned_images_frame.grid(row=2, column=0, padx=4, pady=4, sticky='W')
 
     Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+8), width=5,
                                         height=1)
@@ -3062,35 +3068,36 @@ def build_ui():
     Scanned_Images_fpm.pack(side=LEFT)
 
     # Create frame to display number of frames to go, and estimated time to finish
-    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=14, height=4, font=("Arial", FontSize-2))
-    frames_to_go_frame.pack(side=TOP, ipadx=0, pady=5)
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
+    frames_to_go_frame.grid(row=2, column=1, padx=4, pady=4, sticky='NE')
+
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
-    frames_to_go_entry = tk.Entry(frames_to_go_frame,textvariable=frames_to_go_str, width=8, font=("Arial", FontSize-2))
+    frames_to_go_entry = tk.Entry(frames_to_go_frame,textvariable=frames_to_go_str, width=14, font=("Arial", FontSize-2), justify="right")
     frames_to_go_entry.pack(side=TOP, pady=5)
     time_to_go_str = tk.StringVar(value='')
-    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=18, height=1)
-    time_to_go_time.pack(side=TOP)
+    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=18 if BigSize else 24, height=1)
+    time_to_go_time.pack(side=TOP, pady=1)
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
-    film_type_frame.pack(side=TOP, ipadx=5, pady=(5, 0))
+    film_type_frame.grid(row=3, column=0, padx=4, pady=4, sticky='W')
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
-    film_type_buttons.pack(side=TOP, padx=4, pady=5)
-    film_type_S8_btn = Button(film_type_buttons, text='S8', width=2, height=1, font=("Arial", FontSize+2, 'bold'),
+    film_type_buttons.pack(side=TOP, padx=4, pady=6)
+    film_type_S8_btn = Button(film_type_buttons, text='S8', width=4, height=1, font=("Arial", FontSize+2, 'bold'),
                               command=set_s8, activebackground='#f0f0f0',
                               relief=SUNKEN)
     film_type_S8_btn.pack(side=LEFT)
-    film_type_R8_btn = Button(film_type_buttons, text='R8', width=2, height=1, font=("Arial", FontSize+2, 'bold'),
+    film_type_R8_btn = Button(film_type_buttons, text='R8', width=4, height=1, font=("Arial", FontSize+2, 'bold'),
                               command=set_r8, activebackground='#f0f0f0')
     film_type_R8_btn.pack(side=LEFT)
 
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize-2))
-    rpi_temp_frame.pack(side=TOP, ipadx=0, pady=5)
+    rpi_temp_frame.grid(row=3, column=1, padx=4, pady=4)
     temp_str = str(RPiTemp)+'º'
-    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=8, height=1)
-    RPi_temp_value_label.pack(side=TOP, padx=12)
+    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=10, height=1)
+    RPi_temp_value_label.pack(side=TOP, padx=4)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit', height=1,
@@ -3098,11 +3105,14 @@ def build_ui():
                                                  command=temp_in_fahrenheit_selection, font=("Arial", FontSize))
     temp_in_fahrenheit_checkbox.pack(side=TOP)
 
-    # Application Exit button
-    Exit_btn = Button(top_right_area_frame, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
-                      activeforeground='white', wraplength=80, font=("Arial", FontSize))
-    Exit_btn.pack(side=TOP, padx=5, pady=5)
-
+    # Integrated plotter
+    if PlotterMode:
+        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', width=8, height=5,
+                                              font=("Arial", FontSize - 1))
+        integrated_plotter_frame.grid(row=4, column=0, columnspan=2, padx=4, pady=4, sticky='W')
+        plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
+                                width=plotter_width, height=plotter_height)
+        plotter_canvas.pack(side=TOP, anchor=N)
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
@@ -3358,17 +3368,9 @@ def build_ui():
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
         hdr_bracket_width_auto_checkbox.grid(row=4, column=0, padx=2, pady=1, sticky=W)
 
-        # Integrated plotter
-        if PlotterMode:
-            integrated_plotter_frame = LabelFrame(extended_frame, text='Plotter Area', width=8, height=5, font=("Arial", FontSize-1))
-            integrated_plotter_frame.pack(side=LEFT, ipadx=5, fill=Y, padx=2, pady=2)
-            plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
-                                         width=plotter_width, height=plotter_height)
-            plotter_canvas.pack(side=TOP, anchor=N)
-
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, padx=2, ipady=2)
+            experimental_frame.pack(side=LEFT, padx=2, ipady=12, anchor=N)
 
             # Sharpness, control to allow playing with the values and see the results
             sharpness_control_label = tk.Label(experimental_frame,
