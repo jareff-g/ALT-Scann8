@@ -160,8 +160,8 @@ simulated_captured_frame_list = [None] * 1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
 simulated_images_in_list = 0
-FilmHoleY1 = 300
-FilmHoleY2 = 300
+FilmHoleY1 = 300 if BigSize else 250
+FilmHoleY2 = 300 if BigSize else 250
 SharpnessValue = 1
 
 # Commands (RPI to Arduino)
@@ -1549,11 +1549,11 @@ def set_s8():
         pt_level_str.set(str(PTLevel))
         min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
-    FilmHoleY1 = 300
-    FilmHoleY2 = 300
+    FilmHoleY1 = 300 if BigSize else 240
+    FilmHoleY2 = 300 if BigSize else 240
     if ExpertMode:
-        film_hole_frame_1.place(x=4, y=FilmHoleY2, height=140)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
+        film_hole_frame_1.place(x=4, y=FilmHoleY2, height=140 if BigSize else 120)
+        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140 if BigSize else 120)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -1582,10 +1582,10 @@ def set_r8():
     MinFrameSteps = MinFrameStepsR8
     min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
-    FilmHoleY1 = 40
-    FilmHoleY2 = 540
-    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100)
-    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=130)
+    FilmHoleY1 = 40 if BigSize else 40
+    FilmHoleY2 = 540 if BigSize else 430
+    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100 if BigSize else 70)
+    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=130 if BigSize else 90)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -3198,14 +3198,14 @@ def build_ui():
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=140)
+        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=140 if BigSize else 100)
         film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=5, height=11,
                                 bg='white', fg='white')
         film_hole_label_1.pack(side=TOP)
 
         film_hole_frame_2 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140)
+        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140 if BigSize else 100)
         film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=5, height=11,
                                 bg='white', fg='white')
         film_hole_label_2.pack(side=TOP)
