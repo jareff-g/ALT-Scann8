@@ -141,7 +141,7 @@ ForceBigSize = False
 FolderProcess = 0
 LoggingMode = "INFO"
 LogLevel = 0
-draw_capture_label = 0
+draw_capture_canvas = 0
 button_lock_counter = 0
 
 PiCam2PreviewEnabled=False
@@ -1296,7 +1296,7 @@ def capture_save_thread(queue, event, id):
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 def draw_preview_image(preview_image, idx):
-    global draw_capture_label
+    global draw_capture_canvas
     global win
     global total_wait_time_preview_display
     global hdr_view_4_image
@@ -1324,9 +1324,8 @@ def draw_preview_image(preview_image, idx):
     if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
         # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
         # next two lines to avoid flickering. However, they might cause memory problems
-        draw_capture_label.config(image=PreviewAreaImage)
-        draw_capture_label.image = PreviewAreaImage
-        draw_capture_label.pack()
+        draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
+        draw_capture_canvas.image = PreviewAreaImage
 
         # The Pack geometry manager packs widgets in rows or columns.
         # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
@@ -1549,11 +1548,11 @@ def set_s8():
         pt_level_str.set(str(PTLevel))
         min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
-    FilmHoleY1 = 300 if BigSize else 240
-    FilmHoleY2 = 300 if BigSize else 240
+    FilmHoleY1 = 260 if BigSize else 210
+    FilmHoleY2 = 260 if BigSize else 210
     if ExpertMode:
-        film_hole_frame_1.place(x=4, y=FilmHoleY2, height=140 if BigSize else 120)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140 if BigSize else 120)
+        film_hole_frame_1.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
+        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -1582,10 +1581,10 @@ def set_r8():
     MinFrameSteps = MinFrameStepsR8
     min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
-    FilmHoleY1 = 40 if BigSize else 40
-    FilmHoleY2 = 540 if BigSize else 430
+    FilmHoleY1 = 20 if BigSize else 20
+    FilmHoleY2 = 500 if BigSize else 380
     film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100 if BigSize else 70)
-    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=130 if BigSize else 90)
+    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -2884,8 +2883,7 @@ def build_ui():
     global sharpness_control_value
     global PiCam2_preview_btn
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
-    global preview_border_frame
-    global draw_capture_label
+    global draw_capture_canvas
     global hdr_btn, hq_btn, turbo_btn
     global min_frame_steps_str, frame_fine_tune_str
     global MinFrameSteps
@@ -2916,14 +2914,16 @@ def build_ui():
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
     top_area_frame.pack(side=TOP, anchor=NW)
-    # Create a frame to add a border to the preview
-    preview_border_frame = Frame(top_area_frame, width=PreviewWidth, height=PreviewHeight, bg='dark grey')
-    preview_border_frame.pack(side=LEFT, anchor=N, padx=(38, 0), pady=(38, 0))
-    # Also a label to draw images when preview is not used
-    draw_capture_label = tk.Label(preview_border_frame)
+    # Create a LabelFrame to act as a border
+    draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
+    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(20, 0), pady=(20, 0))
+    # Create the canvas
+    draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey',
+                                 width=PreviewWidth, height=PreviewHeight)
+    draw_capture_canvas.pack(side=TOP, anchor=N)
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_right_area_frame = Frame(top_area_frame, width=PreviewWidth, height=PreviewHeight)
-    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(20, 0), pady=(30, 0), fill=Y)
+    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(20, 0), pady=(15, 0), fill=Y)
 
     # Frame for standard widgets at the bottom ***************************************
     bottom_area_frame = Frame(win, width=app_width-150, height=50)
@@ -3199,14 +3199,14 @@ def build_ui():
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
         film_hole_frame_1.place(x=4, y=FilmHoleY1, height=140 if BigSize else 100)
-        film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=5, height=11,
+        film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                                 bg='white', fg='white')
         film_hole_label_1.pack(side=TOP)
 
         film_hole_frame_2 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
         film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140 if BigSize else 100)
-        film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=5, height=11,
+        film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                                 bg='white', fg='white')
         film_hole_label_2.pack(side=TOP)
 
