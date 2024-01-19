@@ -45,7 +45,7 @@ enum {
     DebugInfo,
     DebugInfoSingle,
     None
-} DebugState = DebugInfo;
+} DebugState = None;
 
 int MaxDebugRepetitions = 3;
 #define MAX_DEBUG_REPETITIONS_COUNT 30000
@@ -607,9 +607,7 @@ boolean RewindFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            digitalWrite(MotorA_Neutral, HIGH);
-            digitalWrite(MotorB_Neutral, LOW);
-            digitalWrite(MotorC_Neutral, LOW);
+            SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_REWIND_ENDED, 0, 0);
         }
@@ -643,9 +641,7 @@ boolean FastForwardFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            digitalWrite(MotorA_Neutral, HIGH);
-            digitalWrite(MotorB_Neutral, LOW);
-            digitalWrite(MotorC_Neutral, LOW);
+            SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
         }
