@@ -2935,65 +2935,74 @@ def build_ui():
     bottom_area_frame.pack(side=TOP, padx=5, pady=5, anchor=NW, fill=X)
 
     # Advance movie button (slow forward through filmgate)
+    bottom_area_column = 0
     AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=10, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    AdvanceMovie_btn.pack(side=LEFT, padx=(15, 0), pady=5)
+    AdvanceMovie_btn.grid(row=0, column=bottom_area_column, padx=(15,0), pady=5, sticky='W')
+    bottom_area_column += 1
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
     save_fg = AdvanceMovie_btn['fg']
 
     # Frame for single step/snapshot
     sstep_area_frame = Frame(bottom_area_frame, width=50, height=50)
-    # sstep_area_frame.pack(side=LEFT, padx=(5, 0), pady=5)
-    sstep_area_frame.pack_forget()
+    sstep_area_frame.grid_forget()
     # Advance one single frame
     SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=8, height=1, command=single_step_movie,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
     SingleStep_btn.pack(side=TOP)
     Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=8, height=1, command=capture_single_step,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
-    #Snapshot_btn.pack(side=TOP)
-    Snapshot_btn.pack_forget()
+    Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
     Rewind_btn = Button(bottom_area_frame, text="<<", font=("Arial", FontSize+5), width=2, height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    Rewind_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    Rewind_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
+    bottom_area_column += 1
     # Fast Forward movie (via upper path, outside of film gate)
     FastForward_btn = Button(bottom_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    FastForward_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    FastForward_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
+    bottom_area_column += 1
 
     # Switch Positive/negative modes
     PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=10, height=3, command=switch_negative_capture,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PosNeg_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    PosNeg_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
+    bottom_area_column += 1
 
     if ExperimentalMode:
         # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
         hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        hq_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+        hq_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
+        bottom_area_column += 1
 
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)
         turbo_btn = Button(bottom_area_frame, text="Turbo On", width=8, height=3, command=switch_turbo_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        turbo_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+        turbo_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
+        bottom_area_column += 1
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
     PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    #PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    PiCam2_preview_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
+    bottom_area_column += 1
 
     # Activate focus zoom, to facilitate focusing the camera
     Focus_btn = Button(bottom_area_frame, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     Focus_btn.config(state=DISABLED)
-    Focus_btn.pack(side=LEFT, padx=(5, 0), pady=5)
+    Focus_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady = 5, sticky = 'W')
+    bottom_area_column += 1
 
     # Focus zoom control (in out, up, down, left, right)
     Focus_frame = LabelFrame(bottom_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
-    Focus_frame.pack(side=LEFT, padx=2)
+    Focus_frame.grid(row=0, column=bottom_area_column, padx=(5, 0), pady = 5, sticky = 'W')
+    bottom_area_column += 1
 
     Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
     Focus_btn_grid_frame.pack(side=LEFT)
