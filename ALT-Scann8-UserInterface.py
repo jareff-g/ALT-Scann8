@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.22"
+__version__ = "1.8.23"
 __date__ = "2024-01-19"
-__version_highlight__ = "Take-up reel working now + wider HDR bracket adjustment"
+__version_highlight__ = "Small screen mode impleented. Not the nicest but...slightly smaller window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -206,12 +206,12 @@ RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
-ExpertMode = False
+ExpertMode = True
 ExperimentalMode = False
 PlotterMode = False
 plotter_canvas = None
 plotter_width=200
-plotter_height=160
+plotter_height=190
 PrevPTValue = 0
 MaxPT = 100
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
@@ -1577,14 +1577,16 @@ def set_r8():
     if ALT_scann_init_done:
         SessionData["PTLevel"] = PTLevel
         SessionData["MinFrameSteps"] = MinFrameSteps
-    pt_level_str.set(str(PTLevel))
     MinFrameSteps = MinFrameStepsR8
-    min_frame_steps_str.set(str(MinFrameSteps))
+    if ExpertMode:
+        pt_level_str.set(str(PTLevel))
+        min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
     FilmHoleY1 = 20 if BigSize else 20
     FilmHoleY2 = 500 if BigSize else 380
-    film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100 if BigSize else 70)
-    film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
+    if ExpertMode:
+        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100 if BigSize else 70)
+        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -2723,6 +2725,7 @@ def tscann8_init():
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
     global ForceSmallSize, ForceBigSize, FontSize, BigSize
+    global plotter_height
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2778,19 +2781,20 @@ def tscann8_init():
         FontSize = 11
         PreviewWidth = 844
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 100
-        app_height = PreviewHeight + 176
+        app_width = PreviewWidth + 200
+        app_height = PreviewHeight + 130
     else:
         BigSize = False
         FontSize = 8
         PreviewWidth = 650
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 200
-        app_height = PreviewHeight + 130
+        app_width = PreviewWidth + 160
+        app_height = PreviewHeight + 100
+        plotter_height = 150
     if ExpertMode:
-        app_height += 200
+        app_height += 220 if BigSize else 190
     if PlotterMode:
-        app_width += 150
+        app_width += 150 if BigSize else 165
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -2923,7 +2927,7 @@ def build_ui():
     draw_capture_canvas.pack(side=TOP, anchor=N)
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_right_area_frame = Frame(top_area_frame, width=PreviewWidth, height=PreviewHeight)
-    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(20, 0), pady=(15, 0), fill=Y)
+    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(0, 0), fill=Y)
 
     # Frame for standard widgets at the bottom ***************************************
     bottom_area_frame = Frame(win, width=app_width-150, height=50)
@@ -2932,7 +2936,7 @@ def build_ui():
     # Advance movie button (slow forward through filmgate)
     AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=8, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    AdvanceMovie_btn.pack(side=LEFT, padx=(30, 0), pady=5)
+    AdvanceMovie_btn.pack(side=LEFT, padx=(15, 0), pady=5)
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
     save_fg = AdvanceMovie_btn['fg']
@@ -3021,11 +3025,11 @@ def build_ui():
     else:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
                            activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
-    Start_btn.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    Start_btn.pack(side=TOP, pady=(5, 0))
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=16, height=8, font=("Arial", FontSize))
-    folder_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=16, height=8, font=("Arial", FontSize-2))
+    folder_frame.pack(side=TOP, pady=(5, 0))
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=22, height=3, font=("Arial", FontSize-3),
                                     wraplength=120)
@@ -3041,14 +3045,14 @@ def build_ui():
     existing_folder_btn.pack(side=LEFT)
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize))
-    scanned_images_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
+    scanned_images_frame.pack(side=TOP, pady=5)
 
-    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+10), width=5,
+    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+8), width=5,
                                         height=1)
-    Scanned_Images_number_label.pack(side=TOP, padx=21)
+    Scanned_Images_number_label.pack(side=TOP)
 
-    scanned_images_fpm_frame = Frame(scanned_images_frame, width=16, height=2)
+    scanned_images_fpm_frame = Frame(scanned_images_frame, width=14, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, text='Frames/Min:', font=("Arial", FontSize-2), width=12,
                                      height=1)
@@ -3058,34 +3062,34 @@ def build_ui():
     Scanned_Images_fpm.pack(side=LEFT)
 
     # Create frame to display number of frames to go, and estimated time to finish
-    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize))
-    frames_to_go_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=14, height=4, font=("Arial", FontSize-2))
+    frames_to_go_frame.pack(side=TOP, ipadx=0, pady=5)
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
     frames_to_go_entry = tk.Entry(frames_to_go_frame,textvariable=frames_to_go_str, width=8, font=("Arial", FontSize-2))
-    frames_to_go_entry.pack(side=TOP, padx=(5, 0), pady=(5, 5))
+    frames_to_go_entry.pack(side=TOP, pady=5)
     time_to_go_str = tk.StringVar(value='')
-    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=22, height=1)
+    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=18, height=1)
     time_to_go_time.pack(side=TOP)
 
     # Create frame to select S8/R8 film
-    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize))
-    film_type_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
+    film_type_frame.pack(side=TOP, ipadx=5, pady=(5, 0))
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=5)
-    film_type_S8_btn = Button(film_type_buttons, text='S8', width=3, height=1, font=("Arial", FontSize+4, 'bold'),
+    film_type_S8_btn = Button(film_type_buttons, text='S8', width=2, height=1, font=("Arial", FontSize+2, 'bold'),
                               command=set_s8, activebackground='#f0f0f0',
                               relief=SUNKEN)
     film_type_S8_btn.pack(side=LEFT)
-    film_type_R8_btn = Button(film_type_buttons, text='R8', width=3, height=1, font=("Arial", FontSize+4, 'bold'),
+    film_type_R8_btn = Button(film_type_buttons, text='R8', width=2, height=1, font=("Arial", FontSize+2, 'bold'),
                               command=set_r8, activebackground='#f0f0f0')
     film_type_R8_btn.pack(side=LEFT)
 
     # Create frame to display RPi temperature
-    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize))
-    rpi_temp_frame.pack(side=TOP, padx=(5, 0), pady=(5, 0))
+    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize-2))
+    rpi_temp_frame.pack(side=TOP, ipadx=0, pady=5)
     temp_str = str(RPiTemp)+'º'
-    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+6), width=8, height=1)
+    RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=8, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=12)
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
@@ -3097,20 +3101,19 @@ def build_ui():
     # Application Exit button
     Exit_btn = Button(top_right_area_frame, text="Exit", width=12, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80, font=("Arial", FontSize))
-    Exit_btn.pack(side=BOTTOM, padx=(5, 0), pady=(5, 0))
+    Exit_btn.pack(side=TOP, padx=5, pady=5)
 
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
-        #extended_frame.place(x=30, y=790)
-        extended_frame.pack(side=TOP, anchor=W, padx=(30, 0))
+        extended_frame.pack(side=TOP, anchor=W, padx=(15, 0))
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", FontSize-1))
         expert_frame.pack(side=LEFT, padx=2, pady=2)
 
         # Exposure / white balance
-        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', pady=11,
+        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
                                     width=16, height=2, font=("Arial", FontSize-1))
         ### exp_wb_frame.pack(side=LEFT, padx=5, pady=5)
         exp_wb_frame.grid(row=0, rowspan=2, column=0, padx=4, pady=4, sticky=N)
@@ -3213,7 +3216,7 @@ def build_ui():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, pady=4, sticky=NW)
+        frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, sticky=NW)
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=12, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3311,7 +3314,7 @@ def build_ui():
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
-        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2, pady=7,
+        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
                                            font=("Arial", FontSize-1))
         hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky=N)
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
@@ -3365,13 +3368,13 @@ def build_ui():
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, ipadx=5, fill=Y, padx=2, pady=2)
+            experimental_frame.pack(side=LEFT, padx=2, ipady=2)
 
             # Sharpness, control to allow playing with the values and see the results
             sharpness_control_label = tk.Label(experimental_frame,
                                                  text='Sharpness:',
                                                  width=20, font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, pady=1, sticky=E)
+            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
             sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
             sharpness_control_selection_aux = experimental_frame.register(
                 sharpness_control_selection)
@@ -3379,14 +3382,14 @@ def build_ui():
                 experimental_frame,
                 command=(sharpness_control_selection_aux, '%d'), width=8,
                 textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
-            sharpness_control_spinbox.grid(row=0, column=1, padx=2, pady=1, sticky=W)
+            sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
             sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
 
             # Display entry to throttle Rwnd/FF speed
             rwnd_speed_control_label = tk.Label(experimental_frame,
                                                  text='RW/FF speed rpm):',
                                                  width=20, font=("Arial", FontSize-1))
-            rwnd_speed_control_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+            rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
             rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
 
             rwnd_speed_control_selection_aux = experimental_frame.register(
@@ -3395,11 +3398,11 @@ def build_ui():
                 experimental_frame, state='readonly',
                 command=(rwnd_speed_control_selection_aux, '%d'), width=8,
                 textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
-            rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+            rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
 
             # Damaged film helpers, to help handling damaged film (broken perforations)
             Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
-            Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, pady=4, sticky='')
+            Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
             # Checkbox to enable/disable manual scan
             Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
             Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
@@ -3423,14 +3426,14 @@ def build_ui():
             manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
 
             # Retreat movie button (slow backward through filmgate)
-            RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=14, height=1, command=retreat_movie,
-                                      activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize-1))
-            RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, pady=4, sticky='')
+            RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
+                                      activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+            RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
 
             # Unlock reels button (to load film, rewind, etc)
-            Free_btn = Button(experimental_frame, text="Unlock Reels", width=14, height=1, command=set_free_mode,
-                              activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize-1))
-            Free_btn.grid(row=4, column=0, columnspan=2, padx=4, pady=4, sticky='')
+            Free_btn = Button(experimental_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
+                              activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+            Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
 
 
 
