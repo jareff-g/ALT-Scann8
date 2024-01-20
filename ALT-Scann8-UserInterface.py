@@ -160,8 +160,8 @@ simulated_captured_frame_list = [None] * 1000
 raw_simulated_capture_image = ''
 simulated_capture_image = ''
 simulated_images_in_list = 0
-FilmHoleY1 = 300 if BigSize else 250
-FilmHoleY2 = 300 if BigSize else 250
+FilmHoleY1 = 260 if BigSize else 210
+FilmHoleY2 = 260 if BigSize else 210
 SharpnessValue = 1
 
 # Commands (RPI to Arduino)
@@ -1054,7 +1054,8 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
-    hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
+    if ExpertMode:
+        hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
     if ExperimentalMode:
         if except_button != RetreatMovie_btn:
             RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
@@ -2328,7 +2329,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
         logging.warning("End of reel reached: Scan terminated")
         ScanStopRequested = True
-    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
+    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS and ExpertMode:  # Get auto levels from Arduino, to be displayed in UI, if auto on
         if (PTLevel_auto):
             pt_level_str.set(str(ArduinoParam1))
         if (FrameSteps_auto):
@@ -2487,7 +2488,7 @@ def load_session_data():
             if 'HdrCaptureActive' in SessionData:
                 HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
                 hdr_set_controls()
-                if HdrCaptureActive:
+                if HdrCaptureActive and ExpertMode:
                     hdr_capture_active_checkbox.select()
             if 'HdrViewX4Active' in SessionData:
                 HdrViewX4Active = eval(SessionData["HdrViewX4Active"])
@@ -2781,7 +2782,7 @@ def tscann8_init():
         FontSize = 11
         PreviewWidth = 844
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 520
+        app_width = PreviewWidth + 500
         app_height = PreviewHeight + 50
         plotter_width += 50
     else:
@@ -2960,7 +2961,7 @@ def build_ui():
     # Fast Forward movie (via upper path, outside of film gate)
     FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='W')
+    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='E')
     bottom_area_row += 1
 
     # Switch Positive/negative modes
@@ -2997,7 +2998,7 @@ def build_ui():
 
     # Focus zoom control (in out, up, down, left, right)
     Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
-    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky = 'W')
+    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4)
     bottom_area_row += 1
 
     Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
@@ -3130,8 +3131,7 @@ def build_ui():
         # Exposure / white balance
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
                                     width=16, height=2, font=("Arial", FontSize-1))
-        ### exp_wb_frame.pack(side=LEFT, padx=5, pady=5)
-        exp_wb_frame.grid(row=0, rowspan=2, column=0, padx=4, pady=4, sticky=N)
+        exp_wb_frame.grid(row=0, column=0, padx=4, pady=4, sticky=N)
 
         catch_up_delay_label = tk.Label(exp_wb_frame,
                                          text='Catch-up\ndelay',
@@ -3201,7 +3201,7 @@ def build_ui():
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
         match_wait_margin_label = tk.Label(exp_wb_frame,
                                          text='Match margin (%):',
-                                         width=14, font=("Arial", FontSize-1))
+                                         width=15, font=("Arial", FontSize-1))
         match_wait_margin_label.grid(row=4, column=0, padx=2, pady=1, sticky=E)
 
         match_wait_margin_str = tk.StringVar(value=str(MatchWaitMargin))
@@ -3231,7 +3231,7 @@ def build_ui():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, rowspan=2, column=2, padx=4, sticky=NW)
+        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=15, sticky=N)
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3294,14 +3294,13 @@ def build_ui():
         # Frame to add scan speed control
         speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18, height=2,
                                            font=("Arial", FontSize-1))
-        ### speed_quality_frame.pack(side=LEFT, padx=5)
-        speed_quality_frame.grid(row=1, column=1, columnspan=2, padx=4, pady=4, sticky=W)
+        speed_quality_frame.grid(row=0, column=4, padx=4, pady=4, sticky=N)
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame,
                                          text='Speed:',
-                                         width=7, font=("Arial", FontSize-1))
-        scan_speed_label.pack(side=LEFT, padx=4)
+                                         width=12, font=("Arial", FontSize-1))
+        scan_speed_label.grid(row=0, column=0, padx=4, pady=(20, 10), sticky=W)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
         scan_speed_selection_aux = speed_quality_frame.register(
             scan_speed_selection)
@@ -3309,15 +3308,15 @@ def build_ui():
             speed_quality_frame,
             command=(scan_speed_selection_aux, '%d'), width=3,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", FontSize-1))
-        scan_speed_spinbox.pack(side=LEFT, padx=4)
+        scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=(20, 10), sticky=W)
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
                                          text='Delay (ms):',
-                                         width=10, font=("Arial", FontSize-1))
-        stabilization_delay_label.pack(side=LEFT, padx=4)
+                                         width=12, font=("Arial", FontSize-1))
+        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=(10, 20), sticky=W)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
@@ -3325,13 +3324,13 @@ def build_ui():
             speed_quality_frame,
             command=(stabilization_delay_selection_aux, '%d'), width=4,
             textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
-        stabilization_delay_spinbox.pack(side=LEFT, padx=4)
+        stabilization_delay_spinbox.grid(row=1, column=1, padx=4, pady=(10, 20), sticky=W)
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
                                            font=("Arial", FontSize-1))
-        hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky=N)
+        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=18, sticky=N)
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
         hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1, width=6,
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
@@ -3375,7 +3374,7 @@ def build_ui():
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, padx=2, ipady=12, anchor=N)
+            experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, anchor=N)
 
             # Sharpness, control to allow playing with the values and see the results
             sharpness_control_label = tk.Label(experimental_frame,
