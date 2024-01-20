@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.23"
-__date__ = "2024-01-19"
+__version__ = "1.8.24"
+__date__ = "2024-01-20"
 __version_highlight__ = "Small screen mode impleented. Not the nicest but...slightly smaller window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -206,7 +206,7 @@ RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
-ExpertMode = True
+ExpertMode = False
 ExperimentalMode = False
 PlotterMode = False
 plotter_canvas = None
@@ -1551,8 +1551,8 @@ def set_s8():
     FilmHoleY1 = 260 if BigSize else 210
     FilmHoleY2 = 260 if BigSize else 210
     if ExpertMode:
-        film_hole_frame_1.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
+        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
+        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -1585,8 +1585,8 @@ def set_r8():
     FilmHoleY1 = 20 if BigSize else 20
     FilmHoleY2 = 500 if BigSize else 380
     if ExpertMode:
-        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=100 if BigSize else 70)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=150 if BigSize else 130)
+        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=100 if BigSize else 70)
+        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
@@ -2781,21 +2781,19 @@ def tscann8_init():
         FontSize = 11
         PreviewWidth = 844
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 200
-        app_height = PreviewHeight + 130
+        app_width = PreviewWidth + 520
+        app_height = PreviewHeight + 50
         plotter_width += 50
     else:
         BigSize = False
         FontSize = 8
         PreviewWidth = 650
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 160
-        app_height = PreviewHeight + 100
+        app_width = PreviewWidth + 420
+        app_height = PreviewHeight + 50
         plotter_height -= 40
     if ExpertMode:
-        app_height += 220 if BigSize else 190
-    if PlotterMode:
-        app_width += 150 if BigSize else 165
+        app_height += 210 if BigSize else 170
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -2919,90 +2917,88 @@ def build_ui():
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
     top_area_frame.pack(side=TOP, anchor=NW)
+    # Create a frame to contain the top right area (buttons) ***************
+    top_left_area_frame = Frame(top_area_frame)
+    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(20, 0), fill=Y)
     # Create a LabelFrame to act as a border
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
-    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(20, 0), pady=(20, 0))
+    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(15, 0), pady=(20, 0))
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey',
                                  width=PreviewWidth, height=PreviewHeight)
-    draw_capture_canvas.pack(side=TOP, anchor=N)
-    # Create a frame to contain the top area (preview + Right buttons) ***************
+    draw_capture_canvas.pack(side=TOP, anchor=N, padx=(20,0))
+    # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame)
-    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(0, 0), fill=Y)
-
-    # Frame for standard widgets at the bottom ***************************************
-    bottom_area_frame = Frame(win, width=app_width-150, height=50)
-    bottom_area_frame.pack(side=TOP, padx=5, pady=5, anchor=NW, fill=X)
+    top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(20, 0), fill=Y)
 
     # Advance movie button (slow forward through filmgate)
     bottom_area_column = 0
-    AdvanceMovie_btn = Button(bottom_area_frame, text="Movie Forward", width=10, height=3, command=advance_movie,
+    bottom_area_row = 0
+    AdvanceMovie_btn = Button(top_left_area_frame, text="Movie Forward", width=12, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    AdvanceMovie_btn.grid(row=0, column=bottom_area_column, padx=(15,0), pady=5, sticky='W')
-    bottom_area_column += 1
+    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='W')
+    bottom_area_row += 1
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
     save_fg = AdvanceMovie_btn['fg']
 
     # Frame for single step/snapshot
-    sstep_area_frame = Frame(bottom_area_frame, width=50, height=50)
+    sstep_area_frame = Frame(top_left_area_frame, width=50, height=50)
     sstep_area_frame.grid_forget()
     # Advance one single frame
-    SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=8, height=1, command=single_step_movie,
+    SingleStep_btn = Button(sstep_area_frame, text="Single Step", width=6, height=1, command=single_step_movie,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
     SingleStep_btn.pack(side=TOP)
-    Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=8, height=1, command=capture_single_step,
+    Snapshot_btn = Button(sstep_area_frame, text="Snapshot", width=6, height=1, command=capture_single_step,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
     Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(bottom_area_frame, text="<<", font=("Arial", FontSize+5), width=2, height=2, command=rewind_movie,
+    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), width=2, height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    Rewind_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
-    bottom_area_column += 1
+    Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='W')
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(bottom_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
+    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    FastForward_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
-    bottom_area_column += 1
+    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='W')
+    bottom_area_row += 1
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(bottom_area_frame, text="Negative image", width=10, height=3, command=switch_negative_capture,
+    PosNeg_btn = Button(top_left_area_frame, text="Negative image", width=12, height=3, command=switch_negative_capture,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PosNeg_btn.grid(row=0, column=bottom_area_column, padx=(5,0), pady=5, sticky='W')
-    bottom_area_column += 1
+    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='W')
+    bottom_area_row += 1
 
     if ExperimentalMode:
         # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
-        hq_btn = Button(bottom_area_frame, text="HQ On", width=8, height=3, command=switch_hq_capture,
+        hq_btn = Button(top_left_area_frame, text="HQ On", width=12, height=3, command=switch_hq_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        hq_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
-        bottom_area_column += 1
+        hq_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        bottom_area_row += 1
 
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)
-        turbo_btn = Button(bottom_area_frame, text="Turbo On", width=8, height=3, command=switch_turbo_capture,
+        turbo_btn = Button(top_left_area_frame, text="Turbo On", width=12, height=3, command=switch_turbo_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        turbo_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
-        bottom_area_column += 1
+        turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        bottom_area_row += 1
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    PiCam2_preview_btn = Button(bottom_area_frame, text="Real Time display ON", width=8, height=3, command=PiCamera2_preview,
+    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", width=12, height=3, command=PiCamera2_preview,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    #PiCam2_preview_btn.pack(side=LEFT, padx=(5, 0), pady=5)
-    PiCam2_preview_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady=5, sticky='W')
-    bottom_area_column += 1
+    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+    bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(bottom_area_frame, text="Focus Zoom ON", width=8, height=3, command=set_focus_zoom,
+    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", width=12, height=3, command=set_focus_zoom,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     Focus_btn.config(state=DISABLED)
-    Focus_btn.grid(row=0, column=bottom_area_column, padx=(5, 0), pady = 5, sticky = 'W')
-    bottom_area_column += 1
+    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky = 'W')
+    bottom_area_row += 1
 
     # Focus zoom control (in out, up, down, left, right)
-    Focus_frame = LabelFrame(bottom_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
-    Focus_frame.grid(row=0, column=bottom_area_column, padx=(5, 0), pady = 5, sticky = 'W')
-    bottom_area_column += 1
+    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
+    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky = 'W')
+    bottom_area_row += 1
 
     Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
     Focus_btn_grid_frame.pack(side=LEFT)
@@ -3031,7 +3027,7 @@ def build_ui():
     # Application Exit button
     Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80, font=("Arial", FontSize))
-    Exit_btn.grid(row=0, column=0, padx=4, pady=(20,3), sticky='W')
+    Exit_btn.grid(row=0, column=0, padx=4, pady=(0,3), sticky='W')
 
     # Start scan button
     if SimulatedRun:
@@ -3040,7 +3036,7 @@ def build_ui():
     else:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
                            activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
-    Start_btn.grid(row=0, column=1, pady=(20,3))
+    Start_btn.grid(row=0, column=1, pady=(0,3))
 
     # Create frame to select target folder
     folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=50, height=8, font=("Arial", FontSize-2))
@@ -3220,14 +3216,14 @@ def build_ui():
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_1.place(x=4, y=FilmHoleY1, height=140 if BigSize else 100)
+        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=140 if BigSize else 100)
         film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                                 bg='white', fg='white')
         film_hole_label_1.pack(side=TOP)
 
         film_hole_frame_2 = Frame(win, width=1, height=1, bg='black')
         film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_2.place(x=4, y=FilmHoleY2, height=140 if BigSize else 100)
+        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=140 if BigSize else 100)
         film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                                 bg='white', fg='white')
         film_hole_label_2.pack(side=TOP)
