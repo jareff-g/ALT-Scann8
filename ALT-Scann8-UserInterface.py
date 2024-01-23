@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.30"
-__date__ = "2024-01-20"
+__version__ = "1.8.31"
+__date__ = "2024-01-23"
 __version_highlight__ = "ALT-Scann8 Tooltips"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -2645,26 +2645,30 @@ def PiCam2_configure():
     global VideoCaptureActive
 
     camera.stop()
+    full_res = camera.sensor_resolution
+    half_res = tuple([dim // 2 for dim in camera.sensor_resolution])
+    print(f">>>> Full res: {full_res}, half res: {half_res}")
+
     if HqCaptureActive:
         if VideoCaptureActive:
-            capture_config = camera.create_video_configuration(main={"size": (2028, 1520)},
-                                           raw={"size": (4056, 3040)},
+            capture_config = camera.create_video_configuration(main={"size": full_res},
+                                           raw={"size": full_res},
                                            transform=Transform(hflip=True),
                                            controls={"FrameRate": 120.0})
         else:
-            capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
-                                           raw={"size": (4056, 3040)},
+            capture_config = camera.create_still_configuration(main={"size": full_res},
+                                           raw={"size": full_res},
                                            transform=Transform(hflip=True))
 
     else:
         if VideoCaptureActive:
-            capture_config = camera.create_video_configuration(main={"size": (2028, 1520)},
-                                           raw={"size": (2028, 1520)},
+            capture_config = camera.create_video_configuration(main={"size": (half_res)},
+                                           raw={"size": (half_res)},
                                            transform=Transform(hflip=True),
                                            controls={"FrameRate": 120.0})
         else:
-            capture_config = camera.create_still_configuration(main={"size": (2028, 1520)},
-                                           raw={"size": (2028, 1520)},
+            capture_config = camera.create_still_configuration(main={"size": (half_res)},
+                                           raw={"size": (half_res)},
                                            transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
@@ -2987,7 +2991,8 @@ def build_ui():
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)
         turbo_btn = Button(top_left_area_frame, text="Turbo On", width=12, height=3, command=switch_turbo_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        #turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        turbo_btn.forget()
         setup_tooltip(turbo_btn, "Enable turbo film capture using video capture of HQ Pi Camera (untested prototype).")
         bottom_area_row += 1
 
