@@ -13,9 +13,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022¡4, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.0"
-__date__ = "2024-01-19"
-__version_highlight__ = "Tooltips comon coe for ALT-Scann8 and AfterScan"
+__version__ = "1.0.1"
+__date__ = "2024-01-23"
+__version_highlight__ = "Tooltips common code for ALT-Scann8 and AfterScan"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -24,7 +24,7 @@ import tkinter as tk
 
 DisableTooltips = False
 FontSize = 12
-
+screen_width = 0
 
 def format_tooltip_text(text, max_line_width):
     words = text.split()
@@ -48,19 +48,28 @@ def format_tooltip_text(text, max_line_width):
 
 
 def show_tooltip(widget, text):
-    global DisableTooltips
+    global DisableTooltips, screen_width
     if widget["state"] == 'disabled' or DisableTooltips:
         return
-    x, y, _, _ = widget.bbox("insert")
-    x += widget.winfo_rootx() + 25
-    y += widget.winfo_rooty() + 25
+
+    x = widget.winfo_rootx() + widget.winfo_width()
+    y = widget.winfo_rooty() + widget.winfo_height()
 
     tooltip_window = tk.Toplevel(widget)
     tooltip_window.wm_overrideredirect(True)
-    tooltip_window.wm_geometry(f"+{x}+{y}")
+    #tooltip_window.wm_geometry(f"+{x}+{y}")
 
     formatted_text = format_tooltip_text(text, 60)
     label = tk.Label(tooltip_window, text=formatted_text, background="light yellow", relief="solid", borderwidth=1, font=("Arial", FontSize))
+    print(f"screen width: {screen_width}, label width: {label.winfo_reqwidth()}, x: {x}")
+    if x + label.winfo_reqwidth() > screen_width:
+        x = screen_width - label.winfo_reqwidth()
+    if widget.winfo_width() > 50:
+        x -= 25
+    if widget.winfo_height() > 50:
+        y -= 25
+    tooltip_window.wm_geometry(f"+{x}+{y}")
+
     label.pack()
 
     widget.tooltip_window = tooltip_window
@@ -77,9 +86,15 @@ def setup_tooltip(widget, tooltip_text):
 
 
 def init_tooltips(font_size):
-    global DisableTooltips, FontSize
+    global DisableTooltips, FontSize, screen_width
     FontSize = font_size
     DisableTooltips = False
+    # Create a temporary root window just for obtaining screen information
+    temp_root = tk.Tk()
+    # Get the screen height
+    screen_width = temp_root.winfo_screenwidth()
+    # Destroy the temporary root window
+    temp_root.destroy()
 
 
 def disable_tooltips():
