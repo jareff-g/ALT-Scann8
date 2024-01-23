@@ -1797,7 +1797,6 @@ def capture(mode):
                 break
         if wait_loop_count > 0:
             total_wait_time_autoexp+=(time.time() - curtime)
-            #print(f"AE match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
             logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     # Wait for auto white balance to adapt only if allowed
@@ -1815,7 +1814,6 @@ def capture(mode):
                abs(aux_gain_blue-PreviousGainBlue) >= (MatchWaitMargin * Tolerance_AWB/100):
                 if (wait_loop_count % 10 == 0):
                     aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
-                    #print(f"AWB Match: {aux_gains_str})")
                     logging.debug("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
                 if ExpertMode:
@@ -1831,7 +1829,6 @@ def capture(mode):
                 break
         if wait_loop_count > 0:
             total_wait_time_awb+=(time.time() - curtime)
-            #print(f"AWB Match delay: {str(round((time.time() - curtime) * 1000,1))} ms")
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     if not SimulatedRun:
@@ -2508,6 +2505,8 @@ def load_session_data():
                                   relief=SUNKEN if HqCaptureActive else RAISED,
                                   bg='red' if HqCaptureActive else save_bg,
                                   fg='white' if HqCaptureActive else save_fg)
+                    if not CameraDisabled:
+                        PiCam2_configure()
                 if 'VideoCaptureActive' in SessionData:
                     VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
                     turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
@@ -2647,7 +2646,6 @@ def PiCam2_configure():
     camera.stop()
     full_res = camera.sensor_resolution
     half_res = tuple([dim // 2 for dim in camera.sensor_resolution])
-    print(f">>>> Full res: {full_res}, half res: {half_res}")
 
     if HqCaptureActive:
         if VideoCaptureActive:
@@ -2985,7 +2983,7 @@ def build_ui():
         hq_btn = Button(top_left_area_frame, text="HQ On", width=12, height=3, command=switch_hq_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
         hq_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
-        setup_tooltip(hq_btn, "Enable HQ film capture (untested prototype).")
+        setup_tooltip(hq_btn, "Enable HQ film capture (using Pi HQ camera full resolution (4056, 3040).")
         bottom_area_row += 1
 
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)

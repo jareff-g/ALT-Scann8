@@ -61,7 +61,7 @@ def show_tooltip(widget, text):
 
     formatted_text = format_tooltip_text(text, 60)
     label = tk.Label(tooltip_window, text=formatted_text, background="light yellow", relief="solid", borderwidth=1, font=("Arial", FontSize))
-    print(f"screen width: {screen_width}, label width: {label.winfo_reqwidth()}, x: {x}")
+
     if x + label.winfo_reqwidth() > screen_width:
         x = screen_width - label.winfo_reqwidth()
     if widget.winfo_width() > 50:
