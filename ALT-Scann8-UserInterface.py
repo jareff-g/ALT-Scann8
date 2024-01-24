@@ -21,7 +21,7 @@ __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __version__ = "1.8.32"
 __date__ = "2024-01-24"
-__version_highlight__ = "ALT-Scann8 Tooltips"
+__version_highlight__ = "PNG support"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -112,6 +112,7 @@ PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 ArduinoTrigger = 0
 last_frame_time = 0
+max_inactivity_delay = 6    # Max time (in sec) we wait for next frame. If expired, we force next frame again
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
@@ -192,6 +193,7 @@ CMD_DECREASE_WIND_SPEED = 63
 CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
+CMD_SET_STALL_TIME = 72
 CMD_REPORT_PLOTTER_INFO = 87
 # Responses (Arduino to RPi)
 RSP_VERSION_ID = 1
@@ -1409,14 +1411,18 @@ def switch_hdr_capture():
     global SimulatedRun
     global hdr_capture_active, HdrCaptureActive, HdrBracketAuto
     global hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox
+    global max_inactivity_delay
+
 
     HdrCaptureActive = hdr_capture_active.get()
     SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
 
     hdr_set_controls()
     if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
+        max_inactivity_delay = max_inactivity_delay * 2
         arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
     else:    # If disabling HDR, need to set standard exposure as set in UI
+        max_inactivity_delay = int(max_inactivity_delay / 2)
         if CurrentExposure == 0:  # Automatic mode
             SessionData["CurrentExposure"] = str(CurrentExposure)
             if not SimulatedRun and not CameraDisabled:
@@ -1433,6 +1439,8 @@ def switch_hdr_capture():
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
             SessionData["CurrentExposure"] = str(CurrentExposure)
+    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+    logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
 
 def switch_hdr_viewx4():
     global HdrViewX4Active, hdr_viewx4_active
@@ -1445,9 +1453,16 @@ def switch_hdr_viewx4():
 # Frames delivered still at 2028x1520, but better quality
 def switch_hq_capture():
     global HqCaptureActive
-    global hq_btn
+    global hq_btn, max_inactivity_delay
 
     HqCaptureActive = not HqCaptureActive
+    if HqCaptureActive:
+        max_inactivity_delay = max_inactivity_delay * 2
+    else:
+        max_inactivity_delay = int(max_inactivity_delay / 2)
+    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+    logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
+
     if not CameraDisabled:
         PiCam2_configure()
     SessionData["HqCaptureActive"] = str(HqCaptureActive)
@@ -2281,13 +2296,11 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanProcessError
     global ScanOngoing
     global ALT_Scann8_controller_detected
-    global last_frame_time
+    global last_frame_time, max_inactivity_delay
     global pt_level_str, min_frame_steps_str
     global Controller_Id
     global ScanStopRequested
     global i2c
-
-    max_inactivity_delay = 6 if HdrCaptureActive else 3
 
     if not SimulatedRun:
         try:
@@ -2462,6 +2475,7 @@ def load_session_data():
     global HdrBracketAuto, hdr_bracket_auto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global frames_to_go_str
+    global max_inactivity_delay
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2499,6 +2513,9 @@ def load_session_data():
                 HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
                 hdr_set_controls()
                 if HdrCaptureActive and ExpertMode:
+                    max_inactivity_delay = max_inactivity_delay * 2
+                    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+                    logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
                     hdr_capture_active_checkbox.select()
             if 'HdrViewX4Active' in SessionData:
                 HdrViewX4Active = eval(SessionData["HdrViewX4Active"])
@@ -2515,6 +2532,10 @@ def load_session_data():
             if ExperimentalMode:
                 if 'HqCaptureActive' in SessionData:
                     HqCaptureActive = eval(SessionData["HqCaptureActive"])
+                    if HqCaptureActive:
+                        max_inactivity_delay = max_inactivity_delay * 2
+                        send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+                        logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
                     hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
                                   relief=SUNKEN if HqCaptureActive else RAISED,
                                   bg='red' if HqCaptureActive else save_bg,
