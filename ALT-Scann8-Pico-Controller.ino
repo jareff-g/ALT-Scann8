@@ -77,6 +77,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_REWIND 64
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
+#define CMD_SET_STALL_TIME 72
 #define CMD_REPORT_PLOTTER_INFO 87
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
@@ -194,6 +195,7 @@ unsigned long StartFrameTime = 0;           // Time at which we get RPi command 
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
 bool NoFilmDetected = false;
+int MaxFilmStallTime = 6000;                // Maximum time film can be undetected to report end of reel
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
 
@@ -436,6 +438,10 @@ void loop() {
                     }
                 }
                 break;
+            case CMD_SET_STALL_TIME:
+                DebugPrint(">Stell", param);
+                MaxFilmStallTime = param * 1000;
+                break;
             case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
                 DebugPrint(">FineT", param);
                 if (param >= 5 and param <= 95)   // Añllowed valued between 5 adn 95%
@@ -488,6 +494,7 @@ void loop() {
                         ScanState = Sts_Scan;
                         analogWrite(PIN_UV_LED, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
+                        scan_process_ongoing = true;
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         FilmDetectedTime = millis();
@@ -828,7 +835,7 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    if (millis() - FilmDetectedTime > 12000)
+    if (millis() - FilmDetectedTime > MaxFilmStallTime)
         NoFilmDetected = true;
     else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
         FilmDetectedTime = millis();
