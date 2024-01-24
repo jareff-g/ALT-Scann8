@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.31"
-__date__ = "2024-01-23"
+__version__ = "1.8.32"
+__date__ = "2024-01-24"
 __version_highlight__ = "ALT-Scann8 Tooltips"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -33,7 +33,7 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, N, W, E, NW, RAISED, SUNKEN
-from tkinter import Label, Button, Frame, LabelFrame, Canvas
+from tkinter import Label, Button, Frame, LabelFrame, Canvas, Radiobutton
 
 from PIL import ImageTk, Image
 
@@ -82,8 +82,8 @@ FocusZoomFactorY = 0.2
 FreeWheelActive = False
 BaseDir = '/home/juan/Vídeos'  # dirplats in original code from Torulf
 CurrentDir = BaseDir
-FrameFilenamePattern = "picture-%05d.jpg"
-FrameHdrFilenamePattern = "picture-%05d.%1d.jpg"   # HDR frames using standard filename (2/12/2023)
+FrameFilenamePattern = "picture-%05d.%s"
+HdrFrameFilenamePattern = "picture-%05d.%1d.%s"   # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
@@ -1268,6 +1268,7 @@ def capture_save_thread(queue, event, id):
     global CurrentDir
     global message
     global ScanStopRequested
+    global file_type
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1289,9 +1290,9 @@ def capture_save_thread(queue, event, id):
             message[0] = Image.fromarray(image_array)
         if message[2] > 1:  # Hdr frame 1 has standard filename
             logging.debug("Saving HDR frame n.%i", message[2])
-            message[0].save(FrameHdrFilenamePattern % (message[1],message[2]), quality=95)
+            message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type.get()), quality=95)
         else:
-            message[0].save(FrameFilenamePattern % message[1], quality=95)
+            message[0].save(FrameFilenamePattern % (message[1], file_type.get()), quality=95)
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1850,7 +1851,7 @@ def capture(mode):
                     # Stabilization delay for HDR managed inside capture_hdr
                     capture_hdr()
                 else:
-                    time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
+                    #time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
                     if VideoCaptureActive:
                         request = camera.capture_request()
                         img = request.make_image("main")
@@ -2219,6 +2220,12 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
     win.after(1000, temperature_loop)
 
 
+def file_type_rb_selected():
+    global file_type
+    SessionData["FileType"] = file_type.get()
+
+
+
 def UpdatePlotterWindow(PTValue):
     global plotter_canvas
     global MaxPT, PrevPTValue
@@ -2420,12 +2427,17 @@ def arrange_widget_state(auto_state, widget_list):
                 widget.select()
             else:
                 widget.deselect()
+        elif isinstance(widget, tk.Radiobutton):
+            if auto_state:
+                widget.select()
+            else:
+                widget.deselect()
 
 
 def load_session_data():
     global SessionData
     global CurrentExposure, CurrentExposureStr, ExposureAdaptPause
-    global CurrentDir
+    global CurrentDir, file_type
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
@@ -2478,6 +2490,8 @@ def load_session_data():
                     set_s8()
                     film_type_R8_btn.config(relief=RAISED)
                     film_type_S8_btn.config(relief=SUNKEN)
+            if 'FileType' in SessionData:
+                file_type.set(SessionData["FileType"])
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
@@ -2505,7 +2519,7 @@ def load_session_data():
                                   relief=SUNKEN if HqCaptureActive else RAISED,
                                   bg='red' if HqCaptureActive else save_bg,
                                   fg='white' if HqCaptureActive else save_fg)
-                    if not CameraDisabled:
+                    if not SimulatedRun and not CameraDisabled:
                         PiCam2_configure()
                 if 'VideoCaptureActive' in SessionData:
                     VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
@@ -2918,6 +2932,7 @@ def build_ui():
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
+    global file_type
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3045,9 +3060,10 @@ def build_ui():
 
     # Create vertical button column at right *************************************
     # Application Exit button
+    top_right_area_row = 0
     Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
                       activeforeground='white', wraplength=80, font=("Arial", FontSize))
-    Exit_btn.grid(row=0, column=0, padx=4, pady=(0,3), sticky='W')
+    Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='W')
     setup_tooltip(Exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
@@ -3059,10 +3075,11 @@ def build_ui():
                            activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
     Start_btn.grid(row=0, column=1, pady=(0,3))
     setup_tooltip(Start_btn, "Start scanning process.")
+    top_right_area_row += 1
 
     # Create frame to select target folder
     folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=50, height=8, font=("Arial", FontSize-2))
-    folder_frame.grid(row=1, column=0, columnspan=2, padx=4, pady=4)
+    folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=50 if BigSize else 55, height=3, font=("Arial", FontSize-3),
                                     wraplength=200)
@@ -3078,10 +3095,24 @@ def build_ui():
                                  activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize-2))
     existing_folder_btn.pack(side=LEFT)
     setup_tooltip(existing_folder_btn, "Select existing folder to store frames generated during the scan.")
+    top_right_area_row += 1
+
+    # Create frame to select target file type
+    file_type_frame = LabelFrame(top_right_area_frame, text='Target file type', width=50, height=8, font=("Arial", FontSize-2))
+    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
+    file_type = tk.StringVar()
+    file_type_jpg_rb = Radiobutton(file_type_frame, text="JPG", variable=file_type, value="jpg", width=14, command=file_type_rb_selected)
+    file_type_jpg_rb.pack(side=LEFT)
+    file_type_png_rb = Radiobutton(file_type_frame, text="PNG", variable=file_type, value="png", width=14, command=file_type_rb_selected)
+    file_type_png_rb.pack(side=LEFT)
+    setup_tooltip(file_type_jpg_rb, "Save frames as jpg files.")
+    setup_tooltip(file_type_png_rb, "Save frames as png files.")
+    file_type.set('jpg')
+    top_right_area_row += 1
 
     # Create frame to display number of scanned images, and frames per minute
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
-    scanned_images_frame.grid(row=2, column=0, padx=4, pady=4, sticky='W')
+    scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
 
     Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+8), width=5,
                                         height=1)
@@ -3100,7 +3131,8 @@ def build_ui():
 
     # Create frame to display number of frames to go, and estimated time to finish
     frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
-    frames_to_go_frame.grid(row=2, column=1, padx=4, pady=4, sticky='NE')
+    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NE')
+    top_right_area_row += 1
 
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
     frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=14, font=("Arial", FontSize-2), justify="right")
@@ -3112,7 +3144,7 @@ def build_ui():
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
-    film_type_frame.grid(row=3, column=0, padx=4, pady=4, sticky='W')
+    film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=6)
@@ -3128,7 +3160,7 @@ def build_ui():
 
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize-2))
-    rpi_temp_frame.grid(row=3, column=1, padx=4, pady=4)
+    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4)
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=10, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=4)
@@ -3140,15 +3172,17 @@ def build_ui():
                                                  command=temp_in_fahrenheit_selection, font=("Arial", FontSize))
     temp_in_fahrenheit_checkbox.pack(side=TOP)
     setup_tooltip(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
+    top_right_area_row += 1
 
     # Integrated plotter
     if PlotterMode:
         integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', width=8, height=5,
                                               font=("Arial", FontSize - 1))
-        integrated_plotter_frame.grid(row=4, column=0, columnspan=2, padx=4, pady=4, sticky='W')
+        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='W')
         plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
                                 width=plotter_width, height=plotter_height)
         plotter_canvas.pack(side=TOP, anchor=N)
+    top_right_area_row += 1
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
