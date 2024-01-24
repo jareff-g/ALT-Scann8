@@ -1028,6 +1028,7 @@ def button_status_change_except(except_button, active):
     global PiCam2_preview_btn, hdr_btn, hq_btn, turbo_btn
     global button_lock_counter
     global hdr_capture_active_checkbox
+    global file_type_jpg_rb, file_type_png_rb
 
     if active:
         button_lock_counter += 1
@@ -1055,6 +1056,10 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != file_type_jpg_rb:
+        file_type_jpg_rb.config(state=DISABLED if active else NORMAL)
+    if except_button != file_type_png_rb:
+        file_type_png_rb.config(state=DISABLED if active else NORMAL)
     if ExpertMode:
         hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
     if ExperimentalMode:
@@ -1618,7 +1623,7 @@ def register_frame():
     # Get current time
     frame_time = time.time()
     # Determine if we should start new count (last capture older than 5 seconds)
-    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 12:
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 30:
         FPM_StartTime = frame_time
         FPM_LastMinuteFrameTimes.clear()
         FPM_CalculatedValue = -1
@@ -1629,7 +1634,7 @@ def register_frame():
     while FPM_LastMinuteFrameTimes[0] <= frame_time-60:
         FPM_LastMinuteFrameTimes.remove(FPM_LastMinuteFrameTimes[0])
     # Calculate current value, only if current count has been going for more than 10 seconds
-    if frame_time - FPM_StartTime > 60:  # no calculations needed, frames in list are all in th elast 60 seconds
+    if frame_time - FPM_StartTime > 60:  # no calculations needed, frames in list are all in the last 60 seconds
         FPM_CalculatedValue = len(FPM_LastMinuteFrameTimes)
     elif frame_time - FPM_StartTime > 10:  # some  calculations needed if less than 60 sec
         FPM_CalculatedValue = int((len(FPM_LastMinuteFrameTimes) * 60) / (frame_time - FPM_StartTime))
@@ -2954,6 +2959,7 @@ def build_ui():
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
     global file_type
+    global file_type_jpg_rb, file_type_png_rb
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
