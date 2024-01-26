@@ -529,6 +529,7 @@ void loop() {
                         ScanState = Sts_Idle; // Exit scan loop
                         SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
                         break;
+                    case SCAN_TERMINATION_REQUESTED:
                     case SCAN_FRAME_DETECTION_ERROR:
                         ScanState = Sts_Idle; // Exit scan loop
                         break;
