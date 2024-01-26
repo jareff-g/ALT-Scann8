@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.1"
+#define __version__     "1.0.2"
 #define  __date__       "2024-01-26"
-#define  __version_highlight__  "Automatic stop at end of reel when doing slow forward"
+#define  __version_highlight__  "Add mandatory margin of 20% to auto PT level"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -703,6 +703,7 @@ void CollectOutgoingFilm(void) {
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
     float ratio;
+    int user_margin, fixed_margin;
 
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
@@ -714,7 +715,10 @@ int GetLevelPT() {
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto) {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
-        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+        fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.2);
+        user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.8 * ratio);
+        //PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+        PerforationThresholdLevel = int((MinPT_Dynamic + fixed_margin + user_margin)/10);
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
