@@ -522,9 +522,16 @@ void loop() {
                 }
                 break;
             case Sts_Scan:
-                if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
-                    ScanState = Sts_Idle; // Exit scan loop
-                    //SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                switch (scan(UI_Command)) {
+                    case SCAN_NO_FRAME_DETECTED:
+                        break;
+                    case SCAN_FRAME_DETECTED:
+                        ScanState = Sts_Idle; // Exit scan loop
+                        SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
+                        break;
+                    case SCAN_FRAME_DETECTION_ERROR:
+                        ScanState = Sts_Idle; // Exit scan loop
+                        break;
                 }
                 break;
             case Sts_SingleStep:
@@ -853,7 +860,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
@@ -922,10 +929,6 @@ ScanResult scan(int UI_Command) {
             if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
                 tone(A2, 2000, 35);
             }
-            else {
-                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
-            }
-      
             FrameDetected = false;
             retvalue = SCAN_FRAME_DETECTED;
             DebugPrint("FrmS",LastFrameSteps);
