@@ -1606,10 +1606,10 @@ def set_r8():
         min_frame_steps_str.set(str(MinFrameSteps))
     # Set reference film holes
     FilmHoleY1 = 20 if BigSize else 20
-    FilmHoleY2 = 500 if BigSize else 380
+    FilmHoleY2 = 540 if BigSize else 380
     if ExpertMode:
-        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=100 if BigSize else 70)
-        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
+        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=130 if BigSize else 70)
+        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=110 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
