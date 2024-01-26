@@ -2338,10 +2338,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
         # This means a duplicate frame might be generated.
-        last_frame_time = time.time() + max_inactivity_delay
+        last_frame_time = time.time() + (max_inactivity_delay - 2)      # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
         NewFrameAvailable = True
         logging.warning("More than %i sec. since last command: Forcing new "
-                        "frame event (frame %i).", max_inactivity_delay, CurrentFrame)
+                        "frame event (frame %i).", max_inactivity_delay - 2, CurrentFrame)
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
@@ -2355,7 +2355,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.debug("Controller requested to reinit")
         reinit_controller()
     elif ArduinoTrigger == RSP_FRAME_AVAILABLE:  # New Frame available
-        last_frame_time = time.time() + max_inactivity_delay
+        last_frame_time = time.time() + max_inactivity_delay - 2    # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
         NewFrameAvailable = True
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
@@ -3018,7 +3018,7 @@ def build_ui():
     Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), width=2, height=2, command=rewind_movie,
+    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), width=3, height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='W')
     setup_tooltip(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
