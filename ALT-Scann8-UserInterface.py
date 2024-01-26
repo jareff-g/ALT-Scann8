@@ -2274,12 +2274,13 @@ def UpdatePlotterWindow(PTValue):
     for item in plotter_canvas.find_all():
         plotter_canvas.move(item, -5, 0)
 
+    usable_height = plotter_height - 15
     # Delete lines moving out of the canvas
-    for item in plotter_canvas.find_overlapping(-10,0,0, plotter_height):
+    for item in plotter_canvas.find_overlapping(-10,0,0, usable_height):
         plotter_canvas.delete(item)
 
     # Draw the new line segment
-    plotter_canvas.create_line(plotter_width-6, plotter_height-(PrevPTValue/(MaxPT/plotter_height)), plotter_width-1, plotter_height-(PTValue/(MaxPT/plotter_height)), width=1, fill="blue")
+    plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevPTValue/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(PTValue/(MaxPT/usable_height)), width=1, fill="blue")
 
     PrevPTValue = PTValue
     if MaxPT > 100:  # Do not allow below 100
