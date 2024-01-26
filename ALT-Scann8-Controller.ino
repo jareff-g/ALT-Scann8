@@ -18,7 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0"
+#define __version__     "1.0.2"
+#define  __date__       "2024-01-26"
+#define  __version_highlight__  "Add mandatory margin of 20% to auto PT level"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -93,6 +95,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REPORT_AUTO_LEVELS 86
 #define RSP_REPORT_PLOTTER_INFO 87
 #define RSP_SCAN_ENDED 88
+#define RSP_FILM_FORWARD_ENDED 89
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -319,7 +322,7 @@ void loop() {
                 }
                 break;
             case CMD_SET_STALL_TIME:
-                DebugPrint(">Stell", param);
+                DebugPrint(">Stall", param);
                 MaxFilmStallTime = param * 1000;
                 break;
             case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
@@ -380,7 +383,6 @@ void loop() {
                         FilmDetectedTime = millis();
                         NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = scan_collect_modulo;
                         collect_timer = scan_collect_timer;
                         tone(A2, 2000, 50);
                         break;
@@ -428,6 +430,8 @@ void loop() {
                         break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
+                        FilmDetectedTime = millis();
+                        NoFilmDetected = false;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -518,9 +522,17 @@ void loop() {
                 }
                 break;
             case Sts_Scan:
-                if (scan(UI_Command) != SCAN_NO_FRAME_DETECTED) {
-                    ScanState = Sts_Idle; // Exit scan loop
-                    //SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                switch (scan(UI_Command)) {
+                    case SCAN_NO_FRAME_DETECTED:
+                        break;
+                    case SCAN_FRAME_DETECTED:
+                        ScanState = Sts_Idle; // Exit scan loop
+                        SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
+                        break;
+                    case SCAN_TERMINATION_REQUESTED:
+                    case SCAN_FRAME_DETECTION_ERROR:
+                        ScanState = Sts_Idle; // Exit scan loop
+                        break;
                 }
                 break;
             case Sts_SingleStep:
@@ -566,7 +578,10 @@ void loop() {
                     SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
-                    SlowForward();
+                    if (!SlowForward()) {
+                        ScanState = Sts_Idle;
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                    }
                 }
                 break;
             case Sts_SlowBackward:
@@ -696,6 +711,7 @@ void CollectOutgoingFilm(void) {
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
     float ratio;
+    int user_margin, fixed_margin;
 
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
@@ -707,7 +723,10 @@ int GetLevelPT() {
     if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto) {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
-        PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+        fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.2);
+        user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.8 * ratio);
+        //PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
+        PerforationThresholdLevel = int((MinPT_Dynamic + fixed_margin + user_margin)/10);
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
@@ -740,7 +759,7 @@ void ReportPlotterInfo() {
     }
 }
 
-void SlowForward(){
+boolean SlowForward(){
     static unsigned long LastMove = 0;
     unsigned long CurrentTime = micros();
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
@@ -750,6 +769,12 @@ void SlowForward(){
         digitalWrite(MotorB_Stepper, HIGH);
         LastMove = CurrentTime + 700;
     }
+    // Check if film still present (auto stop at end of reel)
+    if (NoFilmDetected) {
+        SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
+        return(false);
+    }
+    else return(true);
 }
 
 void SlowBackward(){
@@ -836,7 +861,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.7) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
@@ -880,7 +905,7 @@ ScanResult scan(int UI_Command) {
 
         FrameDetected = false;
 
-        // Check if film still presend (auto stop at end of reel)
+        // Check if film still present (auto stop at end of reel)
         if (NoFilmDetected) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);
@@ -905,10 +930,6 @@ ScanResult scan(int UI_Command) {
             if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
                 tone(A2, 2000, 35);
             }
-            else {
-                SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
-            }
-      
             FrameDetected = false;
             retvalue = SCAN_FRAME_DETECTED;
             DebugPrint("FrmS",LastFrameSteps);
