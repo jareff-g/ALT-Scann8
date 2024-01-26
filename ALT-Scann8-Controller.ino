@@ -18,7 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0"
+#define __version__     "1.0.1"
+#define  __date__       "2024-01-26"
+#define  __version_highlight__  "Automatic stop at end of reel when doing slow forward"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -93,6 +95,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REPORT_AUTO_LEVELS 86
 #define RSP_REPORT_PLOTTER_INFO 87
 #define RSP_SCAN_ENDED 88
+#define RSP_FILM_FORWARD_ENDED 89
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -319,7 +322,7 @@ void loop() {
                 }
                 break;
             case CMD_SET_STALL_TIME:
-                DebugPrint(">Stell", param);
+                DebugPrint(">Stall", param);
                 MaxFilmStallTime = param * 1000;
                 break;
             case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
@@ -380,7 +383,6 @@ void loop() {
                         FilmDetectedTime = millis();
                         NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
-                        collect_modulo = scan_collect_modulo;
                         collect_timer = scan_collect_timer;
                         tone(A2, 2000, 50);
                         break;
@@ -428,6 +430,8 @@ void loop() {
                         break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
+                        FilmDetectedTime = millis();
+                        NoFilmDetected = false;
                         collect_timer = 10;
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -566,7 +570,10 @@ void loop() {
                     SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
-                    SlowForward();
+                    if (!SlowForward()) {
+                        ScanState = Sts_Idle;
+                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                    }
                 }
                 break;
             case Sts_SlowBackward:
@@ -740,7 +747,7 @@ void ReportPlotterInfo() {
     }
 }
 
-void SlowForward(){
+boolean SlowForward(){
     static unsigned long LastMove = 0;
     unsigned long CurrentTime = micros();
     if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
@@ -750,6 +757,12 @@ void SlowForward(){
         digitalWrite(MotorB_Stepper, HIGH);
         LastMove = CurrentTime + 700;
     }
+    // Check if film still present (auto stop at end of reel)
+    if (NoFilmDetected) {
+        SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
+        return(false);
+    }
+    else return(true);
 }
 
 void SlowBackward(){
@@ -880,7 +893,7 @@ ScanResult scan(int UI_Command) {
 
         FrameDetected = false;
 
-        // Check if film still presend (auto stop at end of reel)
+        // Check if film still present (auto stop at end of reel)
         if (NoFilmDetected) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);

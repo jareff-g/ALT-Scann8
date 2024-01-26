@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.32"
-__date__ = "2024-01-24"
+__version__ = "1.8.33"
+__date__ = "2024-01-26"
 __version_highlight__ = "PNG support"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -32,7 +32,7 @@ from tkinter import filedialog
 
 import tkinter.messagebox
 import tkinter.simpledialog
-from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, N, W, E, NW, RAISED, SUNKEN
+from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, Radiobutton
 
 from PIL import ImageTk, Image
@@ -207,6 +207,8 @@ RSP_FAST_FORWARD_ENDED = 85
 RSP_REPORT_AUTO_LEVELS = 86
 RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
+RSP_FILM_FORWARD_ENDED = 89
+
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
 ExpertMode = False
@@ -214,7 +216,7 @@ ExperimentalMode = False
 PlotterMode = False
 plotter_canvas = None
 plotter_width=240
-plotter_height=190
+plotter_height=180
 PrevPTValue = 0
 MaxPT = 100
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
@@ -1077,7 +1079,7 @@ def button_status_change_except(except_button, active):
 
 
 
-def advance_movie():
+def advance_movie(from_arduino = False):
     global AdvanceMovieActive
     global save_bg, save_fg
     global SimulatedRun
@@ -1092,7 +1094,7 @@ def advance_movie():
                                 fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
-    if not SimulatedRun:
+    if not SimulatedRun and not from_arduino:   # Do not send Arduino command if triggered by Arduino response
         send_arduino_command(CMD_FILM_FORWARD)
 
     # Enable/Disable related buttons
@@ -2023,6 +2025,10 @@ def capture_loop_simulated():
 
         # Update number of captured frames
         Scanned_Images_number_label.config(text=str(CurrentFrame))
+        # Update film time
+        fps = 18 if SessionData["FilmType"] == "S8" else 16
+        film_time = f"Film time: {(CurrentFrame//fps)//60:02}:{(CurrentFrame//fps)%60:02}"
+        Scanned_Images_time.config(text=film_time)
         # Update Frames per Minute
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
         if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
@@ -2181,6 +2187,10 @@ def capture_loop():
 
             # Update number of captured frames
             Scanned_Images_number_label.config(text=str(CurrentFrame))
+            # Update film time
+            fps = 18 if SessionData["FilmType"] == "S8" else 16
+            film_time = f"Film time: {(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
+            Scanned_Images_time.config(text=film_time)
             # Update Frames per Minute
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:   # FPM not calculated yet, display some indication
@@ -2197,7 +2207,7 @@ def capture_loop():
             if ScanProcessError_LastTime != 0:
                 if time.time() - ScanProcessError_LastTime <= 5:     # Second error in less than 5 seconds: Stop
                     curtime = time.ctime()
-                    logging.warning("Error during scan process.")
+                    logging.error("Too many errors during scan process, stopping.")
                     ScanProcessError = False
                     if ScanOngoing:
                         ScanStopRequested = True  # Stop in next capture loop
@@ -2205,6 +2215,7 @@ def capture_loop():
             ScanProcessError = False
             if not ScanStopRequested:
                 NewFrameAvailable = True    # Simulate new frame to continue scan
+                logging.warning(f"Error during scan process, frame {CurrentFrame}, simulating new frame. Maybe misaligned.")
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(5, capture_loop)
 
@@ -2279,13 +2290,14 @@ def UpdatePlotterWindow(PTValue):
 def send_arduino_command(cmd, param=0):
     global SimulatedRun, ALT_Scann8_controller_detected
     global i2c
+    global CurrentFrame
 
     if not SimulatedRun:
         time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
         try:
             i2c.write_i2c_block_data(16, cmd, [int(param % 256), int(param >> 8)])  # Send command to Arduino
         except IOError:
-            logging.warning("Error while sending command %i (param %i) to Arduino. Retrying...", cmd, param)
+            logging.warning(f"Error while sending command {cmd} (param {param}) to Arduino while handling frame {CurrentFrame}. Retrying...")
             time.sleep(0.2)  #wait 100 µs, to avoid I/O errors
             i2c.write_i2c_block_data(16, cmd, [int(param%256), int(param>>8)])  # Send command to Arduino
 
@@ -2370,6 +2382,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
         if PlotterMode:
             UpdatePlotterWindow(ArduinoParam1)
+    elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
+        logging.warning("Received film forward end from Arduino")
+        advance_movie(True)
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
@@ -2833,7 +2848,7 @@ def tscann8_init():
         PreviewHeight = int(PreviewWidth/(4/3))
         app_width = PreviewWidth + 420
         app_height = PreviewHeight + 50
-        plotter_height -= 40
+        plotter_height -= 55
     if ExpertMode:
         app_height += 210 if BigSize else 170
     # Prevent window resize
@@ -2905,7 +2920,7 @@ def build_ui():
     global Start_btn
     global folder_frame_target_dir
     global Scanned_Images_number_label
-    global Scanned_Images_fpm
+    global Scanned_Images_fpm, Scanned_Images_time
     global exposure_frame
     global film_type_S8_btn
     global film_type_R8_btn
@@ -3089,18 +3104,18 @@ def build_ui():
     # Application Exit button
     top_right_area_row = 0
     Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
-                      activeforeground='white', wraplength=80, font=("Arial", FontSize))
+                      activeforeground='white', font=("Arial", FontSize))
     Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='W')
     setup_tooltip(Exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
     if SimulatedRun:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
-                           activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
+                           activebackground='#f0f0f0', font=("Arial", FontSize))
     else:
         Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
-                           activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize))
-    Start_btn.grid(row=0, column=1, pady=(0,3))
+                           activebackground='#f0f0f0', font=("Arial", FontSize))
+    Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3))
     setup_tooltip(Start_btn, "Start scanning process.")
     top_right_area_row += 1
 
@@ -3128,9 +3143,9 @@ def build_ui():
     file_type_frame = LabelFrame(top_right_area_frame, text='Target file type', width=50, height=8, font=("Arial", FontSize-2))
     file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
     file_type = tk.StringVar()
-    file_type_jpg_rb = Radiobutton(file_type_frame, text="JPG", variable=file_type, value="jpg", width=14, command=file_type_rb_selected)
+    file_type_jpg_rb = Radiobutton(file_type_frame, text="JPG", variable=file_type, value="jpg", width=14, command=file_type_rb_selected, font=("Arial", FontSize))
     file_type_jpg_rb.pack(side=LEFT)
-    file_type_png_rb = Radiobutton(file_type_frame, text="PNG", variable=file_type, value="png", width=14, command=file_type_rb_selected)
+    file_type_png_rb = Radiobutton(file_type_frame, text="PNG", variable=file_type, value="png", width=14, command=file_type_rb_selected, font=("Arial", FontSize))
     file_type_png_rb.pack(side=LEFT)
     setup_tooltip(file_type_jpg_rb, "Save frames as jpg files.")
     setup_tooltip(file_type_png_rb, "Save frames as png files.")
@@ -3141,13 +3156,18 @@ def build_ui():
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
     scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
 
-    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+8), width=5,
+    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+6), width=5,
                                         height=1)
     Scanned_Images_number_label.pack(side=TOP)
     setup_tooltip(Scanned_Images_number_label, "Number of film frames scanned so far.")
 
     scanned_images_fpm_frame = Frame(scanned_images_frame, width=14, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
+    Scanned_Images_time = Label(scanned_images_fpm_frame, text="Film time:", font=("Arial", FontSize-2), width=12,
+                               height=1)
+    Scanned_Images_time.pack(side=BOTTOM)
+    setup_tooltip(Scanned_Images_time, "Film time in min:sec")
+
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, text='Frames/Min:', font=("Arial", FontSize-2), width=12,
                                      height=1)
     scanned_images_fpm_label.pack(side=LEFT)
@@ -3163,11 +3183,11 @@ def build_ui():
 
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
     frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=14, font=("Arial", FontSize-2), justify="right")
-    frames_to_go_entry.pack(side=TOP, pady=5)
+    frames_to_go_entry.pack(side=TOP, pady=6)
     setup_tooltip(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of remaining time to finish.")
     time_to_go_str = tk.StringVar(value='')
     time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=18 if BigSize else 24, height=1)
-    time_to_go_time.pack(side=TOP, pady=1)
+    time_to_go_time.pack(side=TOP, pady=6)
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
