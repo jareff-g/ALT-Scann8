@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.33"
+__version__ = "1.8.34"
 __date__ = "2024-01-26"
-__version_highlight__ = "PNG support"
+__version_highlight__ = "Bracket shift"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -265,6 +265,7 @@ hdr_min_exp = hdr_lower_exp
 hdr_max_exp = 104
 hdr_best_exp = 0
 hdr_bracket_width = 50
+hdr_bracket_shift = 0
 hdr_min_bracket_width = 4
 hdr_max_bracket_width = 400
 hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster than 4)
@@ -301,6 +302,7 @@ SessionData = {
     "HdrMinExp": hdr_min_exp,
     "HdrMaxExp": hdr_max_exp,
     "HdrBracketWidth": hdr_bracket_width,
+    "HdrBracketShift": hdr_bracket_shift,
     "HdrBracketAuto": True,
     "FramesToGo": FramesToGo
 }
@@ -986,7 +988,7 @@ def hdr_check_max_exp(event):
     SessionData["HdrBracketWidth"] = hdr_max_exp
 
 
-def hdr_check_bracket_width(event):
+def hdr_check_bracket_width():
     global hdr_bracket_width_spinbox, hdr_bracket_width_str, hdr_bracket_width
     global hdr_min_exp, hdr_min_exp_str
     global hdr_max_exp, hdr_max_exp_str
@@ -1020,6 +1022,12 @@ def hdr_check_bracket_width(event):
         SessionData["HdrMinExp"] = hdr_min_exp
         SessionData["HdrMaxExp"] = hdr_max_exp
         SessionData["HdrBracketWidth"] = hdr_bracket_width
+
+
+def hdr_check_bracket_shift():
+    global hdr_bracket_shift_str, hdr_bracket_shift
+    hdr_bracket_shift = int(hdr_bracket_shift_str.get())
+
 
 
 def button_status_change_except(except_button, active):
@@ -1399,7 +1407,7 @@ def disk_space_available():
 
 def hdr_set_controls():
     global hdr_capture_active
-    global hdr_bracket_width_label, hdr_bracket_width_spinbox
+    global hdr_bracket_width_label, hdr_bracket_shift_label, hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
 
     if not ExpertMode:
@@ -1410,7 +1418,9 @@ def hdr_set_controls():
     hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_shift_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
 
 def switch_hdr_capture():
@@ -1647,7 +1657,7 @@ def capture_hdr():
     global capture_display_queue, capture_save_queue
     global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
-    global HdrBracketAuto
+    global HdrBracketAuto, hdr_bracket_shift
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -1675,6 +1685,7 @@ def capture_hdr():
         idx = hdr_num_exposures
         idx_inc = -1
     for exp in work_list:
+        exp = max(1, exp + hdr_bracket_shift)   # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp*1000)})
@@ -2657,6 +2668,9 @@ def load_session_data():
                 if 'HdrBracketWidth' in SessionData:
                     hdr_bracket_width = SessionData["HdrBracketWidth"]
                     hdr_bracket_width_str.set(str(hdr_bracket_width))
+                if 'HdrBracketShift' in SessionData:
+                    hdr_bracket_shift = SessionData["HdrBracketShift"]
+                    hdr_bracket_shift_str.set(str(hdr_bracket_shift))
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
@@ -2970,7 +2984,8 @@ def build_ui():
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
     global min_frame_steps_btn, pt_level_btn
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
-    global hdr_bracket_width_spinbox, hdr_bracket_width_label, hdr_bracket_width_str, hdr_bracket_width
+    global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
+    global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
@@ -3353,7 +3368,7 @@ def build_ui():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=15, sticky=N)
+        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=16, sticky=N)
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3460,52 +3475,67 @@ def build_ui():
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
                                            font=("Arial", FontSize-1))
-        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=18, sticky=N)
+        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=7, sticky=N)
+        hdr_row = 0
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
         hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1, width=6,
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_capture, font=("Arial", FontSize-1))
-        hdr_capture_active_checkbox.grid(row=0, column=0, padx=2, pady=1)
+        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1)
         setup_tooltip(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, width=7,
                                                      variable=hdr_viewx4_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_viewx4, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_viewx4_active_checkbox.grid(row=0, column=1, padx=2, pady=1)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1)
         setup_tooltip(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
+        hdr_row += 1
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
             textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
         hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
+        hdr_row +=1
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_max_exp_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
         hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
             textvariable=hdr_max_exp_str, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_max_exp_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
         hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
+        hdr_row += 1
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_bracket_width_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
-        hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_bracket_width, '%d'), width=8,
+        hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
             textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_bracket_width_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
-        hdr_bracket_width_spinbox.bind("<FocusOut>", hdr_check_bracket_width)
+        hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
+        hdr_row += 1
+
+        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_shift_str = tk.StringVar(value=str(hdr_bracket_shift))
+        hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
+            textvariable=hdr_bracket_shift_str, from_=-100, to=100, increment=10, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
+        hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_shift())
+        hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
         hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text=' Auto bracket', width=10, height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
-        hdr_bracket_width_auto_checkbox.grid(row=4, column=0, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
 
         if ExperimentalMode:
