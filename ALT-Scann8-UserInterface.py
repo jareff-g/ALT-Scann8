@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.34"
+__version__ = "1.8.35"
 __date__ = "2024-01-26"
-__version_highlight__ = "Bracket shift"
+__version_highlight__ = "HDR - Merge in place"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -68,6 +68,7 @@ except ImportError:
 import threading
 import queue
 from tooltip import disable_tooltips, setup_tooltip, init_tooltips
+import cv2
 
 
 #  ######### Global variable definition (I know, too many...) ##########
@@ -255,7 +256,8 @@ FPM_CalculatedValue = -1
 VideoCaptureActive = False
 
 # *** HDR variables
-image_list = []
+MergeMertens = None
+images_to_merge = []
 # 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
 dry_run_iterations = 4
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
@@ -276,6 +278,7 @@ HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 force_adjust_hdr_bracket = False
 HdrBracketAuto = False
+HdrMergeInPlace = False
 hdr_auto_bracket_frames = 8    # Every n frames, bracket is recalculated
 
 # Persisted data
@@ -304,6 +307,7 @@ SessionData = {
     "HdrBracketWidth": hdr_bracket_width,
     "HdrBracketShift": hdr_bracket_shift,
     "HdrBracketAuto": True,
+    "HdrMergeInPlace": False,
     "FramesToGo": FramesToGo
 }
 
@@ -1669,7 +1673,7 @@ def capture_hdr():
     else:
         perform_dry_run = False
 
-    image_list.clear()
+    images_to_merge.clear()
     # session_frames should be equal to 1 for the first captured frame of the scan session.
     # For HDR this means we need to unconditionally wait for exposure adaptation
     # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
@@ -1714,10 +1718,21 @@ def capture_hdr():
         # as it is the same exposure as the last capture of the previous one
         perform_dry_run = True
         # For PiCamera2, preview and save to file are handled in asynchronous threads
-        queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+        if HdrMergeInPlace:
+            images_to_merge.append(captured_snapshot)  # Add frame
+        else:
+            queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+            capture_display_queue.put(queue_item)
+            capture_save_queue.put(queue_item)
+        idx += idx_inc
+    if HdrMergeInPlace:
+        img = MergeMertens.process(images_to_merge)
+        img = img - img.min()  # Now between 0 and 8674
+        img = img / img.max() * 255
+        img = np.uint8(img)
+        queue_item = tuple((img, CurrentFrame, 0))
         capture_display_queue.put(queue_item)
         capture_save_queue.put(queue_item)
-        idx += idx_inc
 
 
 def adjust_hdr_bracket_auto():
@@ -1731,6 +1746,16 @@ def adjust_hdr_bracket_auto():
     SessionData["HdrBracketAuto"] = HdrBracketAuto
 
     arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
+
+
+def adjust_merge_in_place():
+    global HdrCaptureActive, HdrMergeInPlace, hdr_merge_in_place
+
+    if not HdrCaptureActive:
+        return
+
+    HdrMergeInPlace = hdr_merge_in_place.get()
+    SessionData["HdrMergeInPlace"] = HdrMergeInPlace
 
 
 def adjust_hdr_bracket():
@@ -2349,10 +2374,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
         # This means a duplicate frame might be generated.
-        last_frame_time = time.time() + (max_inactivity_delay - 2)      # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
+        last_frame_time = time.time() + int(max_inactivity_delay*0.34)      # Delay shared with arduino, 1/3rd less to avoid conflict with end reel
         NewFrameAvailable = True
         logging.warning("More than %i sec. since last command: Forcing new "
-                        "frame event (frame %i).", max_inactivity_delay - 2, CurrentFrame)
+                        "frame event (frame %i).", int(max_inactivity_delay*0.34), CurrentFrame)
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
@@ -2505,6 +2530,7 @@ def load_session_data():
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
     global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
     global HdrBracketAuto, hdr_bracket_auto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
+    global HdrMergeInPlace, hdr_merge_in_place
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global frames_to_go_str
     global max_inactivity_delay
@@ -2661,6 +2687,9 @@ def load_session_data():
                 if 'HdrBracketAuto' in SessionData:
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
+                if 'HdrMergeInPlace' in SessionData:
+                    HdrMergeInPlace = SessionData["HdrMergeInPlace"]
+                    hdr_merge_in_place.set(HdrMergeInPlace)
                 if 'HdrMinExp' in SessionData:
                     hdr_min_exp = SessionData["HdrMinExp"]
                 if 'HdrMaxExp' in SessionData:
@@ -2823,6 +2852,8 @@ def tscann8_init():
 
     # Init HDR variables
     hdr_init()
+    # Create MergeMertens Object for HDR
+    MergeMertens = cv2.createMergeMertens()
 
     # Try to determine Video folder of user logged in
     homefolder = os.environ['HOME']
@@ -2987,6 +3018,7 @@ def build_ui():
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
+    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
     global file_type
@@ -3532,11 +3564,19 @@ def build_ui():
         hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
-        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text=' Auto bracket', width=10, height=1,
+        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', width=12, height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
-        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
+        hdr_row += 1
+
+        hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
+        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', width=12, height=1,
+                                              variable=hdr_merge_in_place, onvalue=True, offvalue=False,
+                                              command=adjust_merge_in_place, font=("Arial", FontSize-1))
+        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
+        setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
@@ -3546,7 +3586,7 @@ def build_ui():
             sharpness_control_label = tk.Label(experimental_frame,
                                                  text='Sharpness:',
                                                  width=20, font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
+            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=W)
             sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
             sharpness_control_selection_aux = experimental_frame.register(
                 sharpness_control_selection)
