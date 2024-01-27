@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.33"
+__version__ = "1.8.35"
 __date__ = "2024-01-26"
-__version_highlight__ = "PNG support"
+__version_highlight__ = "HDR - Merge in place"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -68,6 +68,7 @@ except ImportError:
 import threading
 import queue
 from tooltip import disable_tooltips, setup_tooltip, init_tooltips
+import cv2
 
 
 #  ######### Global variable definition (I know, too many...) ##########
@@ -255,7 +256,8 @@ FPM_CalculatedValue = -1
 VideoCaptureActive = False
 
 # *** HDR variables
-image_list = []
+MergeMertens = None
+images_to_merge = []
 # 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
 dry_run_iterations = 4
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
@@ -265,6 +267,7 @@ hdr_min_exp = hdr_lower_exp
 hdr_max_exp = 104
 hdr_best_exp = 0
 hdr_bracket_width = 50
+hdr_bracket_shift = 0
 hdr_min_bracket_width = 4
 hdr_max_bracket_width = 400
 hdr_num_exposures = 3   # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster than 4)
@@ -275,6 +278,7 @@ HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 force_adjust_hdr_bracket = False
 HdrBracketAuto = False
+HdrMergeInPlace = False
 hdr_auto_bracket_frames = 8    # Every n frames, bracket is recalculated
 
 # Persisted data
@@ -301,7 +305,9 @@ SessionData = {
     "HdrMinExp": hdr_min_exp,
     "HdrMaxExp": hdr_max_exp,
     "HdrBracketWidth": hdr_bracket_width,
+    "HdrBracketShift": hdr_bracket_shift,
     "HdrBracketAuto": True,
+    "HdrMergeInPlace": False,
     "FramesToGo": FramesToGo
 }
 
@@ -456,7 +462,7 @@ def set_new_folder():
     global CurrentDir, CurrentFrame
     global SimulatedRun
     global folder_frame_target_dir
-    global Scanned_Images_number_label
+    global Scanned_Images_number_str
 
     requested_dir = ""
 
@@ -478,7 +484,7 @@ def set_new_folder():
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
 
     folder_frame_target_dir.config(text=CurrentDir)
-    Scanned_Images_number_label.config(text=str(CurrentFrame))
+    Scanned_Images_number_str.set(str(CurrentFrame))
     SessionData["CurrentDir"] = str(CurrentDir)
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
@@ -507,7 +513,7 @@ def set_existing_folder():
         if current_frame_str == '':
             current_frame_str = '0'
         CurrentFrame = int(current_frame_str)
-        Scanned_Images_number_label.config(text=current_frame_str)
+        Scanned_Images_number_str.set(str(current_frame_str))
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
@@ -986,7 +992,7 @@ def hdr_check_max_exp(event):
     SessionData["HdrBracketWidth"] = hdr_max_exp
 
 
-def hdr_check_bracket_width(event):
+def hdr_check_bracket_width():
     global hdr_bracket_width_spinbox, hdr_bracket_width_str, hdr_bracket_width
     global hdr_min_exp, hdr_min_exp_str
     global hdr_max_exp, hdr_max_exp_str
@@ -1020,6 +1026,12 @@ def hdr_check_bracket_width(event):
         SessionData["HdrMinExp"] = hdr_min_exp
         SessionData["HdrMaxExp"] = hdr_max_exp
         SessionData["HdrBracketWidth"] = hdr_bracket_width
+
+
+def hdr_check_bracket_shift():
+    global hdr_bracket_shift_str, hdr_bracket_shift
+    hdr_bracket_shift = int(hdr_bracket_shift_str.get())
+
 
 
 def button_status_change_except(except_button, active):
@@ -1399,7 +1411,7 @@ def disk_space_available():
 
 def hdr_set_controls():
     global hdr_capture_active
-    global hdr_bracket_width_label, hdr_bracket_width_spinbox
+    global hdr_bracket_width_label, hdr_bracket_shift_label, hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
 
     if not ExpertMode:
@@ -1410,7 +1422,9 @@ def hdr_set_controls():
     hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_shift_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
 
 def switch_hdr_capture():
@@ -1647,7 +1661,7 @@ def capture_hdr():
     global capture_display_queue, capture_save_queue
     global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
-    global HdrBracketAuto
+    global HdrBracketAuto, hdr_bracket_shift
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -1659,7 +1673,7 @@ def capture_hdr():
     else:
         perform_dry_run = False
 
-    image_list.clear()
+    images_to_merge.clear()
     # session_frames should be equal to 1 for the first captured frame of the scan session.
     # For HDR this means we need to unconditionally wait for exposure adaptation
     # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
@@ -1675,6 +1689,7 @@ def capture_hdr():
         idx = hdr_num_exposures
         idx_inc = -1
     for exp in work_list:
+        exp = max(1, exp + hdr_bracket_shift)   # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp*1000)})
@@ -1703,10 +1718,21 @@ def capture_hdr():
         # as it is the same exposure as the last capture of the previous one
         perform_dry_run = True
         # For PiCamera2, preview and save to file are handled in asynchronous threads
-        queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+        if HdrMergeInPlace:
+            images_to_merge.append(captured_snapshot)  # Add frame
+        else:
+            queue_item = tuple((captured_snapshot, CurrentFrame, idx))
+            capture_display_queue.put(queue_item)
+            capture_save_queue.put(queue_item)
+        idx += idx_inc
+    if HdrMergeInPlace:
+        img = MergeMertens.process(images_to_merge)
+        img = img - img.min()  # Now between 0 and 8674
+        img = img / img.max() * 255
+        img = np.uint8(img)
+        queue_item = tuple((img, CurrentFrame, 0))
         capture_display_queue.put(queue_item)
         capture_save_queue.put(queue_item)
-        idx += idx_inc
 
 
 def adjust_hdr_bracket_auto():
@@ -1720,6 +1746,16 @@ def adjust_hdr_bracket_auto():
     SessionData["HdrBracketAuto"] = HdrBracketAuto
 
     arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
+
+
+def adjust_merge_in_place():
+    global HdrCaptureActive, HdrMergeInPlace, hdr_merge_in_place
+
+    if not HdrCaptureActive:
+        return
+
+    HdrMergeInPlace = hdr_merge_in_place.get()
+    SessionData["HdrMergeInPlace"] = HdrMergeInPlace
 
 
 def adjust_hdr_bracket():
@@ -1892,7 +1928,7 @@ def capture(mode):
                         if mode == 'manual':  # In manual mode, increase CurrentFrame
                             CurrentFrame += 1
                             # Update number of captured frames
-                            Scanned_Images_number_label.config(text=str(CurrentFrame))
+                            Scanned_Images_number_str.set(str(CurrentFrame))
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -1973,8 +2009,8 @@ def capture_loop_simulated():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
-    global Scanned_Images_fpm
     global SessionData
+    global Scanned_Images_time_str, Scanned_Images_Fpm_str
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2024,18 +2060,19 @@ def capture_loop_simulated():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         # Update number of captured frames
-        Scanned_Images_number_label.config(text=str(CurrentFrame))
+        Scanned_Images_number_str.set(str(CurrentFrame))
         # Update film time
         fps = 18 if SessionData["FilmType"] == "S8" else 16
         film_time = f"Film time: {(CurrentFrame//fps)//60:02}:{(CurrentFrame//fps)%60:02}"
-        Scanned_Images_time.config(text=film_time)
+        Scanned_Images_time_str.set(film_time)
         # Update Frames per Minute
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
         if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
-            Scanned_Images_fpm.config(text=''.join([char*int(scan_period_frames) for char in '.']), anchor='w')
+            aux_str = ''.join([char*int(scan_period_frames) for char in '.'])
+            Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
         else:
             FramesPerMinute = FPM_CalculatedValue
-            Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+            Scanned_Images_Fpm_str.set(f"Frames/Min: {FramesPerMinute}")
         win.update()
 
         # Invoke capture_loop one more time, as long as scan is ongoing
@@ -2125,7 +2162,7 @@ def capture_loop():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames, CurrentStill
-    global Scanned_Images_fpm
+    global Scanned_Images_time_str, Scanned_Images_Fpm_str
 
     if ScanStopRequested:
         stop_scan()
@@ -2186,18 +2223,19 @@ def capture_loop():
             #     json.dump(SessionData, f)
 
             # Update number of captured frames
-            Scanned_Images_number_label.config(text=str(CurrentFrame))
+            Scanned_Images_number_str.set(str(CurrentFrame))
             # Update film time
             fps = 18 if SessionData["FilmType"] == "S8" else 16
             film_time = f"Film time: {(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
-            Scanned_Images_time.config(text=film_time)
+            Scanned_Images_time_str.set(film_time)
             # Update Frames per Minute
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:   # FPM not calculated yet, display some indication
-                Scanned_Images_fpm.config(text=''.join([char * int(scan_period_frames) for char in '.']), anchor='w')
+                aux_str = ''.join([char * int(scan_period_frames) for char in '.'])
+                Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
             else:
                 FramesPerMinute = FPM_CalculatedValue
-                Scanned_Images_fpm.config(text=str(int(FPM_CalculatedValue)))
+                Scanned_Images_Fpm_str.set(f"Frames/Min: {FPM_CalculatedValue}")
             win.update()
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
@@ -2338,10 +2376,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
         # This means a duplicate frame might be generated.
-        last_frame_time = time.time() + (max_inactivity_delay - 2)      # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
+        last_frame_time = time.time() + int(max_inactivity_delay*0.34)      # Delay shared with arduino, 1/3rd less to avoid conflict with end reel
         NewFrameAvailable = True
         logging.warning("More than %i sec. since last command: Forcing new "
-                        "frame event (frame %i).", max_inactivity_delay - 2, CurrentFrame)
+                        "frame event (frame %i).", int(max_inactivity_delay*0.34), CurrentFrame)
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
@@ -2494,9 +2532,11 @@ def load_session_data():
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
     global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
     global HdrBracketAuto, hdr_bracket_auto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
+    global HdrMergeInPlace, hdr_merge_in_place
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global frames_to_go_str
     global max_inactivity_delay
+    global Scanned_Images_number_str
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2512,7 +2552,7 @@ def load_session_data():
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
                 CurrentFrame = int(SessionData["CurrentFrame"])
-                Scanned_Images_number_label.config(text=SessionData["CurrentFrame"])
+                Scanned_Images_number_str.set(SessionData["CurrentFrame"])
             if 'FramesToGo' in SessionData:
                 FramesToGo = int(SessionData["FramesToGo"])
                 frames_to_go_str.set(str(FramesToGo))
@@ -2650,6 +2690,9 @@ def load_session_data():
                 if 'HdrBracketAuto' in SessionData:
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
+                if 'HdrMergeInPlace' in SessionData:
+                    HdrMergeInPlace = SessionData["HdrMergeInPlace"]
+                    hdr_merge_in_place.set(HdrMergeInPlace)
                 if 'HdrMinExp' in SessionData:
                     hdr_min_exp = SessionData["HdrMinExp"]
                 if 'HdrMaxExp' in SessionData:
@@ -2657,6 +2700,9 @@ def load_session_data():
                 if 'HdrBracketWidth' in SessionData:
                     hdr_bracket_width = SessionData["HdrBracketWidth"]
                     hdr_bracket_width_str.set(str(hdr_bracket_width))
+                if 'HdrBracketShift' in SessionData:
+                    hdr_bracket_shift = SessionData["HdrBracketShift"]
+                    hdr_bracket_shift_str.set(str(hdr_bracket_shift))
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
@@ -2809,6 +2855,8 @@ def tscann8_init():
 
     # Init HDR variables
     hdr_init()
+    # Create MergeMertens Object for HDR
+    MergeMertens = cv2.createMergeMertens()
 
     # Try to determine Video folder of user logged in
     homefolder = os.environ['HOME']
@@ -2920,8 +2968,6 @@ def build_ui():
     global Exit_btn
     global Start_btn
     global folder_frame_target_dir
-    global Scanned_Images_number_label
-    global Scanned_Images_fpm, Scanned_Images_time
     global exposure_frame
     global film_type_S8_btn
     global film_type_R8_btn
@@ -2970,12 +3016,16 @@ def build_ui():
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
     global min_frame_steps_btn, pt_level_btn
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
-    global hdr_bracket_width_spinbox, hdr_bracket_width_label, hdr_bracket_width_str, hdr_bracket_width
+    global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
+    global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
+    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
     global file_type
     global file_type_jpg_rb, file_type_png_rb
+    global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
+
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3157,25 +3207,25 @@ def build_ui():
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
     scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
 
-    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+6), width=5,
+    Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
+    Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str, font=("Arial", FontSize+6), width=5,
                                         height=1)
     Scanned_Images_number_label.pack(side=TOP)
     setup_tooltip(Scanned_Images_number_label, "Number of film frames scanned so far.")
 
     scanned_images_fpm_frame = Frame(scanned_images_frame, width=14, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
-    Scanned_Images_time = Label(scanned_images_fpm_frame, text="Film time:", font=("Arial", FontSize-2), width=12,
+    Scanned_Images_time_str = tk.StringVar(value="Film time:")
+    Scanned_Images_time_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_time_str, font=("Arial", FontSize-2), width=20,
                                height=1)
-    Scanned_Images_time.pack(side=BOTTOM)
-    setup_tooltip(Scanned_Images_time, "Film time in min:sec")
+    Scanned_Images_time_label.pack(side=BOTTOM)
+    setup_tooltip(Scanned_Images_time_label, "Film time in min:sec")
 
-    scanned_images_fpm_label = Label(scanned_images_fpm_frame, text='Frames/Min:', font=("Arial", FontSize-2), width=12,
+    Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Min:")
+    scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str, font=("Arial", FontSize-2), width=20,
                                      height=1)
     scanned_images_fpm_label.pack(side=LEFT)
-    Scanned_Images_fpm = Label(scanned_images_fpm_frame, text=str(FramesPerMinute), font=("Arial", FontSize-2), width=8,
-                               height=1)
-    Scanned_Images_fpm.pack(side=LEFT)
-    setup_tooltip(Scanned_Images_fpm, "Scan speed in frames per minute.")
+    setup_tooltip(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
     # Create frame to display number of frames to go, and estimated time to finish
     frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
@@ -3353,7 +3403,7 @@ def build_ui():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=15, sticky=N)
+        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=16, sticky=N)
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3460,53 +3510,76 @@ def build_ui():
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
                                            font=("Arial", FontSize-1))
-        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=18, sticky=N)
+        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=7, sticky=N)
+        hdr_row = 0
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
         hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1, width=6,
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_capture, font=("Arial", FontSize-1))
-        hdr_capture_active_checkbox.grid(row=0, column=0, padx=2, pady=1)
+        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1)
         setup_tooltip(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, width=7,
                                                      variable=hdr_viewx4_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_viewx4, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_viewx4_active_checkbox.grid(row=0, column=1, padx=2, pady=1)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1)
         setup_tooltip(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
+        hdr_row += 1
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_label.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
             textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
         hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
+        hdr_row +=1
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_max_exp_label.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
         hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
             textvariable=hdr_max_exp_str, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_max_exp_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
         hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
+        hdr_row += 1
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_bracket_width_label.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
-        hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_bracket_width, '%d'), width=8,
+        hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
             textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_bracket_width_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
-        hdr_bracket_width_spinbox.bind("<FocusOut>", hdr_check_bracket_width)
+        hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
+        hdr_row += 1
+
+        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_shift_str = tk.StringVar(value=str(hdr_bracket_shift))
+        hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
+            textvariable=hdr_bracket_shift_str, from_=-100, to=100, increment=10, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
+        hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_shift())
+        hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
-        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text=' Auto bracket', width=10, height=1,
+        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', width=12, height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
-        hdr_bracket_width_auto_checkbox.grid(row=4, column=0, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
+        hdr_row += 1
+
+        hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
+        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', width=12, height=1,
+                                              variable=hdr_merge_in_place, onvalue=True, offvalue=False,
+                                              command=adjust_merge_in_place, font=("Arial", FontSize-1))
+        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
+        setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
@@ -3516,7 +3589,7 @@ def build_ui():
             sharpness_control_label = tk.Label(experimental_frame,
                                                  text='Sharpness:',
                                                  width=20, font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
+            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=W)
             sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
             sharpness_control_selection_aux = experimental_frame.register(
                 sharpness_control_selection)
