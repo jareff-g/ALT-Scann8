@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.34"
+__version__ = "1.8.35"
 __date__ = "2024-01-26"
-__version_highlight__ = "Bracket shift"
+__version_highlight__ = "Armonize frame counter labels"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -458,7 +458,7 @@ def set_new_folder():
     global CurrentDir, CurrentFrame
     global SimulatedRun
     global folder_frame_target_dir
-    global Scanned_Images_number_label
+    global Scanned_Images_number_str
 
     requested_dir = ""
 
@@ -480,7 +480,7 @@ def set_new_folder():
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
 
     folder_frame_target_dir.config(text=CurrentDir)
-    Scanned_Images_number_label.config(text=str(CurrentFrame))
+    Scanned_Images_number_str.set(str(CurrentFrame))
     SessionData["CurrentDir"] = str(CurrentDir)
     SessionData["CurrentFrame"] = str(CurrentFrame)
 
@@ -509,7 +509,7 @@ def set_existing_folder():
         if current_frame_str == '':
             current_frame_str = '0'
         CurrentFrame = int(current_frame_str)
-        Scanned_Images_number_label.config(text=current_frame_str)
+        Scanned_Images_number_str.set(str(current_frame_str))
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
@@ -1903,7 +1903,7 @@ def capture(mode):
                         if mode == 'manual':  # In manual mode, increase CurrentFrame
                             CurrentFrame += 1
                             # Update number of captured frames
-                            Scanned_Images_number_label.config(text=str(CurrentFrame))
+                            Scanned_Images_number_str.set(str(CurrentFrame))
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -1984,8 +1984,8 @@ def capture_loop_simulated():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames
-    global Scanned_Images_fpm
     global SessionData
+    global Scanned_Images_time_str, Scanned_Images_Fpm_str
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2035,18 +2035,19 @@ def capture_loop_simulated():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         # Update number of captured frames
-        Scanned_Images_number_label.config(text=str(CurrentFrame))
+        Scanned_Images_number_str.set(str(CurrentFrame))
         # Update film time
         fps = 18 if SessionData["FilmType"] == "S8" else 16
         film_time = f"Film time: {(CurrentFrame//fps)//60:02}:{(CurrentFrame//fps)%60:02}"
-        Scanned_Images_time.config(text=film_time)
+        Scanned_Images_time_str.set(film_time)
         # Update Frames per Minute
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
         if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
-            Scanned_Images_fpm.config(text=''.join([char*int(scan_period_frames) for char in '.']), anchor='w')
+            aux_str = ''.join([char*int(scan_period_frames) for char in '.'])
+            Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
         else:
             FramesPerMinute = FPM_CalculatedValue
-            Scanned_Images_fpm.config(text=str(int(FramesPerMinute)))
+            Scanned_Images_Fpm_str.set(f"Frames/Min: {FramesPerMinute}")
         win.update()
 
         # Invoke capture_loop one more time, as long as scan is ongoing
@@ -2136,7 +2137,7 @@ def capture_loop():
     global ScanStopRequested
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames, CurrentStill
-    global Scanned_Images_fpm
+    global Scanned_Images_time_str, Scanned_Images_Fpm_str
 
     if ScanStopRequested:
         stop_scan()
@@ -2197,18 +2198,19 @@ def capture_loop():
             #     json.dump(SessionData, f)
 
             # Update number of captured frames
-            Scanned_Images_number_label.config(text=str(CurrentFrame))
+            Scanned_Images_number_str.set(str(CurrentFrame))
             # Update film time
             fps = 18 if SessionData["FilmType"] == "S8" else 16
             film_time = f"Film time: {(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
-            Scanned_Images_time.config(text=film_time)
+            Scanned_Images_time_str.set(film_time)
             # Update Frames per Minute
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:   # FPM not calculated yet, display some indication
-                Scanned_Images_fpm.config(text=''.join([char * int(scan_period_frames) for char in '.']), anchor='w')
+                aux_str = ''.join([char * int(scan_period_frames) for char in '.'])
+                Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
             else:
                 FramesPerMinute = FPM_CalculatedValue
-                Scanned_Images_fpm.config(text=str(int(FPM_CalculatedValue)))
+                Scanned_Images_Fpm_str.set(f"Frames/Min: {FPM_CalculatedValue}")
             win.update()
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
@@ -2508,6 +2510,7 @@ def load_session_data():
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global frames_to_go_str
     global max_inactivity_delay
+    global Scanned_Images_number_str
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2523,7 +2526,7 @@ def load_session_data():
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
                 CurrentFrame = int(SessionData["CurrentFrame"])
-                Scanned_Images_number_label.config(text=SessionData["CurrentFrame"])
+                Scanned_Images_number_str.set(SessionData["CurrentFrame"])
             if 'FramesToGo' in SessionData:
                 FramesToGo = int(SessionData["FramesToGo"])
                 frames_to_go_str.set(str(FramesToGo))
@@ -2934,8 +2937,6 @@ def build_ui():
     global Exit_btn
     global Start_btn
     global folder_frame_target_dir
-    global Scanned_Images_number_label
-    global Scanned_Images_fpm, Scanned_Images_time
     global exposure_frame
     global film_type_S8_btn
     global film_type_R8_btn
@@ -2991,6 +2992,8 @@ def build_ui():
     global RetreatMovie_btn
     global file_type
     global file_type_jpg_rb, file_type_png_rb
+    global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
+
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3172,25 +3175,25 @@ def build_ui():
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
     scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
 
-    Scanned_Images_number_label = Label(scanned_images_frame, text=str(CurrentFrame), font=("Arial", FontSize+6), width=5,
+    Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
+    Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str, font=("Arial", FontSize+6), width=5,
                                         height=1)
     Scanned_Images_number_label.pack(side=TOP)
     setup_tooltip(Scanned_Images_number_label, "Number of film frames scanned so far.")
 
     scanned_images_fpm_frame = Frame(scanned_images_frame, width=14, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
-    Scanned_Images_time = Label(scanned_images_fpm_frame, text="Film time:", font=("Arial", FontSize-2), width=12,
+    Scanned_Images_time_str = tk.StringVar(value="Film time:")
+    Scanned_Images_time_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_time_str, font=("Arial", FontSize-2), width=20,
                                height=1)
-    Scanned_Images_time.pack(side=BOTTOM)
-    setup_tooltip(Scanned_Images_time, "Film time in min:sec")
+    Scanned_Images_time_label.pack(side=BOTTOM)
+    setup_tooltip(Scanned_Images_time_label, "Film time in min:sec")
 
-    scanned_images_fpm_label = Label(scanned_images_fpm_frame, text='Frames/Min:', font=("Arial", FontSize-2), width=12,
+    Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Min:")
+    scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str, font=("Arial", FontSize-2), width=20,
                                      height=1)
     scanned_images_fpm_label.pack(side=LEFT)
-    Scanned_Images_fpm = Label(scanned_images_fpm_frame, text=str(FramesPerMinute), font=("Arial", FontSize-2), width=8,
-                               height=1)
-    Scanned_Images_fpm.pack(side=LEFT)
-    setup_tooltip(Scanned_Images_fpm, "Scan speed in frames per minute.")
+    setup_tooltip(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
     # Create frame to display number of frames to go, and estimated time to finish
     frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
