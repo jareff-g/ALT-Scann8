@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.41"
-__date__ = "2024-01-26"
-__version_highlight__ = "UI - Widget alignment"
+__version__ = "1.8.42"
+__date__ = "2024-01-28"
+__version_highlight__ = "UI - Widget alignment (bugfixes)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -111,6 +111,10 @@ ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
+# Variables to deal with remaining disk space
+available_space_mb = 0
+disk_space_error_to_notify = False
+
 ArduinoTrigger = 0
 last_frame_time = 0
 max_inactivity_delay = 6    # Max time (in sec) we wait for next frame. If expired, we force next frame again
@@ -1395,7 +1399,7 @@ def update_rpi_temp():
         RPiTemp = 64.5
 
 def disk_space_available():
-    global CurrentDir
+    global CurrentDir, available_space_mb, disk_space_error_to_notify
 
     if not check_disk_space:
         return True
@@ -1404,6 +1408,7 @@ def disk_space_available():
 
     if available_space_mb < 500:
         logging.debug(f"Disk space running out, only {available_space_mb} MB available")
+        disk_space_error_to_notify = True
         return False
     else:
         return True
@@ -2018,6 +2023,7 @@ def capture_loop_simulated():
     global session_frames
     global SessionData
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global disk_space_error_to_notify
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2037,6 +2043,10 @@ def capture_loop_simulated():
             logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
+        if disk_space_error_to_notify:
+            tk.messagebox.showwarning("Disk space low",
+                                      f"Running out of disk space, only {int(available_space_mb)} MB remain. Please delete some files before continuing current scan.")
+            disk_space_error_to_notify = False
     if ScanOngoing:
         os.chdir(CurrentDir)
         frame_to_display = CurrentFrame % simulated_images_in_list
@@ -2084,6 +2094,11 @@ def capture_loop_simulated():
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(500, capture_loop_simulated)
+
+        if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
+            logging.error("No disk space available, stopping scan process.")
+            if ScanOngoing:
+                ScanStopRequested = True  # Stop in next capture loop
 
 
 def start_scan():
@@ -2170,6 +2185,7 @@ def capture_loop():
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames, CurrentStill
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global disk_space_error_to_notify
 
     if ScanStopRequested:
         stop_scan()
@@ -2189,6 +2205,9 @@ def capture_loop():
             logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
+        if disk_space_error_to_notify:
+            tk.messagebox.showwarning("Disk space low", f"Running out of disk space, only {int(available_space_mb)} MB remain. Please delete some files before continuing current scan.")
+            disk_space_error_to_notify = False
     elif ScanOngoing:
         if NewFrameAvailable:
             # Update remaining time
@@ -3478,13 +3497,13 @@ def build_ui():
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
-        speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18,
+        speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
                                            font=("Arial", FontSize-1))
         speed_quality_frame.grid(row=0, column=3, padx=4, pady=4, sticky='NSEW')
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame,
-                                         text='Speed:',
+                                         text='Scan Speed:',
                                          font=("Arial", FontSize-1))
         scan_speed_label.grid(row=0, column=0, padx=3, pady=(20, 10), sticky=E)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
@@ -3494,16 +3513,16 @@ def build_ui():
             speed_quality_frame,
             command=(scan_speed_selection_aux, '%d'), width=3,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", FontSize-1))
-        scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=(20, 10), sticky=W)
+        scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=4, sticky=W)
         setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
-                                         text='Delay (ms):',
+                                         text='Stabilization\ndelay (ms):',
                                          font=("Arial", FontSize-1))
-        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=(10, 20), sticky=E)
+        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=4, sticky=E)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
@@ -3511,7 +3530,7 @@ def build_ui():
             speed_quality_frame,
             command=(stabilization_delay_selection_aux, '%d'), width=4,
             textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
-        stabilization_delay_spinbox.grid(row=1, column=1, padx=4, pady=(10, 20), sticky=W)
+        stabilization_delay_spinbox.grid(row=1, column=1, padx=4, sticky='W')
         setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
@@ -3535,7 +3554,7 @@ def build_ui():
         hdr_row += 1
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
             textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
