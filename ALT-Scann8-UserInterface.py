@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.40"
+__version__ = "1.8.41"
 __date__ = "2024-01-26"
-__version_highlight__ = "HDR - Merge in place - Working (but slow)"
+__version_highlight__ = "UI - Widget alignment"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3057,7 +3057,7 @@ def build_ui():
     bottom_area_row = 0
     AdvanceMovie_btn = Button(top_left_area_frame, text="Movie Forward", width=12, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='W')
+    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='NSEW')
     setup_tooltip(AdvanceMovie_btn, "Advance film (can be used with real-time view enabled).")
     bottom_area_row += 1
     # Once first button created, get default colors, to revert when we change them
@@ -3076,111 +3076,111 @@ def build_ui():
     Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), width=3, height=2, command=rewind_movie,
+    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='W')
+    Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
+    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='E')
+    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(FastForward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
     bottom_area_row += 1
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(top_left_area_frame, text="Negative image", width=12, height=3, command=switch_negative_capture,
+    PosNeg_btn = Button(top_left_area_frame, text="Negative image", height=3, command=switch_negative_capture,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='W')
+    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(PosNeg_btn, "Enable negative film capture (untested with real negative film).")
     bottom_area_row += 1
 
     if ExperimentalMode:
         # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
-        hq_btn = Button(top_left_area_frame, text="HQ On", width=12, height=3, command=switch_hq_capture,
+        hq_btn = Button(top_left_area_frame, text="HQ On", height=3, command=switch_hq_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        hq_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        hq_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='NSEW')
         setup_tooltip(hq_btn, "Enable HQ film capture (using Pi HQ camera full resolution (4056, 3040).")
         bottom_area_row += 1
 
         # Switch VideoCaptureActive mode on/off (Capture video Configuration)
-        turbo_btn = Button(top_left_area_frame, text="Turbo On", width=12, height=3, command=switch_turbo_capture,
+        turbo_btn = Button(top_left_area_frame, text="Turbo On", height=3, command=switch_turbo_capture,
                             activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        #turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+        #turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='NSEW')
         turbo_btn.forget()
         setup_tooltip(turbo_btn, "Enable turbo film capture using video capture of HQ Pi Camera (untested prototype).")
         bottom_area_row += 1
 
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", width=12, height=3, command=PiCamera2_preview,
+    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", height=3, command=PiCamera2_preview,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='NSEW')
     setup_tooltip(PiCam2_preview_btn, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", width=12, height=3, command=set_focus_zoom,
+    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", height=3, command=set_focus_zoom,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     Focus_btn.config(state=DISABLED)
-    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky = 'W')
+    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, sticky='NSEW')
     setup_tooltip(Focus_btn, "Zoom in on the real-time film preview. Useful to focus the film.")
     bottom_area_row += 1
 
     # Focus zoom control (in out, up, down, left, right)
-    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
-    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4)
+    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', height=3, font=("Arial", FontSize-2))
+    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, ipady=2, sticky='NSEW')
     bottom_area_row += 1
 
     Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
-    Focus_btn_grid_frame.pack(side=LEFT)
+    Focus_btn_grid_frame.pack()
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
+    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=set_focus_plus,
                             activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_plus_btn.grid(row=0, column=2)
+    focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
     setup_tooltip(focus_plus_btn, "Increase zoom level.")
-    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
+    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=set_focus_minus,
                              activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_minus_btn.grid(row=0, column=0)
+    focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     setup_tooltip(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=set_focus_left,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_lf_btn.grid(row=1, column=0)
+    focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     setup_tooltip(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
+    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=set_focus_up,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_up_btn.grid(row=0, column=1)
+    focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     setup_tooltip(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=set_focus_down,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_dn_btn.grid(row=1, column=1)
+    focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     setup_tooltip(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=set_focus_right,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_rt_btn.grid(row=1, column=2)
+    focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     setup_tooltip(focus_rt_btn, "Move zoom view to the right.")
 
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
-    Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
+    Exit_btn = Button(top_right_area_frame, text="Exit", height=5, command=exit_app, activebackground='red',
                       activeforeground='white', font=("Arial", FontSize))
-    Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='W')
+    Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='EW')
     setup_tooltip(Exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
     if SimulatedRun:
-        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
+        Start_btn = Button(top_right_area_frame, text="START Scan", height=5, command=start_scan_simulated,
                            activebackground='#f0f0f0', font=("Arial", FontSize))
     else:
-        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
+        Start_btn = Button(top_right_area_frame, text="START Scan", height=5, command=start_scan,
                            activebackground='#f0f0f0', font=("Arial", FontSize))
-    Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3))
+    Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3), sticky='EW')
     setup_tooltip(Start_btn, "Start scanning process.")
     top_right_area_row += 1
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=50, height=8, font=("Arial", FontSize-2))
-    folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', height=8, font=("Arial", FontSize-2))
+    folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='EW')
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=50 if BigSize else 55, height=3, font=("Arial", FontSize-3),
                                     wraplength=200)
@@ -3199,8 +3199,8 @@ def build_ui():
     top_right_area_row += 1
 
     # Create frame to select target file type
-    file_type_frame = LabelFrame(top_right_area_frame, text='Target file type', width=50, height=8, font=("Arial", FontSize-2))
-    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
+    file_type_frame = LabelFrame(top_right_area_frame, text='Target file type', height=8, font=("Arial", FontSize-2))
+    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='EW')
     file_type = tk.StringVar()
     file_type_jpg_rb = Radiobutton(file_type_frame, text="JPG", variable=file_type, value="jpg", width=14, command=file_type_rb_selected, font=("Arial", FontSize))
     file_type_jpg_rb.pack(side=LEFT)
@@ -3212,8 +3212,8 @@ def build_ui():
     top_right_area_row += 1
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
-    scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
+    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', height=4, font=("Arial", FontSize-2))
+    scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='NSEW')
 
     Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
     Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str, font=("Arial", FontSize+6), width=5,
@@ -3236,8 +3236,8 @@ def build_ui():
     setup_tooltip(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
     # Create frame to display number of frames to go, and estimated time to finish
-    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
-    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NE')
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', height=4, font=("Arial", FontSize-2))
+    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NSEW')
     top_right_area_row += 1
 
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
@@ -3249,8 +3249,8 @@ def build_ui():
     time_to_go_time.pack(side=TOP, pady=6)
 
     # Create frame to select S8/R8 film
-    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
-    film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
+    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', height=1, font=("Arial", FontSize-2))
+    film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='NSEW')
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=6)
@@ -3265,8 +3265,8 @@ def build_ui():
     setup_tooltip(film_type_R8_btn, "Select Regular 8 film.")
 
     # Create frame to display RPi temperature
-    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize-2))
-    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4)
+    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize-2))
+    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NSEW')
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=10, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=4)
@@ -3282,9 +3282,9 @@ def build_ui():
 
     # Integrated plotter
     if PlotterMode:
-        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', width=8, height=5,
+        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', height=5,
                                               font=("Arial", FontSize - 1))
-        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='W')
+        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='NSEW')
         plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
                                 width=plotter_width, height=plotter_height)
         plotter_canvas.pack(side=TOP, anchor=N)
@@ -3296,12 +3296,12 @@ def build_ui():
         extended_frame.pack(side=TOP, anchor=W, padx=(15, 0))
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", FontSize-1))
-        expert_frame.pack(side=LEFT, padx=2, pady=2)
+        expert_frame.pack(side=LEFT, padx=2, pady=2, fill='both', expand=True)
 
         # Exposure / white balance
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
-                                    width=16, height=2, font=("Arial", FontSize-1))
-        exp_wb_frame.grid(row=0, column=0, padx=4, pady=4, sticky=N)
+                                    width=16, font=("Arial", FontSize-1))
+        exp_wb_frame.grid(row=0, column=0, padx=4, pady=4, sticky='NSEW')
 
         catch_up_delay_label = tk.Label(exp_wb_frame,
                                          text='Catch-up\ndelay',
@@ -3409,9 +3409,9 @@ def build_ui():
         film_hole_label_2.pack(side=TOP)
 
         # Frame to add frame align controls
-        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
+        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=16, sticky=N)
+        frame_alignment_frame.grid(row=0, column=2, padx=4, pady=4, sticky='NSEW')
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3449,7 +3449,7 @@ def build_ui():
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
-                                         width=10, font=("Arial", FontSize-1))
+                                         font=("Arial", FontSize-1))
         frame_fine_tune_label.grid(row=2, column=0, padx=2, pady=3, sticky=E)
         frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
         frame_fine_tune_selection_aux = frame_alignment_frame.register(
@@ -3464,7 +3464,7 @@ def build_ui():
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame,
                                          text='Extra Steps:',
-                                         width=10, font=("Arial", FontSize-1))
+                                         font=("Arial", FontSize-1))
         frame_extra_steps_label.grid(row=3, column=0, padx=2, pady=3, sticky=E)
         frame_extra_steps_str = tk.StringVar(value=str(FrameExtraSteps))
         frame_extra_steps_selection_aux = frame_alignment_frame.register(
@@ -3478,15 +3478,15 @@ def build_ui():
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
-        speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18, height=2,
+        speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18,
                                            font=("Arial", FontSize-1))
-        speed_quality_frame.grid(row=0, column=4, padx=4, pady=4, sticky=N)
+        speed_quality_frame.grid(row=0, column=3, padx=4, pady=4, sticky='NSEW')
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame,
                                          text='Speed:',
-                                         width=12, font=("Arial", FontSize-1))
-        scan_speed_label.grid(row=0, column=0, padx=4, pady=(20, 10), sticky=W)
+                                         font=("Arial", FontSize-1))
+        scan_speed_label.grid(row=0, column=0, padx=3, pady=(20, 10), sticky=E)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
         scan_speed_selection_aux = speed_quality_frame.register(
             scan_speed_selection)
@@ -3502,8 +3502,8 @@ def build_ui():
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
                                          text='Delay (ms):',
-                                         width=12, font=("Arial", FontSize-1))
-        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=(10, 20), sticky=W)
+                                         font=("Arial", FontSize-1))
+        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=(10, 20), sticky=E)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
@@ -3516,26 +3516,26 @@ def build_ui():
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
-        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
+        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18,
                                            font=("Arial", FontSize-1))
-        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=7, sticky=N)
+        hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky='NSEW')
         hdr_row = 0
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
-        hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1, width=6,
+        hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1,
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_capture, font=("Arial", FontSize-1))
-        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1)
+        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
-        hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, width=7,
+        hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1,
                                                      variable=hdr_viewx4_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_viewx4, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
         hdr_row += 1
 
-        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
+        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
             textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
@@ -3544,7 +3544,7 @@ def build_ui():
         hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
         hdr_row +=1
 
-        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
         hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
@@ -3554,7 +3554,7 @@ def build_ui():
         hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
         hdr_row += 1
 
-        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
@@ -3564,7 +3564,7 @@ def build_ui():
         hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
         hdr_row += 1
 
-        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_shift_str = tk.StringVar(value=str(hdr_bracket_shift))
         hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
@@ -3575,15 +3575,15 @@ def build_ui():
         hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
-        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', width=12, height=1,
+        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
-        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
         hdr_row += 1
 
         hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
-        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', width=12, height=1,
+        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', height=1,
                                               variable=hdr_merge_in_place, onvalue=True, offvalue=False,
                                               command=adjust_merge_in_place, font=("Arial", FontSize-1))
         hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
@@ -3591,13 +3591,13 @@ def build_ui():
 
         if ExperimentalMode:
             experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, anchor=N)
+            experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, anchor=N, fill='both', expand=True)
 
             # Sharpness, control to allow playing with the values and see the results
             sharpness_control_label = tk.Label(experimental_frame,
                                                  text='Sharpness:',
-                                                 width=20, font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=W)
+                                                 font=("Arial", FontSize-1))
+            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
             sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
             sharpness_control_selection_aux = experimental_frame.register(
                 sharpness_control_selection)
@@ -3613,7 +3613,7 @@ def build_ui():
             # Display entry to throttle Rwnd/FF speed
             rwnd_speed_control_label = tk.Label(experimental_frame,
                                                  text='RW/FF speed rpm):',
-                                                 width=20, font=("Arial", FontSize-1))
+                                                 font=("Arial", FontSize-1))
             rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
             rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
 
