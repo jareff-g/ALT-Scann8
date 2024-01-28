@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.35"
+__version__ = "1.8.40"
 __date__ = "2024-01-26"
-__version_highlight__ = "HDR - Merge in place"
+__version_highlight__ = "HDR - Merge in place - Working (but slow)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1662,6 +1662,7 @@ def capture_hdr():
     global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
     global HdrBracketAuto, hdr_bracket_shift
+    global MergeMertens
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -1719,17 +1720,23 @@ def capture_hdr():
         perform_dry_run = True
         # For PiCamera2, preview and save to file are handled in asynchronous threads
         if HdrMergeInPlace:
-            images_to_merge.append(captured_snapshot)  # Add frame
+            # Convert Pillow image to NumPy array
+            img_np = np.array(captured_snapshot)
+            # Convert the NumPy array to a format suitable for MergeMertens (e.g., float32)
+            img_np_float32 = img_np.astype(np.float32)
+            images_to_merge.append(img_np_float32)  # Add frame
         else:
             queue_item = tuple((captured_snapshot, CurrentFrame, idx))
             capture_display_queue.put(queue_item)
             capture_save_queue.put(queue_item)
         idx += idx_inc
     if HdrMergeInPlace:
+        # Perform merge of the HDR image list
         img = MergeMertens.process(images_to_merge)
-        img = img - img.min()  # Now between 0 and 8674
-        img = img / img.max() * 255
-        img = np.uint8(img)
+        # Convert the result back to PIL
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        img = Image.fromarray(img)
+        # Add processed item to the queue to be saved and previewed
         queue_item = tuple((img, CurrentFrame, 0))
         capture_display_queue.put(queue_item)
         capture_save_queue.put(queue_item)
@@ -2830,6 +2837,7 @@ def tscann8_init():
     global capture_save_queue, capture_save_event
     global ForceSmallSize, ForceBigSize, FontSize, BigSize
     global plotter_width, plotter_height
+    global MergeMertens
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
