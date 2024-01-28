@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.42"
+__version__ = "1.8.43"
 __date__ = "2024-01-28"
 __version_highlight__ = "UI - Widget alignment (bugfixes)"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2479,7 +2479,7 @@ def load_config_data():
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
     global MatchWaitMargin, match_wait_margin_str
-    global SharpnessValue
+    global SharpnessValue, sharpness_control_spinbox
     global CaptureStabilizationDelay, stabilization_delay_str
 
     for item in SessionData:
@@ -2599,7 +2599,7 @@ def load_session_data():
             if 'HdrCaptureActive' in SessionData:
                 HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
                 hdr_set_controls()
-                if HdrCaptureActive and ExpertMode:
+                if HdrCaptureActive:
                     max_inactivity_delay = max_inactivity_delay * 2
                     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
                     logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
@@ -2925,7 +2925,7 @@ def tscann8_init():
         app_width = PreviewWidth + 420
         app_height = PreviewHeight + 50
         plotter_height -= 55
-    if ExpertMode:
+    if ExpertMode or ExperimentalMode:
         app_height += 210 if BigSize else 170
     # Prevent window resize
     win.minsize(app_width, app_height)
@@ -3608,83 +3608,82 @@ def build_ui():
         hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
-        if ExperimentalMode:
-            experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, anchor=N, fill='both', expand=True)
+    if ExperimentalMode:
+        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
+        experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, fill='both', expand=True)
 
-            # Sharpness, control to allow playing with the values and see the results
-            sharpness_control_label = tk.Label(experimental_frame,
-                                                 text='Sharpness:',
-                                                 font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
-            sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
-            sharpness_control_selection_aux = experimental_frame.register(
-                sharpness_control_selection)
-            sharpness_control_spinbox = tk.Spinbox(
-                experimental_frame,
-                command=(sharpness_control_selection_aux, '%d'), width=8,
-                textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
-            sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
-            setup_tooltip(sharpness_control_spinbox,
-                          "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
-            sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
+        # Sharpness, control to allow playing with the values and see the results
+        sharpness_control_label = tk.Label(experimental_frame,
+                                             text='Sharpness:',
+                                             font=("Arial", FontSize-1))
+        sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
+        sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
+        sharpness_control_selection_aux = experimental_frame.register(
+            sharpness_control_selection)
+        sharpness_control_spinbox = tk.Spinbox(
+            experimental_frame,
+            command=(sharpness_control_selection_aux, '%d'), width=8,
+            textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
+        sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
+        setup_tooltip(sharpness_control_spinbox,
+                      "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
+        sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
+        # Display entry to throttle Rwnd/FF speed
+        rwnd_speed_control_label = tk.Label(experimental_frame,
+                                             text='RW/FF speed rpm):',
+                                             font=("Arial", FontSize-1))
+        rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
+        rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
 
-            # Display entry to throttle Rwnd/FF speed
-            rwnd_speed_control_label = tk.Label(experimental_frame,
-                                                 text='RW/FF speed rpm):',
-                                                 font=("Arial", FontSize-1))
-            rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
-            rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
+        rwnd_speed_control_selection_aux = experimental_frame.register(
+            rwnd_speed_control_selection)
+        rwnd_speed_control_spinbox = tk.Spinbox(
+            experimental_frame, state='readonly',
+            command=(rwnd_speed_control_selection_aux, '%d'), width=8,
+            textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
+        rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
+        setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
 
-            rwnd_speed_control_selection_aux = experimental_frame.register(
-                rwnd_speed_control_selection)
-            rwnd_speed_control_spinbox = tk.Spinbox(
-                experimental_frame, state='readonly',
-                command=(rwnd_speed_control_selection_aux, '%d'), width=8,
-                textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
-            rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
-            setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
+        # Damaged film helpers, to help handling damaged film (broken perforations)
+        Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
+        Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
+        # Checkbox to enable/disable manual scan
+        Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
+        Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
+                                               variable=Manual_scan_activated, onvalue=True,
+                                               offvalue=False,
+                                               command=Manual_scan_activated_selection, font=("Arial", FontSize-1))
+        Manual_scan_checkbox.pack(side=TOP)
+        setup_tooltip(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
+        # Common area for buttons
+        Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
+        Manual_scan_btn_frame.pack(side=TOP)
 
-            # Damaged film helpers, to help handling damaged film (broken perforations)
-            Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
-            Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
-            # Checkbox to enable/disable manual scan
-            Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
-            Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
-                                                   variable=Manual_scan_activated, onvalue=True,
-                                                   offvalue=False,
-                                                   command=Manual_scan_activated_selection, font=("Arial", FontSize-1))
-            Manual_scan_checkbox.pack(side=TOP)
-            setup_tooltip(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
-            # Common area for buttons
-            Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
-            Manual_scan_btn_frame.pack(side=TOP)
+        # Manual scan buttons
+        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
+                                state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
+        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
+                                state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
+        manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
+                                 state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
 
-            # Manual scan buttons
-            manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
-                                    state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
-            manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
-                                    state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
-            manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
-                                     state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
+        # Retreat movie button (slow backward through filmgate)
+        RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
+                                  activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+        RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
+        setup_tooltip(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
 
-            # Retreat movie button (slow backward through filmgate)
-            RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
-                                      activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
-            RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
-            setup_tooltip(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
-
-            # Unlock reels button (to load film, rewind, etc.)
-            Free_btn = Button(experimental_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
-                              activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
-            Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
-            setup_tooltip(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
+        # Unlock reels button (to load film, rewind, etc.)
+        Free_btn = Button(experimental_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
+                          activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+        Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
+        setup_tooltip(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
 
 
 
