@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.2"
-#define  __date__       "2024-01-26"
-#define  __version_highlight__  "Add mandatory margin of 20% to auto PT level"
+#define __version__     "1.0.3"
+#define  __date__       "2024-01-29"
+#define  __version_highlight__  "Fix slow forward autostop"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -433,6 +433,8 @@ void loop() {
                         FilmDetectedTime = millis();
                         NoFilmDetected = false;
                         collect_timer = 10;
+                        analogWrite(11, UVLedBrightness); // Turn on UV LED
+                        UVLedOn = true;
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         delay(50);
@@ -574,11 +576,15 @@ void loop() {
             case Sts_SlowForward:
                 if (UI_Command == CMD_FILM_FORWARD) { // Stop slow forward
                     delay(50);
+                    analogWrite(11, 0); // Turn off UV LED
+                    UVLedOn = false;
                     ScanState = Sts_Idle;
                     SetReelsAsNeutral(HIGH, HIGH, HIGH);
                 }
                 else {
                     if (!SlowForward()) {
+                        analogWrite(11, 0); // Turn off UV LED
+                        UVLedOn = false;
                         ScanState = Sts_Idle;
                         SetReelsAsNeutral(HIGH, HIGH, HIGH);
                     }
