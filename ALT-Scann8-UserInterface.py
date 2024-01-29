@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.43"
+__version__ = "1.8.44"
 __date__ = "2024-01-28"
-__version_highlight__ = "UI - Widget alignment (bugfixes)"
+__version_highlight__ = "UI - Add threshold level to integrated plotter"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -223,6 +223,7 @@ plotter_canvas = None
 plotter_width=240
 plotter_height=180
 PrevPTValue = 0
+PrevThresholdLevel = 0
 MaxPT = 100
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
@@ -1418,6 +1419,7 @@ def hdr_set_controls():
     global hdr_capture_active
     global hdr_bracket_width_label, hdr_bracket_shift_label, hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
+    global hdr_merge_in_place_checkbox
 
     if not ExpertMode:
         return
@@ -1431,6 +1433,8 @@ def hdr_set_controls():
     hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_merge_in_place_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+
 
 def switch_hdr_capture():
     global CurrentExposure
@@ -2321,9 +2325,9 @@ def file_type_rb_selected():
 
 
 
-def UpdatePlotterWindow(PTValue):
+def UpdatePlotterWindow(PTValue, ThresholdLevel):
     global plotter_canvas
-    global MaxPT, PrevPTValue
+    global MaxPT, PrevPTValue, PrevThresholdLevel
     global plotter_width, plotter_height
 
     if plotter_canvas == None:
@@ -2343,10 +2347,13 @@ def UpdatePlotterWindow(PTValue):
     for item in plotter_canvas.find_overlapping(-10,0,0, usable_height):
         plotter_canvas.delete(item)
 
-    # Draw the new line segment
+    # Draw the new line segment for PT Level
     plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevPTValue/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(PTValue/(MaxPT/usable_height)), width=1, fill="blue")
+    # Draw the new line segment for threshold
+    plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevThresholdLevel/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(ThresholdLevel/(MaxPT/usable_height)), width=1, fill="red")
 
     PrevPTValue = PTValue
+    PrevThresholdLevel = ThresholdLevel
     if MaxPT > 100:  # Do not allow below 100
         MaxPT-=1 # Dynamic max
 
@@ -2446,7 +2453,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
         if PlotterMode:
-            UpdatePlotterWindow(ArduinoParam1)
+            UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
         advance_movie(True)
@@ -3046,7 +3053,7 @@ def build_ui():
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
-    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox
+    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
     global file_type
