@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.3"
+#define __version__     "1.0.4"
 #define  __date__       "2024-01-29"
-#define  __version_highlight__  "Fix slow forward autostop"
+#define  __version_highlight__  "Report threshold level when reporting PT Level"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -760,7 +760,7 @@ void ReportPlotterInfo() {
             Previous_PT_Signal = PT_SignalLevelRead;
             PreviousFrameSteps = LastFrameSteps;
             if (IntegratedPlotter)  // Plotter info to ALT-Scann 8 Integrated plotter
-                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, 0);
+                SendToRPi(RSP_REPORT_PLOTTER_INFO, PT_SignalLevelRead, PerforationThresholdLevel);
         }
     }
 }
