@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.44"
+__version__ = "1.8.45"
 __date__ = "2024-01-28"
 __version_highlight__ = "UI - Add threshold level to integrated plotter"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2350,8 +2350,10 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
     # Draw the new line segment for PT Level
     plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevPTValue/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(PTValue/(MaxPT/usable_height)), width=1, fill="blue")
     # Draw the new line segment for threshold
+    if (ThresholdLevel > MaxPT):
+        logging.debug(f"ThresholdLevel value is wrong ({ThresholdLevel}), replacing by previous ({PrevThresholdLevel})")
+        ThresholdLevel = PrevThresholdLevel     # Swap by previous if bigger than MaxPT, sometimes I2C losses second parameter, no idea why
     plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevThresholdLevel/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(ThresholdLevel/(MaxPT/usable_height)), width=1, fill="red")
-
     PrevPTValue = PTValue
     PrevThresholdLevel = ThresholdLevel
     if MaxPT > 100:  # Do not allow below 100
@@ -2396,7 +2398,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
-            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
+            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]   # Sometimes this part arrives as 255, 255, no idea why
         except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
