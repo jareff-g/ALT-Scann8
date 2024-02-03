@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.45"
-__date__ = "2024-01-28"
-__version_highlight__ = "UI - Add threshold level to integrated plotter"
+__version__ = "1.8.46"
+__date__ = "2024-02-03"
+__version_highlight__ = "Allow negative Extra Steps (-30-+30)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3500,7 +3500,7 @@ def build_ui():
         frame_extra_steps_spinbox = tk.Spinbox(
             frame_alignment_frame,
             command=(frame_extra_steps_selection_aux, '%d'), width=8,
-            textvariable=frame_extra_steps_str, from_=0, to=20, font=("Arial", FontSize-1))
+            textvariable=frame_extra_steps_str, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
