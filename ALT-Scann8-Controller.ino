@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.4"
-#define  __date__       "2024-01-29"
-#define  __version_highlight__  "Report threshold level when reporting PT Level"
+#define __version__     "1.0.5"
+#define  __date__       "2024-02-03"
+#define  __version_highlight__  "Allow negative FrameExtraSteps: Deducted from MinFrameSteps on the fly"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -149,6 +149,7 @@ int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NE
 int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
+int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
 int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
@@ -334,6 +335,8 @@ void loop() {
                 DebugPrint(">BoostPT", param);
                 if (param >= 1 && param <= 20)  // Also to move up we add extra steps
                     FrameExtraSteps = param;
+                else if (param >= -30 && param <= -1)  // Manually force reduction of MinFrameSteps
+                    FrameDeductSteps = param;
                 break;
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
@@ -402,7 +405,7 @@ void loop() {
                         // Also send, if required, to RPi autocalculated threshold level every frame
                         // Alternate reports for each value, otherwise I2C has I/O errors
                         if (PT_Level_Auto || Frame_Steps_Auto)
-                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps);
+                            SendToRPi(RSP_REPORT_AUTO_LEVELS, PerforationThresholdLevel, MinFrameSteps+FrameDeductSteps);
                         break;
                     case CMD_SET_REGULAR_8:  // Select R8 film
                         DebugPrintStr(">R8");
@@ -867,7 +870,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
