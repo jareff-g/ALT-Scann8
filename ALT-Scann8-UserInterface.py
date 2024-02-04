@@ -33,7 +33,7 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
-from tkinter import Label, Button, Frame, LabelFrame, Canvas, Radiobutton, OptionMenu
+from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
 
 from PIL import ImageTk, Image
 
@@ -2476,11 +2476,6 @@ def arrange_widget_state(auto_state, widget_list):
                 widget.select()
             else:
                 widget.deselect()
-        elif isinstance(widget, tk.Radiobutton):
-            if auto_state:
-                widget.select()
-            else:
-                widget.deselect()
 
 
 def load_session_data():
@@ -2713,8 +2708,6 @@ def PiCam2_configure():
     global CurrentExposure, CurrentAwbAuto, SharpnessValue
 
     camera.stop()
-    full_res = camera.sensor_resolution
-    half_res = tuple([dim // 2 for dim in camera.sensor_resolution])
     target_res = resolution_dropdown_selected.get()
     target_res_list = target_res.split('x')
     target_res_tuple = tuple(map(int, target_res_list))
