@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.47"
+__version__ = "1.8.48"
 __date__ = "2024-02-04"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2716,13 +2716,16 @@ def PiCam2_configure():
     full_res = camera.sensor_resolution
     half_res = tuple([dim // 2 for dim in camera.sensor_resolution])
     target_res = resolution_dropdown_selected.get()
-    print(f"*** target_res: {target_res}")
     target_res_list = target_res.split('x')
     target_res_tuple = tuple(map(int, target_res_list))
-    print(f"*** target_res: {target_res_tuple}")
-    capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
-                                   raw={"size": target_res_tuple},
-                                   transform=Transform(hflip=True))
+    if target_res == "1332x990":
+        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
+                                                           raw={"size": target_res_tuple, "format": "SRGGB10_CSI2P"},
+                                                           transform=Transform(hflip=True))
+    else:
+        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
+                                       raw={"size": target_res_tuple},
+                                       transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
@@ -2886,6 +2889,7 @@ def tscann8_init():
         PreviewWinX = 250
         PreviewWinY = 150
         camera = Picamera2()
+        logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
         PiCam2_configure()
         ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
@@ -3138,7 +3142,10 @@ def build_ui():
     # Capture resolution Dropdown
     # Drop down to select capture resolution
     # Dropdown menu options
-    resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480", "320x240"]
+    if ExperimentalMode:
+        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480"]
+    else:
+        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1024x768", "640x480"]
     resolution_dropdown_selected = tk.StringVar()
     resolution_dropdown_selected.set(resolution_list[1])  # Set the initial value
     resolution_label = Label(file_type_frame, text='Resolution:', font=("Arial", FontSize))
@@ -3149,7 +3156,10 @@ def build_ui():
     resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
     resolution_dropdown.pack(side=LEFT)
     # resolution_dropdown.config(state=DISABLED)
-    setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames")
+    if ExperimentalMode:
+        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames. 1332x990 uses the 120 FPS mode of RPi HQ camera, allowing faster speeds (but requires readjusting the lens)")
+    else:
+        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames")
 
     # File format (JPG or PNG)
     # Drop down to select file type
