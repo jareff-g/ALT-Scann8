@@ -1666,9 +1666,7 @@ def capture_hdr():
         if perform_dry_run:
             for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
                 camera.capture_image("main")
-                win.update()
         captured_snapshot = camera.capture_image("main")
-        win.update()
         # We skip dry run only for the first capture of each frame,
         # as it is the same exposure as the last capture of the previous one
         perform_dry_run = True
@@ -1738,7 +1736,6 @@ def adjust_hdr_bracket():
         camera.set_controls({"ExposureTime": 0})    # Set automatic exposure, 7 shots allowed to catch up
         for i in range(1, dry_run_iterations * 2):
             camera.capture_image("main")
-            win.update()
 
         # Since we are in auto exposure mode, retrieve current value to start from there
         metadata = camera.capture_metadata()
@@ -1803,7 +1800,6 @@ def capture(mode):
                     logging.debug("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
-                win.update()
                 time.sleep(0.2)
                 if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
                     break;
@@ -1835,7 +1831,6 @@ def capture(mode):
                     colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
-                win.update()
                 time.sleep(0.2)
                 if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
                     break;
@@ -2026,7 +2021,6 @@ def capture_loop_simulated():
         else:
             FramesPerMinute = FPM_CalculatedValue
             Scanned_Images_Fpm_str.set(f"Frames/Min: {FramesPerMinute}")
-        win.update()
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(500, capture_loop_simulated)
@@ -2198,7 +2192,6 @@ def capture_loop():
             else:
                 FramesPerMinute = FPM_CalculatedValue
                 Scanned_Images_Fpm_str.set(f"Frames/Min: {FPM_CalculatedValue}")
-            win.update()
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
                 if ScanOngoing:
@@ -2244,7 +2237,6 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
             rounded_temp = round(RPiTemp, 1)
             temp_str = str(rounded_temp) + 'º'
         RPi_temp_value_label.config(text=str(temp_str))
-        win.update()
         last_temp = RPiTemp
         LastTempInFahrenheit = TempInFahrenheit
 
@@ -3026,12 +3018,12 @@ def build_ui():
     Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), height=2, command=rewind_movie,
+    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+3), height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), height=2, command=fast_forward_movie,
+    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+3), height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(FastForward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
