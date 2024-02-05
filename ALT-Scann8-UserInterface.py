@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.40"
-__date__ = "2024-01-26"
-__version_highlight__ = "HDR - Merge in place - Working (but slow)"
+__version__ = "1.9.0"
+__date__ = "2024-02-05"
+__version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -33,7 +33,7 @@ from tkinter import filedialog
 import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
-from tkinter import Label, Button, Frame, LabelFrame, Canvas, Radiobutton
+from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
 
 from PIL import ImageTk, Image
 
@@ -92,7 +92,6 @@ CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
 NegativeCaptureActive = False
 HdrCaptureActive = False
-HqCaptureActive = False
 AdvanceMovieActive = False
 RetreatMovieActive = False
 RewindMovieActive = False  # SpolaState in original code from Torulf
@@ -111,9 +110,14 @@ ScriptDir = os.path.dirname(
     sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
+# Variables to deal with remaining disk space
+available_space_mb = 0
+disk_space_error_to_notify = False
+
 ArduinoTrigger = 0
 last_frame_time = 0
-max_inactivity_delay = 6    # Max time (in sec) we wait for next frame. If expired, we force next frame again
+reference_inactivity_delay = 6    # Max time (in sec) we wait for next frame. If expired, we force next frame again
+max_inactivity_delay = reference_inactivity_delay
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
@@ -219,6 +223,7 @@ plotter_canvas = None
 plotter_width=240
 plotter_height=180
 PrevPTValue = 0
+PrevThresholdLevel = 0
 MaxPT = 100
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
@@ -253,7 +258,6 @@ ALT_Scann8_controller_detected = False
 FPM_LastMinuteFrameTimes = list()
 FPM_StartTime = time.ctime()
 FPM_CalculatedValue = -1
-VideoCaptureActive = False
 
 # *** HDR variables
 MergeMertens = None
@@ -290,7 +294,6 @@ SessionData = {
     "CurrentExposure": str(CurrentExposure),
     "NegativeCaptureActive": str(NegativeCaptureActive),
     "HdrCaptureActive": str(HdrCaptureActive),
-    "HqCaptureActive": str(HqCaptureActive),
     "FilmType": 'S8',
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8":  260,
@@ -325,6 +328,8 @@ def exit_app():  # Exit Application
             if PiCam2PreviewEnabled:
                 camera.stop_preview()
             camera.close()
+    # Set window position for next run
+    SessionData["WindowPos"] = win.geometry()
     # Write session data upon exit
     with open(PersistedDataFilename, 'w') as f:
         json.dump(SessionData, f)
@@ -1039,10 +1044,9 @@ def button_status_change_except(except_button, active):
     global Rewind_btn, FastForward_btn, Start_btn
     global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
     global film_type_S8_btn, film_type_R8_btn
-    global PiCam2_preview_btn, hdr_btn, hq_btn, turbo_btn
+    global PiCam2_preview_btn, hdr_btn
     global button_lock_counter
     global hdr_capture_active_checkbox
-    global file_type_jpg_rb, file_type_png_rb
 
     if active:
         button_lock_counter += 1
@@ -1070,10 +1074,14 @@ def button_status_change_except(except_button, active):
         film_type_S8_btn.config(state=DISABLED if active else NORMAL)
     if except_button != film_type_R8_btn:
         film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+    '''
     if except_button != file_type_jpg_rb:
         file_type_jpg_rb.config(state=DISABLED if active else NORMAL)
     if except_button != file_type_png_rb:
         file_type_png_rb.config(state=DISABLED if active else NORMAL)
+    '''
+    if except_button != file_type_dropdown:
+        file_type_dropdown.config(state=DISABLED if active else NORMAL)
     if ExpertMode:
         hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
     if ExperimentalMode:
@@ -1081,10 +1089,6 @@ def button_status_change_except(except_button, active):
             RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
         if except_button != Free_btn:
             Free_btn.config(state=DISABLED if active else NORMAL)
-        if except_button != hq_btn:
-            hq_btn.config(state=DISABLED if active else NORMAL)
-        if except_button != turbo_btn:
-            turbo_btn.config(state=DISABLED if active else NORMAL)
 
     if except_button != PiCam2_preview_btn:
         PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
@@ -1289,7 +1293,6 @@ def capture_save_thread(queue, event, id):
     global CurrentDir
     global message
     global ScanStopRequested
-    global file_type
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1311,9 +1314,9 @@ def capture_save_thread(queue, event, id):
             message[0] = Image.fromarray(image_array)
         if message[2] > 1:  # Hdr frame 1 has standard filename
             logging.debug("Saving HDR frame n.%i", message[2])
-            message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type.get()), quality=95)
+            message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type_dropdown_selected.get()), quality=95)
         else:
-            message[0].save(FrameFilenamePattern % (message[1], file_type.get()), quality=95)
+            message[0].save(FrameFilenamePattern % (message[1], file_type_dropdown_selected.get()), quality=95)
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1395,7 +1398,7 @@ def update_rpi_temp():
         RPiTemp = 64.5
 
 def disk_space_available():
-    global CurrentDir
+    global CurrentDir, available_space_mb, disk_space_error_to_notify
 
     if not check_disk_space:
         return True
@@ -1404,6 +1407,7 @@ def disk_space_available():
 
     if available_space_mb < 500:
         logging.debug(f"Disk space running out, only {available_space_mb} MB available")
+        disk_space_error_to_notify = True
         return False
     else:
         return True
@@ -1413,6 +1417,7 @@ def hdr_set_controls():
     global hdr_capture_active
     global hdr_bracket_width_label, hdr_bracket_shift_label, hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
+    global hdr_merge_in_place_checkbox
 
     if not ExpertMode:
         return
@@ -1426,6 +1431,8 @@ def hdr_set_controls():
     hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    hdr_merge_in_place_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+
 
 def switch_hdr_capture():
     global CurrentExposure
@@ -1467,46 +1474,6 @@ def switch_hdr_viewx4():
     global HdrViewX4Active, hdr_viewx4_active
     HdrViewX4Active = hdr_viewx4_active.get()
     SessionData["HdrViewX4Active"] = str(HdrViewX4Active)
-
-
-
-# Capture with sensor at 4056x3040
-# Frames delivered still at 2028x1520, but better quality
-def switch_hq_capture():
-    global HqCaptureActive
-    global hq_btn, max_inactivity_delay
-
-    HqCaptureActive = not HqCaptureActive
-    if HqCaptureActive:
-        max_inactivity_delay = max_inactivity_delay * 2
-    else:
-        max_inactivity_delay = int(max_inactivity_delay / 2)
-    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
-    logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-
-    if not CameraDisabled:
-        PiCam2_configure()
-    SessionData["HqCaptureActive"] = str(HqCaptureActive)
-    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
-                   relief=SUNKEN if HqCaptureActive else RAISED,
-                   bg='red' if HqCaptureActive else save_bg,
-                   fg='white' if HqCaptureActive else save_fg)
-
-
-# Capture using Video configuration
-# Faster than still
-def switch_turbo_capture():
-    global VideoCaptureActive
-    global turbo_btn
-
-    VideoCaptureActive = not VideoCaptureActive
-    if not CameraDisabled:
-        PiCam2_configure()
-    SessionData["VideoCaptureActive"] = str(VideoCaptureActive)
-    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
-                   relief=SUNKEN if VideoCaptureActive else RAISED,
-                   bg='red' if VideoCaptureActive else save_bg,
-                   fg='white' if VideoCaptureActive else save_fg)
 
 
 def switch_negative_capture():
@@ -1659,7 +1626,7 @@ def register_frame():
 def capture_hdr():
     global CurrentFrame
     global capture_display_queue, capture_save_queue
-    global camera, hdr_exp_list, hdr_rev_exp_list, VideoCaptureActive
+    global camera, hdr_exp_list, hdr_rev_exp_list
     global recalculate_hdr_exp_list, dry_run_iterations
     global HdrBracketAuto, hdr_bracket_shift
     global MergeMertens
@@ -1696,25 +1663,10 @@ def capture_hdr():
             camera.set_controls({"ExposureTime": int(exp*1000)})
         else:
             time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image only if no dry run
-        # Depending on results, maybe set as well fps: {"FrameDurationLimits": (40000, 40000)}
-        if VideoCaptureActive:
-            if perform_dry_run:
-                for i in range(1, dry_run_iterations):
-                    camera.capture_request()
-                    win.update()
-            request = camera.capture_request()
-            win.update()
-            img = request.make_image("main")
-            img = img.convert('RGB')
-            captured_snapshot = img.copy()
-            request.release()
-        else:
-            if perform_dry_run:
-                for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
-                    camera.capture_image("main")
-                    win.update()
-            captured_snapshot = camera.capture_image("main")
-            win.update()
+        if perform_dry_run:
+            for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
+                camera.capture_image("main")
+        captured_snapshot = camera.capture_image("main")
         # We skip dry run only for the first capture of each frame,
         # as it is the same exposure as the last capture of the previous one
         perform_dry_run = True
@@ -1766,7 +1718,7 @@ def adjust_merge_in_place():
 
 
 def adjust_hdr_bracket():
-    global camera, VideoCaptureActive, HdrCaptureActive
+    global camera, HdrCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
     global hdr_min_exp, hdr_max_exp, hdr_best_exp, hdr_bracket_width
     global hdr_min_exp_str, hdr_max_exp_str
@@ -1782,14 +1734,8 @@ def adjust_hdr_bracket():
         aux_current_exposure = 20
     else:
         camera.set_controls({"ExposureTime": 0})    # Set automatic exposure, 7 shots allowed to catch up
-        if VideoCaptureActive:
-            for i in range(1, dry_run_iterations * 2):
-                camera.capture_request()
-                win.update()
-        else:
-            for i in range(1, dry_run_iterations * 2):
-                camera.capture_image("main")
-                win.update()
+        for i in range(1, dry_run_iterations * 2):
+            camera.capture_image("main")
 
         # Since we are in auto exposure mode, retrieve current value to start from there
         metadata = camera.capture_metadata()
@@ -1830,8 +1776,7 @@ def capture(mode):
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
     global capture_display_queue, capture_save_queue
-    global HdrCaptureActive, HqCaptureActive
-    global VideoCaptureActive
+    global HdrCaptureActive
 
     if SimulatedRun or CameraDisabled:
         return
@@ -1855,7 +1800,6 @@ def capture(mode):
                     logging.debug("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
-                win.update()
                 time.sleep(0.2)
                 if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
                     break;
@@ -1887,7 +1831,6 @@ def capture(mode):
                     colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
-                win.update()
                 time.sleep(0.2)
                 if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
                     break;
@@ -1917,14 +1860,7 @@ def capture(mode):
                     capture_hdr()
                 else:
                     #time.sleep(CaptureStabilizationDelay)  # Allow time to stabilize image, too fast with PiCamera2
-                    if VideoCaptureActive:
-                        request = camera.capture_request()
-                        img = request.make_image("main")
-                        img = img.convert('RGB')
-                        captured_snapshot = img.copy()
-                        request.release()
-                    else:
-                        captured_snapshot = camera.capture_image("main")
+                    captured_snapshot = camera.capture_image("main")
                     # For PiCamera2, preview and save to file are handled in asynchronous threads
                     queue_item = tuple((captured_snapshot, CurrentFrame, 0))
                     capture_display_queue.put(queue_item)
@@ -2018,6 +1954,7 @@ def capture_loop_simulated():
     global session_frames
     global SessionData
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global disk_space_error_to_notify
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -2037,6 +1974,10 @@ def capture_loop_simulated():
             logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
+        if disk_space_error_to_notify:
+            tk.messagebox.showwarning("Disk space low",
+                                      f"Running out of disk space, only {int(available_space_mb)} MB remain. Please delete some files before continuing current scan.")
+            disk_space_error_to_notify = False
     if ScanOngoing:
         os.chdir(CurrentDir)
         frame_to_display = CurrentFrame % simulated_images_in_list
@@ -2080,10 +2021,14 @@ def capture_loop_simulated():
         else:
             FramesPerMinute = FPM_CalculatedValue
             Scanned_Images_Fpm_str.set(f"Frames/Min: {FramesPerMinute}")
-        win.update()
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(500, capture_loop_simulated)
+
+        if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
+            logging.error("No disk space available, stopping scan process.")
+            if ScanOngoing:
+                ScanStopRequested = True  # Stop in next capture loop
 
 
 def start_scan():
@@ -2170,6 +2115,7 @@ def capture_loop():
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
     global session_frames, CurrentStill
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global disk_space_error_to_notify
 
     if ScanStopRequested:
         stop_scan()
@@ -2189,6 +2135,9 @@ def capture_loop():
             logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_autoexp),1)),
                          round((total_wait_time_autoexp*1000/session_frames),1))
+        if disk_space_error_to_notify:
+            tk.messagebox.showwarning("Disk space low", f"Running out of disk space, only {int(available_space_mb)} MB remain. Please delete some files before continuing current scan.")
+            disk_space_error_to_notify = False
     elif ScanOngoing:
         if NewFrameAvailable:
             # Update remaining time
@@ -2243,7 +2192,6 @@ def capture_loop():
             else:
                 FramesPerMinute = FPM_CalculatedValue
                 Scanned_Images_Fpm_str.set(f"Frames/Min: {FPM_CalculatedValue}")
-            win.update()
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
                 if ScanOngoing:
@@ -2289,22 +2237,33 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
             rounded_temp = round(RPiTemp, 1)
             temp_str = str(rounded_temp) + 'º'
         RPi_temp_value_label.config(text=str(temp_str))
-        win.update()
         last_temp = RPiTemp
         LastTempInFahrenheit = TempInFahrenheit
 
     win.after(1000, temperature_loop)
 
 
-def file_type_rb_selected():
-    global file_type
-    SessionData["FileType"] = file_type.get()
+def set_file_type(event):
+    SessionData["FileType"] = file_type_dropdown_selected.get()
 
 
+def set_resolution(event):
+    global max_inactivity_delay
+    SessionData["CaptureResolution"] = resolution_dropdown_selected.get()
+    if resolution_dropdown_selected.get() == "4056x3040":
+        max_inactivity_delay = reference_inactivity_delay * 2
+    else:
+        max_inactivity_delay = reference_inactivity_delay
+    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+    logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
 
-def UpdatePlotterWindow(PTValue):
+    if not SimulatedRun and not CameraDisabled:
+        PiCam2_configure()
+
+
+def UpdatePlotterWindow(PTValue, ThresholdLevel):
     global plotter_canvas
-    global MaxPT, PrevPTValue
+    global MaxPT, PrevPTValue, PrevThresholdLevel
     global plotter_width, plotter_height
 
     if plotter_canvas == None:
@@ -2324,10 +2283,15 @@ def UpdatePlotterWindow(PTValue):
     for item in plotter_canvas.find_overlapping(-10,0,0, usable_height):
         plotter_canvas.delete(item)
 
-    # Draw the new line segment
+    # Draw the new line segment for PT Level
     plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevPTValue/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(PTValue/(MaxPT/usable_height)), width=1, fill="blue")
-
+    # Draw the new line segment for threshold
+    if (ThresholdLevel > MaxPT):
+        logging.debug(f"ThresholdLevel value is wrong ({ThresholdLevel}), replacing by previous ({PrevThresholdLevel})")
+        ThresholdLevel = PrevThresholdLevel     # Swap by previous if bigger than MaxPT, sometimes I2C losses second parameter, no idea why
+    plotter_canvas.create_line(plotter_width-6, 15+usable_height-(PrevThresholdLevel/(MaxPT/usable_height)), plotter_width-1, 15+usable_height-(ThresholdLevel/(MaxPT/usable_height)), width=1, fill="red")
     PrevPTValue = PTValue
+    PrevThresholdLevel = ThresholdLevel
     if MaxPT > 100:  # Do not allow below 100
         MaxPT-=1 # Dynamic max
 
@@ -2370,7 +2334,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
-            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]
+            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]   # Sometimes this part arrives as 255, 255, no idea why
         except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
@@ -2427,7 +2391,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
         if PlotterMode:
-            UpdatePlotterWindow(ArduinoParam1)
+            UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
         advance_movie(True)
@@ -2460,7 +2424,7 @@ def load_config_data():
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
     global MatchWaitMargin, match_wait_margin_str
-    global SharpnessValue
+    global SharpnessValue, sharpness_control_spinbox
     global CaptureStabilizationDelay, stabilization_delay_str
 
     for item in SessionData:
@@ -2506,21 +2470,16 @@ def arrange_widget_state(auto_state, widget_list):
                 widget.select()
             else:
                 widget.deselect()
-        elif isinstance(widget, tk.Radiobutton):
-            if auto_state:
-                widget.select()
-            else:
-                widget.deselect()
 
 
 def load_session_data():
     global SessionData
     global CurrentExposure, CurrentExposureStr, ExposureAdaptPause
-    global CurrentDir, file_type
+    global CurrentDir
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
     global NegativeCaptureActive, PosNeg_btn
-    global hq_btn, hdr_btn, turbo_btn
+    global hdr_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
@@ -2533,7 +2492,6 @@ def load_session_data():
     global ScanSpeed, scan_speed_str
     global exposure_str
     global wb_red_str, wb_blue_str
-    global HqCaptureActive
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
@@ -2573,49 +2531,57 @@ def load_session_data():
                     film_type_R8_btn.config(relief=RAISED)
                     film_type_S8_btn.config(relief=SUNKEN)
             if 'FileType' in SessionData:
-                file_type.set(SessionData["FileType"])
+                file_type_dropdown_selected.set(SessionData["FileType"])
+            if 'CaptureResolution' in SessionData:
+                resolution_dropdown_selected.set(SessionData["CaptureResolution"])
+                if resolution_dropdown_selected.get() =="4056x3040":
+                    max_inactivity_delay = reference_inactivity_delay * 2
+                else:
+                    max_inactivity_delay = reference_inactivity_delay
+                send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+                logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
+                if not SimulatedRun and not CameraDisabled:
+                    PiCam2_configure()
             if 'NegativeCaptureActive' in SessionData:
                 NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
                 PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
-            if 'HdrCaptureActive' in SessionData:
-                HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
-                hdr_set_controls()
-                if HdrCaptureActive and ExpertMode:
-                    max_inactivity_delay = max_inactivity_delay * 2
-                    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
-                    logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-                    hdr_capture_active_checkbox.select()
-            if 'HdrViewX4Active' in SessionData:
-                HdrViewX4Active = eval(SessionData["HdrViewX4Active"])
-                if HdrViewX4Active and ExpertMode:
-                    hdr_viewx4_active_checkbox.select()
-            if 'HdrMinExp' in SessionData:
-                hdr_min_exp = SessionData["HdrMinExp"]
-                if ExpertMode:
-                    hdr_min_exp_str.set(hdr_min_exp)
-            if 'HdrMaxExp' in SessionData:
-                hdr_max_exp = SessionData["HdrMaxExp"]
-                if ExpertMode:
-                    hdr_max_exp_str.set(hdr_max_exp)
             if ExperimentalMode:
-                if 'HqCaptureActive' in SessionData:
-                    HqCaptureActive = eval(SessionData["HqCaptureActive"])
-                    if HqCaptureActive:
-                        max_inactivity_delay = max_inactivity_delay * 2
+                if 'HdrCaptureActive' in SessionData:
+                    HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
+                    hdr_set_controls()
+                    if HdrCaptureActive:
+                        max_inactivity_delay = reference_inactivity_delay * 2
                         send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
                         logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-                    hq_btn.config(text='HQ Off' if HqCaptureActive else 'HQ On',
-                                  relief=SUNKEN if HqCaptureActive else RAISED,
-                                  bg='red' if HqCaptureActive else save_bg,
-                                  fg='white' if HqCaptureActive else save_fg)
-                    if not SimulatedRun and not CameraDisabled:
-                        PiCam2_configure()
-                if 'VideoCaptureActive' in SessionData:
-                    VideoCaptureActive = eval(SessionData["VideoCaptureActive"])
-                    turbo_btn.config(text='Turbo Off' if VideoCaptureActive else 'Turbo On',
-                                     relief=SUNKEN if VideoCaptureActive else RAISED,
-                                     bg='red' if VideoCaptureActive else save_bg,
-                                     fg='white' if VideoCaptureActive else save_fg)
+                        hdr_capture_active_checkbox.select()
+                if 'HdrViewX4Active' in SessionData:
+                    HdrViewX4Active = eval(SessionData["HdrViewX4Active"])
+                    if HdrViewX4Active and ExpertMode:
+                        hdr_viewx4_active_checkbox.select()
+                if 'HdrMinExp' in SessionData:
+                    hdr_min_exp = SessionData["HdrMinExp"]
+                    if ExpertMode:
+                        hdr_min_exp_str.set(hdr_min_exp)
+                if 'HdrMaxExp' in SessionData:
+                    hdr_max_exp = SessionData["HdrMaxExp"]
+                    if ExpertMode:
+                        hdr_max_exp_str.set(hdr_max_exp)
+                if 'HdrBracketAuto' in SessionData:
+                    HdrBracketAuto = SessionData["HdrBracketAuto"]
+                    hdr_bracket_auto.set(HdrBracketAuto)
+                if 'HdrMergeInPlace' in SessionData:
+                    HdrMergeInPlace = SessionData["HdrMergeInPlace"]
+                    hdr_merge_in_place.set(HdrMergeInPlace)
+                if 'HdrMinExp' in SessionData:
+                    hdr_min_exp = SessionData["HdrMinExp"]
+                if 'HdrMaxExp' in SessionData:
+                    hdr_max_exp = SessionData["HdrMaxExp"]
+                if 'HdrBracketWidth' in SessionData:
+                    hdr_bracket_width = SessionData["HdrBracketWidth"]
+                    hdr_bracket_width_str.set(str(hdr_bracket_width))
+                if 'HdrBracketShift' in SessionData:
+                    hdr_bracket_shift = SessionData["HdrBracketShift"]
+                    hdr_bracket_shift_str.set(str(hdr_bracket_shift))
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     CurrentExposureStr = SessionData["CurrentExposure"]
@@ -2694,28 +2660,13 @@ def load_session_data():
                     ScanSpeed = SessionData["ScanSpeed"]
                     scan_speed_str.set(str(ScanSpeed))
                     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
-                if 'HdrBracketAuto' in SessionData:
-                    HdrBracketAuto = SessionData["HdrBracketAuto"]
-                    hdr_bracket_auto.set(HdrBracketAuto)
-                if 'HdrMergeInPlace' in SessionData:
-                    HdrMergeInPlace = SessionData["HdrMergeInPlace"]
-                    hdr_merge_in_place.set(HdrMergeInPlace)
-                if 'HdrMinExp' in SessionData:
-                    hdr_min_exp = SessionData["HdrMinExp"]
-                if 'HdrMaxExp' in SessionData:
-                    hdr_max_exp = SessionData["HdrMaxExp"]
-                if 'HdrBracketWidth' in SessionData:
-                    hdr_bracket_width = SessionData["HdrBracketWidth"]
-                    hdr_bracket_width_str.set(str(hdr_bracket_width))
-                if 'HdrBracketShift' in SessionData:
-                    hdr_bracket_shift = SessionData["HdrBracketShift"]
-                    hdr_bracket_shift_str.set(str(hdr_bracket_shift))
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
         arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
         arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
         arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
+    if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
             arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
@@ -2749,34 +2700,19 @@ def reinit_controller():
 def PiCam2_configure():
     global camera, capture_config, preview_config
     global CurrentExposure, CurrentAwbAuto, SharpnessValue
-    global HqCaptureActive
-    global VideoCaptureActive
 
     camera.stop()
-    full_res = camera.sensor_resolution
-    half_res = tuple([dim // 2 for dim in camera.sensor_resolution])
-
-    if HqCaptureActive:
-        if VideoCaptureActive:
-            capture_config = camera.create_video_configuration(main={"size": full_res},
-                                           raw={"size": full_res},
-                                           transform=Transform(hflip=True),
-                                           controls={"FrameRate": 120.0})
-        else:
-            capture_config = camera.create_still_configuration(main={"size": full_res},
-                                           raw={"size": full_res},
-                                           transform=Transform(hflip=True))
-
+    target_res = resolution_dropdown_selected.get()
+    target_res_list = target_res.split('x')
+    target_res_tuple = tuple(map(int, target_res_list))
+    if target_res == "1332x990":
+        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
+                                                           raw={"size": target_res_tuple, "format": "SRGGB10_CSI2P"},
+                                                           transform=Transform(hflip=True))
     else:
-        if VideoCaptureActive:
-            capture_config = camera.create_video_configuration(main={"size": (half_res)},
-                                           raw={"size": (half_res)},
-                                           transform=Transform(hflip=True),
-                                           controls={"FrameRate": 120.0})
-        else:
-            capture_config = camera.create_still_configuration(main={"size": (half_res)},
-                                           raw={"size": (half_res)},
-                                           transform=Transform(hflip=True))
+        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
+                                       raw={"size": target_res_tuple},
+                                       transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
@@ -2906,12 +2842,16 @@ def tscann8_init():
         app_width = PreviewWidth + 420
         app_height = PreviewHeight + 50
         plotter_height -= 55
-    if ExpertMode:
-        app_height += 210 if BigSize else 170
+    if ExpertMode or ExperimentalMode:
+        app_height += 220 if BigSize else 170
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
     win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
+    if 'WindowPos' in SessionData:
+        win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
+
+    build_ui()
 
     if SimulatedRun:
         win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
@@ -2938,6 +2878,7 @@ def tscann8_init():
         PreviewWinX = 250
         PreviewWinY = 150
         camera = Picamera2()
+        logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
         PiCam2_configure()
         ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
@@ -3002,7 +2943,7 @@ def build_ui():
     global PiCam2_preview_btn
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
-    global hdr_btn, hq_btn, turbo_btn
+    global hdr_btn
     global min_frame_steps_str, frame_fine_tune_str
     global MinFrameSteps
     global pt_level_spinbox, pt_level_str
@@ -3027,11 +2968,12 @@ def build_ui():
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
-    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox
+    global hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
-    global file_type
-    global file_type_jpg_rb, file_type_png_rb
+    # global file_type_jpg_rb, file_type_png_rb
+    global file_type_dropdown, file_type_dropdown_selected
+    global resolution_dropdown, resolution_dropdown_selected
     global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
 
 
@@ -3057,7 +2999,7 @@ def build_ui():
     bottom_area_row = 0
     AdvanceMovie_btn = Button(top_left_area_frame, text="Movie Forward", width=12, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='W')
+    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='NSEW')
     setup_tooltip(AdvanceMovie_btn, "Advance film (can be used with real-time view enabled).")
     bottom_area_row += 1
     # Once first button created, get default colors, to revert when we change them
@@ -3076,111 +3018,95 @@ def build_ui():
     Snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+5), width=3, height=2, command=rewind_movie,
+    Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+3), height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='W')
+    Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+5), width=2, height=2, command=fast_forward_movie,
+    FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+3), height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
-    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='E')
+    FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(FastForward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
     bottom_area_row += 1
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(top_left_area_frame, text="Negative image", width=12, height=3, command=switch_negative_capture,
+    PosNeg_btn = Button(top_left_area_frame, text="Negative image", height=3, command=switch_negative_capture,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='W')
+    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='NSEW')
     setup_tooltip(PosNeg_btn, "Enable negative film capture (untested with real negative film).")
     bottom_area_row += 1
 
-    if ExperimentalMode:
-        # Switch HD mode on/off (Capture with sensor in 4056x3040, still delivering 2025x1520, but better quality)
-        hq_btn = Button(top_left_area_frame, text="HQ On", width=12, height=3, command=switch_hq_capture,
-                            activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        hq_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
-        setup_tooltip(hq_btn, "Enable HQ film capture (using Pi HQ camera full resolution (4056, 3040).")
-        bottom_area_row += 1
-
-        # Switch VideoCaptureActive mode on/off (Capture video Configuration)
-        turbo_btn = Button(top_left_area_frame, text="Turbo On", width=12, height=3, command=switch_turbo_capture,
-                            activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-        #turbo_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
-        turbo_btn.forget()
-        setup_tooltip(turbo_btn, "Enable turbo film capture using video capture of HQ Pi Camera (untested prototype).")
-        bottom_area_row += 1
-
     # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", width=12, height=3, command=PiCamera2_preview,
+    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", height=3, command=PiCamera2_preview,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='W')
+    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='NSEW')
     setup_tooltip(PiCam2_preview_btn, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", width=12, height=3, command=set_focus_zoom,
+    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", height=3, command=set_focus_zoom,
                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     Focus_btn.config(state=DISABLED)
-    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky = 'W')
+    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, sticky='NSEW')
     setup_tooltip(Focus_btn, "Zoom in on the real-time film preview. Useful to focus the film.")
     bottom_area_row += 1
 
     # Focus zoom control (in out, up, down, left, right)
-    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', width=12, height=3, font=("Arial", FontSize-2))
-    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4)
+    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', height=3, font=("Arial", FontSize-2))
+    Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, ipady=2, sticky='NSEW')
     bottom_area_row += 1
 
     Focus_btn_grid_frame = Frame(Focus_frame, width=10, height=10)
-    Focus_btn_grid_frame.pack(side=LEFT)
+    Focus_btn_grid_frame.pack()
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", width=1, height=1, command=set_focus_plus,
+    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=set_focus_plus,
                             activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_plus_btn.grid(row=0, column=2)
+    focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
     setup_tooltip(focus_plus_btn, "Increase zoom level.")
-    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", width=1, height=1, command=set_focus_minus,
+    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=set_focus_minus,
                              activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_minus_btn.grid(row=0, column=0)
+    focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     setup_tooltip(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", width=1, height=1, command=set_focus_left,
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=set_focus_left,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_lf_btn.grid(row=1, column=0)
+    focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     setup_tooltip(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", width=1, height=1, command=set_focus_up,
+    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=set_focus_up,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_up_btn.grid(row=0, column=1)
+    focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     setup_tooltip(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", width=1, height=1, command=set_focus_down,
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=set_focus_down,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_dn_btn.grid(row=1, column=1)
+    focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     setup_tooltip(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", width=1, height=1, command=set_focus_right,
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=set_focus_right,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
-    focus_rt_btn.grid(row=1, column=2)
+    focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     setup_tooltip(focus_rt_btn, "Move zoom view to the right.")
 
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
-    Exit_btn = Button(top_right_area_frame, text="Exit", width=14, height=5, command=exit_app, activebackground='red',
+    Exit_btn = Button(top_right_area_frame, text="Exit", height=5, command=exit_app, activebackground='red',
                       activeforeground='white', font=("Arial", FontSize))
-    Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='W')
+    Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='EW')
     setup_tooltip(Exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
     if SimulatedRun:
-        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan_simulated,
+        Start_btn = Button(top_right_area_frame, text="START Scan", height=5, command=start_scan_simulated,
                            activebackground='#f0f0f0', font=("Arial", FontSize))
     else:
-        Start_btn = Button(top_right_area_frame, text="START Scan", width=14, height=5, command=start_scan,
+        Start_btn = Button(top_right_area_frame, text="START Scan", height=5, command=start_scan,
                            activebackground='#f0f0f0', font=("Arial", FontSize))
-    Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3))
+    Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3), sticky='EW')
     setup_tooltip(Start_btn, "Start scanning process.")
     top_right_area_row += 1
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', width=50, height=8, font=("Arial", FontSize-2))
-    folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', height=8, font=("Arial", FontSize-2))
+    folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='EW')
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, width=50 if BigSize else 55, height=3, font=("Arial", FontSize-3),
                                     wraplength=200)
@@ -3198,22 +3124,55 @@ def build_ui():
     setup_tooltip(existing_folder_btn, "Select existing folder to store frames generated during the scan.")
     top_right_area_row += 1
 
-    # Create frame to select target file type
-    file_type_frame = LabelFrame(top_right_area_frame, text='Target file type', width=50, height=8, font=("Arial", FontSize-2))
-    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4)
-    file_type = tk.StringVar()
-    file_type_jpg_rb = Radiobutton(file_type_frame, text="JPG", variable=file_type, value="jpg", width=14, command=file_type_rb_selected, font=("Arial", FontSize))
-    file_type_jpg_rb.pack(side=LEFT)
-    file_type_png_rb = Radiobutton(file_type_frame, text="PNG", variable=file_type, value="png", width=14, command=file_type_rb_selected, font=("Arial", FontSize))
-    file_type_png_rb.pack(side=LEFT)
-    setup_tooltip(file_type_jpg_rb, "Save frames as jpg files.")
-    setup_tooltip(file_type_png_rb, "Save frames as png files.")
-    file_type.set('jpg')
+    # Create frame to select target file specs
+    file_type_frame = LabelFrame(top_right_area_frame, text='Capture resolution & file type', height=8, font=("Arial", FontSize-2))
+    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='EW')
+
+    # Capture resolution Dropdown
+    # Drop down to select capture resolution
+    # Dropdown menu options
+    if ExperimentalMode:
+        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480"]
+    else:
+        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1024x768", "640x480"]
+    resolution_dropdown_selected = tk.StringVar()
+    resolution_dropdown_selected.set(resolution_list[1])  # Set the initial value
+    resolution_label = Label(file_type_frame, text='Resolution:', font=("Arial", FontSize))
+    resolution_label.pack(side=LEFT)
+    #resolution_label.config(state=DISABLED)
+    resolution_dropdown = OptionMenu(file_type_frame,
+                                    resolution_dropdown_selected, *resolution_list, command=set_resolution)
+    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    resolution_dropdown.pack(side=LEFT)
+    # resolution_dropdown.config(state=DISABLED)
+    if ExperimentalMode:
+        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames. 1332x990 uses the 120 FPS mode of RPi HQ camera, allowing faster speeds (but requires readjusting the lens)")
+    else:
+        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames")
+
+    # File format (JPG or PNG)
+    # Drop down to select file type
+    # Dropdown menu options
+    file_type_list = ["jpg", "png"]
+    file_type_dropdown_selected = tk.StringVar()
+    file_type_dropdown_selected.set(file_type_list[0])  # Set the initial value
+
+    # No label for now
+    file_type_label = Label(file_type_frame, text='Type:', font=("Arial", FontSize))
+    file_type_label.pack(side=LEFT)
+    # file_type_label.config(state=DISABLED)
+    file_type_dropdown = OptionMenu(file_type_frame,
+                                    file_type_dropdown_selected, *file_type_list, command=set_file_type)
+    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    file_type_dropdown.pack(side=LEFT)
+    #file_type_dropdown.config(state=DISABLED)
+    setup_tooltip(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
+
     top_right_area_row += 1
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', width=16, height=4, font=("Arial", FontSize-2))
-    scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
+    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', height=4, font=("Arial", FontSize-2))
+    scanned_images_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='NSEW')
 
     Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
     Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str, font=("Arial", FontSize+6), width=5,
@@ -3236,8 +3195,8 @@ def build_ui():
     setup_tooltip(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
     # Create frame to display number of frames to go, and estimated time to finish
-    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', width=16, height=4, font=("Arial", FontSize-2))
-    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NE')
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', height=4, font=("Arial", FontSize-2))
+    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NSEW')
     top_right_area_row += 1
 
     frames_to_go_str = tk.StringVar(value=str(FramesToGo))
@@ -3249,8 +3208,8 @@ def build_ui():
     time_to_go_time.pack(side=TOP, pady=6)
 
     # Create frame to select S8/R8 film
-    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', width=16, height=1, font=("Arial", FontSize-2))
-    film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='W')
+    film_type_frame = LabelFrame(top_right_area_frame, text='Film type', height=1, font=("Arial", FontSize-2))
+    film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='NSEW')
 
     film_type_buttons = Frame(film_type_frame, width=16, height=1)
     film_type_buttons.pack(side=TOP, padx=4, pady=6)
@@ -3265,8 +3224,8 @@ def build_ui():
     setup_tooltip(film_type_R8_btn, "Select Regular 8 film.")
 
     # Create frame to display RPi temperature
-    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', width=8, height=1, font=("Arial", FontSize-2))
-    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4)
+    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize-2))
+    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NSEW')
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=10, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=4)
@@ -3282,9 +3241,9 @@ def build_ui():
 
     # Integrated plotter
     if PlotterMode:
-        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', width=8, height=5,
+        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', height=5,
                                               font=("Arial", FontSize - 1))
-        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='W')
+        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='NSEW')
         plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
                                 width=plotter_width, height=plotter_height)
         plotter_canvas.pack(side=TOP, anchor=N)
@@ -3293,25 +3252,25 @@ def build_ui():
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
-        extended_frame.pack(side=TOP, anchor=W, padx=(15, 0))
+        extended_frame.pack(side=TOP, anchor=W, padx=5)
     if ExpertMode:
-        expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, height=5, font=("Arial", FontSize-1))
-        expert_frame.pack(side=LEFT, padx=2, pady=2)
+        expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
+        expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True)
 
         # Exposure / white balance
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
-                                    width=16, height=2, font=("Arial", FontSize-1))
-        exp_wb_frame.grid(row=0, column=0, padx=4, pady=4, sticky=N)
+                                    width=16, font=("Arial", FontSize-1))
+        exp_wb_frame.grid(row=0, column=0, padx=5, ipady=5, sticky='NSEW')
 
         catch_up_delay_label = tk.Label(exp_wb_frame,
                                          text='Catch-up\ndelay',
                                          width=10, font=("Arial", FontSize-1))
-        catch_up_delay_label.grid(row=0, column=2, padx=2, pady=1)
+        catch_up_delay_label.grid(row=0, column=2, padx=5, pady=1)
         exposure_btn = Button(exp_wb_frame, text="Exposure:", width=12, height=1,
                                                     command=exposure_spinbox_auto,
                                                     activebackground='#f0f0f0',
                                                     state=NORMAL, font=("Arial", FontSize-1))
-        exposure_btn.grid(row=1, column=0, padx=2, pady=1, sticky=E)
+        exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
         exposure_str = tk.StringVar(value=str(CurrentExposure))
@@ -3321,14 +3280,14 @@ def build_ui():
             exp_wb_frame,
             command=(exposure_selection_aux, '%d'), width=8,
             textvariable=exposure_str, from_=-100, to=100, font=("Arial", FontSize-1))
-        exposure_spinbox.grid(row=1, column=1, padx=2, pady=1, sticky=W)
+        exposure_spinbox.grid(row=1, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
 
         auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
         auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_exposure_change_pause_selection, font=("Arial", FontSize-1))
-        auto_exp_wait_checkbox.grid(row=1, column=2, padx=2, pady=1)
+        auto_exp_wait_checkbox.grid(row=1, column=2, padx=5, pady=1)
         setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
         arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
 
@@ -3337,7 +3296,7 @@ def build_ui():
                                                     command=wb_spinbox_auto,
                                                     activebackground='#f0f0f0',
                                                     state=NORMAL, font=("Arial", FontSize-1))
-        wb_red_btn.grid(row=2, column=0, padx=2, pady=1, sticky=E)
+        wb_red_btn.grid(row=2, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
         wb_red_str = tk.StringVar(value=str(GainRed))
 
@@ -3346,14 +3305,14 @@ def build_ui():
             exp_wb_frame,
             command=(wb_red_selection_aux, '%d'), width=8,
             textvariable=wb_red_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
-        wb_red_spinbox.grid(row=2, column=1, padx=2, pady=1, sticky=W)
+        wb_red_spinbox.grid(row=2, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
 
         wb_blue_btn = Button(exp_wb_frame, text="AWB Blue:", width=12, height=1,
                                                     command=wb_spinbox_auto,
                                                     activebackground='#f0f0f0',
                                                     state=NORMAL, font=("Arial", FontSize-1))
-        wb_blue_btn.grid(row=3, column=0, padx=2, pady=1, sticky=E)
+        wb_blue_btn.grid(row=3, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_blue_btn, "Toggle automatic white balance for blue channel (on/off).")
         wb_blue_str = tk.StringVar(value=str(GainBlue))
 
@@ -3362,26 +3321,26 @@ def build_ui():
             exp_wb_frame,
             command=(wb_blue_selection_aux, '%d'), width=8,
             textvariable=wb_blue_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
-        wb_blue_spinbox.grid(row=3, column=1, padx=2, pady=1, sticky=W)
+        wb_blue_spinbox.grid(row=3, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_white_balance_change_pause_selection, font=("Arial", FontSize-1))
-        awb_red_wait_checkbox.grid(row=2, column=2, padx=2, pady=1)
+        awb_red_wait_checkbox.grid(row=2, column=2, padx=5, pady=1)
         setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
         awb_blue_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
                                                 variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
                                                 command=auto_white_balance_change_pause_selection, font=("Arial", FontSize-1))
-        awb_blue_wait_checkbox.grid(row=3, column=2, padx=2, pady=1)
+        awb_blue_wait_checkbox.grid(row=3, column=2, padx=5, pady=1)
         setup_tooltip(awb_blue_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
         match_wait_margin_label = tk.Label(exp_wb_frame,
                                          text='Match margin (%):',
                                          width=15, font=("Arial", FontSize-1))
-        match_wait_margin_label.grid(row=4, column=0, padx=2, pady=1, sticky=E)
+        match_wait_margin_label.grid(row=4, column=0, padx=5, pady=1, sticky=E)
 
         match_wait_margin_str = tk.StringVar(value=str(MatchWaitMargin))
 
@@ -3390,7 +3349,7 @@ def build_ui():
             exp_wb_frame,
             command=(match_wait_margin_selection_aux, '%d'), width=8,
             textvariable=match_wait_margin_str, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
-        match_wait_margin_spinbox.grid(row=4, column=1, padx=2, pady=1, sticky=W)
+        match_wait_margin_spinbox.grid(row=4, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and stabilization wait is selected, select the level to match before terminating wait.")
 
         # Display markers for film hole reference
@@ -3409,9 +3368,9 @@ def build_ui():
         film_hole_label_2.pack(side=TOP)
 
         # Frame to add frame align controls
-        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16, height=2,
+        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16,
                                            font=("Arial", FontSize-1))
-        frame_alignment_frame.grid(row=0, column=2, padx=4, ipady=16, sticky=N)
+        frame_alignment_frame.grid(row=0, column=2, padx=4, sticky='NSEW')
         # Spinbox to select MinFrameSteps on Arduino
         min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
                                                     command=min_frame_steps_spinbox_auto,
@@ -3449,7 +3408,7 @@ def build_ui():
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
-                                         width=10, font=("Arial", FontSize-1))
+                                         font=("Arial", FontSize-1))
         frame_fine_tune_label.grid(row=2, column=0, padx=2, pady=3, sticky=E)
         frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
         frame_fine_tune_selection_aux = frame_alignment_frame.register(
@@ -3464,7 +3423,7 @@ def build_ui():
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame,
                                          text='Extra Steps:',
-                                         width=10, font=("Arial", FontSize-1))
+                                         font=("Arial", FontSize-1))
         frame_extra_steps_label.grid(row=3, column=0, padx=2, pady=3, sticky=E)
         frame_extra_steps_str = tk.StringVar(value=str(FrameExtraSteps))
         frame_extra_steps_selection_aux = frame_alignment_frame.register(
@@ -3472,21 +3431,21 @@ def build_ui():
         frame_extra_steps_spinbox = tk.Spinbox(
             frame_alignment_frame,
             command=(frame_extra_steps_selection_aux, '%d'), width=8,
-            textvariable=frame_extra_steps_str, from_=0, to=20, font=("Arial", FontSize-1))
+            textvariable=frame_extra_steps_str, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
-        speed_quality_frame = LabelFrame(expert_frame, text="Scan speed / Stabilization delay", width=18, height=2,
+        speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
                                            font=("Arial", FontSize-1))
-        speed_quality_frame.grid(row=0, column=4, padx=4, pady=4, sticky=N)
+        speed_quality_frame.grid(row=0, column=3, padx=4, sticky='NSEW')
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame,
-                                         text='Speed:',
-                                         width=12, font=("Arial", FontSize-1))
-        scan_speed_label.grid(row=0, column=0, padx=4, pady=(20, 10), sticky=W)
+                                         text='Scan Speed:',
+                                         font=("Arial", FontSize-1))
+        scan_speed_label.grid(row=0, column=0, padx=3, pady=(20, 10), sticky=E)
         scan_speed_str = tk.StringVar(value=str(ScanSpeed))
         scan_speed_selection_aux = speed_quality_frame.register(
             scan_speed_selection)
@@ -3494,16 +3453,16 @@ def build_ui():
             speed_quality_frame,
             command=(scan_speed_selection_aux, '%d'), width=3,
             textvariable=scan_speed_str, from_=1, to=10, font=("Arial", FontSize-1))
-        scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=(20, 10), sticky=W)
+        scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=4, sticky=W)
         setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
         scan_speed_selection('down')
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
-                                         text='Delay (ms):',
-                                         width=12, font=("Arial", FontSize-1))
-        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=(10, 20), sticky=W)
+                                         text='Stabilization\ndelay (ms):',
+                                         font=("Arial", FontSize-1))
+        stabilization_delay_label.grid(row=1, column=0, padx=4, pady=4, sticky=E)
         stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
         stabilization_delay_selection_aux = speed_quality_frame.register(
             stabilization_delay_selection)
@@ -3511,30 +3470,35 @@ def build_ui():
             speed_quality_frame,
             command=(stabilization_delay_selection_aux, '%d'), width=4,
             textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
-        stabilization_delay_spinbox.grid(row=1, column=1, padx=4, pady=(10, 20), sticky=W)
+        stabilization_delay_spinbox.grid(row=1, column=1, padx=4, sticky='W')
         setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
+    if ExperimentalMode:
+        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
+        experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
+
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
-        hdr_frame = LabelFrame(expert_frame, text="Multi-exposure fusion", width=18, height=2,
+        hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", width=18,
                                            font=("Arial", FontSize-1))
-        hdr_frame.grid(row=0, column=1, padx=4, pady=4, ipady=7, sticky=N)
+        #hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky='NSEW')
+        hdr_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
         hdr_row = 0
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
-        hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1, width=6,
+        hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1,
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_capture, font=("Arial", FontSize-1))
-        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1)
+        hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
-        hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, width=7,
+        hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1,
                                                      variable=hdr_viewx4_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_viewx4, font=("Arial", FontSize-1), state=DISABLED)
-        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
         hdr_row += 1
 
-        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
@@ -3544,7 +3508,7 @@ def build_ui():
         hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
         hdr_row +=1
 
-        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
         hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
@@ -3554,7 +3518,7 @@ def build_ui():
         hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
         hdr_row += 1
 
-        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
@@ -3564,7 +3528,7 @@ def build_ui():
         hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
         hdr_row += 1
 
-        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', width=16, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_bracket_shift_str = tk.StringVar(value=str(hdr_bracket_shift))
         hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
@@ -3575,97 +3539,96 @@ def build_ui():
         hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
-        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', width=12, height=1,
+        hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
-        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
         hdr_row += 1
 
         hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
-        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', width=12, height=1,
+        hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', height=1,
                                               variable=hdr_merge_in_place, onvalue=True, offvalue=False,
                                               command=adjust_merge_in_place, font=("Arial", FontSize-1))
         hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
-        if ExperimentalMode:
-            experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
-            experimental_frame.pack(side=LEFT, padx=2, pady=2, ipady=5, anchor=N)
+        # Experimental miscellaneous sub-frame
+        experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous', width=8, height=5, font=("Arial", FontSize-1))
+        experimental_miscellaneous_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
 
-            # Sharpness, control to allow playing with the values and see the results
-            sharpness_control_label = tk.Label(experimental_frame,
-                                                 text='Sharpness:',
-                                                 width=20, font=("Arial", FontSize-1))
-            sharpness_control_label.grid(row=0, column=0, padx=2, sticky=W)
-            sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
-            sharpness_control_selection_aux = experimental_frame.register(
-                sharpness_control_selection)
-            sharpness_control_spinbox = tk.Spinbox(
-                experimental_frame,
-                command=(sharpness_control_selection_aux, '%d'), width=8,
-                textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
-            sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
-            setup_tooltip(sharpness_control_spinbox,
-                          "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
-            sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
+        # Sharpness, control to allow playing with the values and see the results
+        sharpness_control_label = tk.Label(experimental_miscellaneous_frame,
+                                             text='Sharpness:',
+                                             font=("Arial", FontSize-1))
+        sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
+        sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
+        sharpness_control_selection_aux = experimental_miscellaneous_frame.register(
+            sharpness_control_selection)
+        sharpness_control_spinbox = tk.Spinbox(
+            experimental_miscellaneous_frame,
+            command=(sharpness_control_selection_aux, '%d'), width=8,
+            textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
+        sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
+        setup_tooltip(sharpness_control_spinbox,
+                      "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
+        sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
+        # Display entry to throttle Rwnd/FF speed
+        rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame,
+                                             text='RW/FF speed rpm):',
+                                             font=("Arial", FontSize-1))
+        rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
+        rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
 
-            # Display entry to throttle Rwnd/FF speed
-            rwnd_speed_control_label = tk.Label(experimental_frame,
-                                                 text='RW/FF speed rpm):',
-                                                 width=20, font=("Arial", FontSize-1))
-            rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
-            rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
+        rwnd_speed_control_selection_aux = experimental_miscellaneous_frame.register(
+            rwnd_speed_control_selection)
+        rwnd_speed_control_spinbox = tk.Spinbox(
+            experimental_miscellaneous_frame, state='readonly',
+            command=(rwnd_speed_control_selection_aux, '%d'), width=8,
+            textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
+        rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
+        setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
 
-            rwnd_speed_control_selection_aux = experimental_frame.register(
-                rwnd_speed_control_selection)
-            rwnd_speed_control_spinbox = tk.Spinbox(
-                experimental_frame, state='readonly',
-                command=(rwnd_speed_control_selection_aux, '%d'), width=8,
-                textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
-            rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
-            setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
+        # Damaged film helpers, to help handling damaged film (broken perforations)
+        Damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
+        Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
+        # Checkbox to enable/disable manual scan
+        Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
+        Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
+                                               variable=Manual_scan_activated, onvalue=True,
+                                               offvalue=False,
+                                               command=Manual_scan_activated_selection, font=("Arial", FontSize-1))
+        Manual_scan_checkbox.pack(side=TOP)
+        setup_tooltip(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
+        # Common area for buttons
+        Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
+        Manual_scan_btn_frame.pack(side=TOP)
 
-            # Damaged film helpers, to help handling damaged film (broken perforations)
-            Damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
-            Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
-            # Checkbox to enable/disable manual scan
-            Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
-            Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan', width=20, height=1,
-                                                   variable=Manual_scan_activated, onvalue=True,
-                                                   offvalue=False,
-                                                   command=Manual_scan_activated_selection, font=("Arial", FontSize-1))
-            Manual_scan_checkbox.pack(side=TOP)
-            setup_tooltip(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
-            # Common area for buttons
-            Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
-            Manual_scan_btn_frame.pack(side=TOP)
+        # Manual scan buttons
+        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
+                                state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
+        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
+                                state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
+        manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
+                                 state=DISABLED, font=("Arial", FontSize-1))
+        manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
+        setup_tooltip(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
 
-            # Manual scan buttons
-            manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
-                                    state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
-            manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
-                                    state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
-            manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
-                                     state=DISABLED, font=("Arial", FontSize-1))
-            manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
-            setup_tooltip(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
+        # Retreat movie button (slow backward through filmgate)
+        RetreatMovie_btn = Button(experimental_miscellaneous_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
+                                  activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+        RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
+        setup_tooltip(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
 
-            # Retreat movie button (slow backward through filmgate)
-            RetreatMovie_btn = Button(experimental_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
-                                      activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
-            RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
-            setup_tooltip(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
-
-            # Unlock reels button (to load film, rewind, etc.)
-            Free_btn = Button(experimental_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
-                              activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
-            Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
-            setup_tooltip(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
+        # Unlock reels button (to load film, rewind, etc.)
+        Free_btn = Button(experimental_miscellaneous_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
+                          activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
+        Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
+        setup_tooltip(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
 
 
 
@@ -3733,14 +3696,12 @@ def main(argv):
 
     ALT_scann_init_done = False
 
+    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
+
     tscann8_init()
 
     if not SimulatedRun:
         arduino_listen_loop()
-
-    build_ui()
-
-    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
 
     load_config_data()
     load_session_data()

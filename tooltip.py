@@ -13,9 +13,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022¡4, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __date__ = "2024-01-23"
-__version_highlight__ = "Tooltips common code for ALT-Scann8 and AfterScan"
+__version_highlight__ = "Bugfix - Tooltip covering small widgets"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -66,7 +66,7 @@ def show_tooltip(widget, text):
         x = screen_width - label.winfo_reqwidth()
     if widget.winfo_width() > 50:
         x -= 25
-    if widget.winfo_height() > 50:
+    if widget.winfo_height() > 100:
         y -= 25
     tooltip_window.wm_geometry(f"+{x}+{y}")
 
