@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.8.48"
-__date__ = "2024-02-04"
+__version__ = "1.8.49"
+__date__ = "2024-02-05"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -328,6 +328,8 @@ def exit_app():  # Exit Application
             if PiCam2PreviewEnabled:
                 camera.stop_preview()
             camera.close()
+    # Set window position for next run
+    SessionData["WindowPos"] = win.geometry()
     # Write session data upon exit
     with open(PersistedDataFilename, 'w') as f:
         json.dump(SessionData, f)
@@ -2854,6 +2856,8 @@ def tscann8_init():
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
     win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
+    if 'WindowPos' in SessionData:
+        win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
 
     build_ui()
 
@@ -3700,12 +3704,12 @@ def main(argv):
 
     ALT_scann_init_done = False
 
+    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
+
     tscann8_init()
 
     if not SimulatedRun:
         arduino_listen_loop()
-
-    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
 
     load_config_data()
     load_session_data()
