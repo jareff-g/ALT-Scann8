@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.5"
-#define  __date__       "2024-02-03"
-#define  __version_highlight__  "Allow negative FrameExtraSteps: Deducted from MinFrameSteps on the fly"
+#define __version__     "1.0.6"
+#define  __date__       "2024-02-06"
+#define  __version_highlight__  "More reactive PT automatic threshold"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -727,10 +727,10 @@ int GetLevelPT() {
     MinPT = min(PT_SignalLevelRead, MinPT);
     MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
     MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
-    if (MaxPT_Dynamic > MinPT_Dynamic) MaxPT_Dynamic-=2;
+    if (MaxPT_Dynamic > (MinPT_Dynamic+10)) MaxPT_Dynamic-=5;
     //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
-    if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=2;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
-    if (PT_Level_Auto) {
+    if (MinPT_Dynamic < (MaxPT_Dynamic-10)) MinPT_Dynamic+=15;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (PT_Level_Auto && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
         fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.2);
         user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.8 * ratio);
@@ -741,7 +741,7 @@ int GetLevelPT() {
     // If relevant diff between max/min dinamic it means we have film passing by
     if (millis() - FilmDetectedTime > MaxFilmStallTime)
         NoFilmDetected = true;
-    else if (MaxPT_Dynamic-MinPT_Dynamic > MaxPT_Dynamic/4)
+    else if (MaxPT_Dynamic-MinPT_Dynamic >= MaxPT/4) 
         FilmDetectedTime = millis();
 
     return(PT_SignalLevelRead);
