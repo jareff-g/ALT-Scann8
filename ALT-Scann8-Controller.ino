@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.6"
+#define __version__     "1.0.7"
 #define  __date__       "2024-02-06"
-#define  __version_highlight__  "More reactive PT automatic threshold"
+#define  __version_highlight__  "Parameter validation in commands from RPi"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -324,6 +324,9 @@ void loop() {
                 break;
             case CMD_SET_STALL_TIME:
                 DebugPrint(">Stall", param);
+                // Limit parameter to valid values (between 1 and 12 seconds)
+                if (param < 1) param = 1;
+                if (param > 12) param = 12;
                 MaxFilmStallTime = param * 1000;
                 break;
             case CMD_SET_FRAME_FINE_TUNE:       // Adjust PT threshold to % between min and max PT
@@ -333,18 +336,20 @@ void loop() {
                 break;
             case CMD_SET_EXTRA_STEPS:
                 DebugPrint(">BoostPT", param);
-                if (param >= 1 && param <= 20)  // Also to move up we add extra steps
+                if (param >= 1 && param <= 30)  // Also to move up we add extra steps
                     FrameExtraSteps = param;
                 else if (param >= -30 && param <= -1)  // Manually force reduction of MinFrameSteps
                     FrameDeductSteps = param;
                 break;
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
-                ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
-                scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
-                OriginalScanSpeed = ScanSpeed;
-                DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
-                DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                if (param >= 1 and param <= 10) {   // Handle only if valid speed (I2C sometimes fails)
+                    ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
+                    scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
+                    OriginalScanSpeed = ScanSpeed;
+                    DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
+                    DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
+                }
                 break;
             case CMD_REPORT_PLOTTER_INFO:
                 DebugPrint(">PlotterInfo", param);
@@ -521,7 +526,9 @@ void loop() {
                     case CMD_ADVANCE_FRAME_FRACTION:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
-                        capstan_advance(param);
+                        // Parameter validation (can be 5 or 20, but we allow a bit more). Mainly to avoid crazy values
+                        if (param >=1 and param <= 40)
+                            capstan_advance(param);
                         SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                 }
