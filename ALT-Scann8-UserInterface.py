@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.0"
-__date__ = "2024-02-05"
+__version__ = "1.9.1"
+__date__ = "2024-02-06"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -225,6 +225,7 @@ plotter_height=180
 PrevPTValue = 0
 PrevThresholdLevel = 0
 MaxPT = 100
+MinPT = 800
 MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previous frame
                         # % of absolute value (1 for AWB color gain, and 8000 for exposure)
                         # That ,means we wait until the difference between a frame and the previous one is less
@@ -2263,7 +2264,7 @@ def set_resolution(event):
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
     global plotter_canvas
-    global MaxPT, PrevPTValue, PrevThresholdLevel
+    global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel
     global plotter_width, plotter_height
 
     if plotter_canvas == None:
@@ -2273,7 +2274,9 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
         return
 
     MaxPT = max(MaxPT,PTValue)
+    MinPT = min(MinPT,PTValue)
     plotter_canvas.create_text(10, 5, text=str(MaxPT), anchor='nw', font=f"Helvetica {8}")
+    plotter_canvas.create_text(10, plotter_height - 15, text=str(MinPT), anchor='nw', font=f"Helvetica {8}")
     # Shift the graph to the left
     for item in plotter_canvas.find_all():
         plotter_canvas.move(item, -5, 0)
@@ -2294,6 +2297,8 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
     PrevThresholdLevel = ThresholdLevel
     if MaxPT > 100:  # Do not allow below 100
         MaxPT-=1 # Dynamic max
+    if MinPT < 800:  # Do not allow above 800
+        MinPT+=1 # Dynamic min
 
 
 # send_arduino_command: No response expected
