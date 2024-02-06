@@ -4,7 +4,7 @@
 
 Feel free to join our Discord server to discuss and get support!
 
-You can also visit the [wiki](https://github.com/jareff-g/ALT-Scann8/wiki), where you can find a [description of the ALT-Scann UI](https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface), and also a [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions) with answers to the most common questions (including intial set up of the Raspberry Pi)
+You can also visit the [wiki](https://github.com/jareff-g/ALT-Scann8/wiki), where you can find a [description of the ALT-Scann UI](https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface), and also a [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions) with answers to the most common questions (including [intial set up of the Raspberry Pi](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions#question-1))
 
 # ALT-Scann 8 User Interface
 
