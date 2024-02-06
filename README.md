@@ -4,6 +4,8 @@
 
 Feel free to join our Discord server to discuss and get support!
 
+You can also visit the [wiki](https://github.com/jareff-g/ALT-Scann8/wiki), where you can find a [description of the ALT-Scann UI](https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface), and also a [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions) with answers to the most common questions (including intial set up of the Raspberry Pi)
+
 # ALT-Scann 8 User Interface
 
 The application is an alternate user interface for [T-Scann 8](http://tscann8.torulf.com/index.html), the Super8/Regular8 film scanner designed by Torulf Holmström.  It is a fork of the original UI ('T-Scann8-UserInterface v2.1') from Torulf, licensed under a [Creative Commons Attribution-NonCommercial 4.0 International License](http://creativecommons.org/licenses/by-nc/4.0/). ALT-Scann8-UI is licensed under a MIT License by Juan Remirez de Esparza.
