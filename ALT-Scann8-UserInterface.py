@@ -1505,6 +1505,10 @@ def set_negative_image():
         negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
 
+def set_auto_stop_enabled():
+    SessionData["AutoStopActive"] = str(auto_stop_enabled.get())
+
+
 # Function to enable 'real' preview with PiCamera2
 # Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
 #  - Focus
@@ -2549,6 +2553,8 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 negative_image.set(eval(SessionData["NegativeCaptureActive"]))
                 set_negative_image()
+            if 'AutoStopActive' in SessionData:
+                auto_stop_enabled.set(eval(SessionData["AutoStopActive"]))
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
