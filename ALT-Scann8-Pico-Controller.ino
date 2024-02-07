@@ -13,9 +13,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.7"
-#define  __date__       "2024-02-06"
-#define  __version_highlight__  "Parameter validation in commands from RPi"
+#define __version__     "1.0.8"
+#define  __date__       "2024-02-07"
+#define  __version_highlight__  "Add Parameter to enable/disable auto-stop"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -80,6 +80,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
 #define CMD_SET_STALL_TIME 72
+#define CMD_SET_AUTO_STOP 74
 #define CMD_REPORT_PLOTTER_INFO 87
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
@@ -485,6 +486,10 @@ void loop() {
                 }
                 scan_process_ongoing = false;
                 SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                break;
+            case CMD_SET_AUTO_STOP:
+                DebugPrint(">Auto stop", param);
+                AutoStopEnabled = param;
                 break;
         }
 
@@ -927,7 +932,7 @@ boolean SlowForward(){
         LastMove = CurrentTime + 700;
     }
     // Check if film still present (auto stop at end of reel)
-    if (NoFilmDetected) {
+    if (AutoStopEnabled && NoFilmDetected) {
         SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
         return(false);
     }
@@ -1065,7 +1070,7 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         // Check if film still present (auto stop at end of reel)
-        if (NoFilmDetected) {
+        if (AutoStopEnabled && NoFilmDetected) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);
         }

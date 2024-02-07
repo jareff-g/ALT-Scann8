@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.1"
-__date__ = "2024-02-06"
+__version__ = "1.9.2"
+__date__ = "2024-02-07"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -90,7 +90,6 @@ CurrentFrame = 0  # bild in original code from Torulf
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
-NegativeCaptureActive = False
 HdrCaptureActive = False
 AdvanceMovieActive = False
 RetreatMovieActive = False
@@ -199,6 +198,7 @@ CMD_UNCONDITIONAL_REWIND = 64
 CMD_UNCONDITIONAL_FAST_FORWARD = 65
 CMD_SET_SCAN_SPEED = 70
 CMD_SET_STALL_TIME = 72
+CMD_SET_AUTO_STOP = 74
 CMD_REPORT_PLOTTER_INFO = 87
 # Responses (Arduino to RPi)
 RSP_VERSION_ID = 1
@@ -293,7 +293,7 @@ SessionData = {
     "CurrentDir": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
     "CurrentExposure": str(CurrentExposure),
-    "NegativeCaptureActive": str(NegativeCaptureActive),
+    "NegativeCaptureActive": False,
     "HdrCaptureActive": str(HdrCaptureActive),
     "FilmType": 'S8',
     "MinFrameStepsS8": 290,
@@ -358,30 +358,38 @@ def set_free_mode():
     button_status_change_except(Free_btn, FreeWheelActive)
 
 
+def set_auto_stop_enabled():
+    if not SimulatedRun:
+        send_arduino_command(CMD_SET_AUTO_STOP, auto_stop_enabled.get())
+    logging.debug(f"Set Auto Stop: {auto_stop_enabled.get()}")
+
+
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
     global save_bg, save_fg
     global SimulatedRun
-    global ZoomSize, Focus_btn
+    global ZoomSize, real_time_zoom_checkbox
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
 
-    if not FocusZoomActive:
-        Focus_btn.config(text='Focus Zoom OFF', bg='red', fg='white', relief=SUNKEN)
-        if not SimulatedRun and not CameraDisabled:
+    if real_time_zoom.get():
+        real_time_zoom_checkbox.config(fg="white")  # Change background color and text color when checked
+    else:
+        real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
+
+    if not SimulatedRun and not CameraDisabled:
+        if real_time_zoom.get():
             camera.set_controls(
                 {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
                                (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
-    else:
-        Focus_btn.config(text='Focus Zoom ON', bg=save_bg, fg=save_fg, relief=RAISED)
-        if not SimulatedRun and not CameraDisabled:
+        else:
             camera.set_controls({"ScalerCrop": (0, 0) + (ZoomSize[0], ZoomSize[1])})
 
     time.sleep(.2)
     FocusZoomActive = not FocusZoomActive
 
     # Enable/Disable related buttons
-    button_status_change_except(Focus_btn, FocusZoomActive)
+    button_status_change_except(real_time_zoom_checkbox, real_time_zoom.get())
     # Enable disable buttons for focus move
     if ExpertMode:
         focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
@@ -1043,11 +1051,12 @@ def hdr_check_bracket_shift():
 def button_status_change_except(except_button, active):
     global Free_btn, SingleStep_btn, Snapshot_btn, AdvanceMovie_btn, RetreatMovie_btn
     global Rewind_btn, FastForward_btn, Start_btn
-    global PosNeg_btn, Focus_btn, Start_btn, Exit_btn
-    global film_type_S8_btn, film_type_R8_btn
-    global PiCam2_preview_btn, hdr_btn
+    global Start_btn, Exit_btn
+    global film_type_S8_rb, film_type_R8_rb
+    global hdr_btn
     global button_lock_counter
     global hdr_capture_active_checkbox
+    global real_time_zoom_checkbox, negative_image_checkbox
 
     if active:
         button_lock_counter += 1
@@ -1065,16 +1074,16 @@ def button_status_change_except(except_button, active):
         Rewind_btn.config(state=DISABLED if active else NORMAL)
     if except_button != FastForward_btn:
         FastForward_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != PosNeg_btn:
-        PosNeg_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != negative_image_checkbox:
+        negative_image_checkbox.config(state=DISABLED if active else NORMAL)
     if except_button != Start_btn and not PiCam2PreviewEnabled:
         Start_btn.config(state=DISABLED if active else NORMAL)
     if except_button != Exit_btn:
         Exit_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != film_type_S8_btn:
-        film_type_S8_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != film_type_R8_btn:
-        film_type_R8_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != film_type_S8_rb:
+        film_type_S8_rb.config(state=DISABLED if active else NORMAL)
+    if except_button != film_type_R8_rb:
+        film_type_R8_rb.config(state=DISABLED if active else NORMAL)
     '''
     if except_button != file_type_jpg_rb:
         file_type_jpg_rb.config(state=DISABLED if active else NORMAL)
@@ -1083,17 +1092,28 @@ def button_status_change_except(except_button, active):
     '''
     if except_button != file_type_dropdown:
         file_type_dropdown.config(state=DISABLED if active else NORMAL)
-    if ExpertMode:
-        hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
     if ExperimentalMode:
         if except_button != RetreatMovie_btn:
             RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
         if except_button != Free_btn:
             Free_btn.config(state=DISABLED if active else NORMAL)
-
-    if except_button != PiCam2_preview_btn:
-        PiCam2_preview_btn.config(state=DISABLED if active else NORMAL)
-
+        if except_button != new_folder_btn:
+            new_folder_btn.config(state=DISABLED if active else NORMAL)
+        hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
+    if except_button != real_time_display_checkbox:
+        real_time_display_checkbox.config(state=DISABLED if active else NORMAL)
+    if except_button != real_time_zoom_checkbox:
+        real_time_zoom_checkbox.config(state=DISABLED if active else NORMAL)
+    if except_button != resolution_label:
+        resolution_label.config(state=DISABLED if active else NORMAL)
+    if except_button != resolution_dropdown:
+        resolution_dropdown.config(state=DISABLED if active else NORMAL)
+    if except_button != file_type_label:
+        file_type_label.config(state=DISABLED if active else NORMAL)
+    if except_button != file_type_dropdown:
+        file_type_dropdown.config(state=DISABLED if active else NORMAL)
+    if except_button != existing_folder_btn:
+        existing_folder_btn.config(state=DISABLED if active else NORMAL)
 
 
 def advance_movie(from_arduino = False):
@@ -1279,10 +1299,10 @@ def capture_display_thread(queue, event, id):
         # If too many items in queue the skip display
         if (queue.qsize() <= 5):
             # Invert image if button selected
-            if NegativeCaptureActive:
+            if negative_image.get():
                 image_array = np.asarray(message[0])
                 image_array = np.negative(image_array)
-                message[0] = Image.fromarray(image_array)
+                message = (Image.fromarray(image_array), message[1], message[2])
             draw_preview_image(message[0], message[2])
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
@@ -1309,10 +1329,10 @@ def capture_save_thread(queue, event, id):
         if message == END_TOKEN:
             break
         # Invert image if button selected
-        if NegativeCaptureActive:
+        if negative_image.get():
             image_array = np.asarray(message[0])
             image_array = np.negative(image_array)
-            message[0] = Image.fromarray(image_array)
+            message = (Image.fromarray(image_array), message[1], message[2])
         if message[2] > 1:  # Hdr frame 1 has standard filename
             logging.debug("Saving HDR frame n.%i", message[2])
             message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type_dropdown_selected.get()), quality=95)
@@ -1477,21 +1497,16 @@ def switch_hdr_viewx4():
     SessionData["HdrViewX4Active"] = str(HdrViewX4Active)
 
 
-def switch_negative_capture():
-    global NegativeCaptureActive
-    global SimulatedRun
-    global PosNeg_btn
+def set_negative_image():
+    SessionData["NegativeCaptureActive"] = str(negative_image.get())
+    if negative_image.get():
+        negative_image_checkbox.config(fg="white")  # Change background color and text color when checked
+    else:
+        negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
-    NegativeCaptureActive = not NegativeCaptureActive
-    SessionData["NegativeCaptureActive"] = str(NegativeCaptureActive)
-    PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image',
-                      relief=SUNKEN if NegativeCaptureActive else RAISED,
-                      bg='red' if NegativeCaptureActive else save_bg,
-                      fg='white' if NegativeCaptureActive else save_fg)
 
-    if not SimulatedRun and not CameraDisabled:
-        # Do nothing for PiCamera2, image turns negative at save time
-        logging.debug("Negative mode " + "On" if NegativeCaptureActive else "Off")
+def set_auto_stop_enabled():
+    SessionData["AutoStopActive"] = str(auto_stop_enabled.get())
 
 
 # Function to enable 'real' preview with PiCamera2
@@ -1499,16 +1514,19 @@ def switch_negative_capture():
 #  - Focus
 #  - Color adjustment
 #  - Exposure adjustment
-def PiCamera2_preview():
-#def change_preview_status(mode):
+def set_real_time_display():
     global win
     global capture_config, preview_config
-    global PiCam2PreviewEnabled
-    global PiCam2_preview_btn, Start_btn
+    global real_time_display, Start_btn
 
-    PiCam2PreviewEnabled = not PiCam2PreviewEnabled
+    if real_time_display.get():
+        logging.debug("Real time display enabled")
+        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
+    else:
+        logging.debug("Real time display disabled")
+        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
     if not SimulatedRun and not CameraDisabled:
-        if (PiCam2PreviewEnabled):
+        if real_time_display.get():
             camera.stop_preview()
             camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
             time.sleep(0.1)
@@ -1519,19 +1537,13 @@ def PiCamera2_preview():
             time.sleep(0.1)
             camera.switch_mode(capture_config)
 
-    PiCam2_preview_btn.config(text='Real Time display ' + ('OFF' if PiCam2PreviewEnabled else 'ON'),
-                      relief=SUNKEN if PiCam2PreviewEnabled else RAISED,
-                      bg='red' if PiCam2PreviewEnabled else save_bg,
-                      fg='white' if PiCam2PreviewEnabled else save_fg)
-
     # Do not allow scan to start while PiCam2 preview is active
-    Start_btn.config(state=DISABLED if PiCam2PreviewEnabled else NORMAL)
-    Focus_btn.config(state=NORMAL if PiCam2PreviewEnabled else DISABLED)
+    Start_btn.config(state=DISABLED if real_time_display.get() else NORMAL)
+    real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
 
 
 def set_s8():
     global SimulatedRun, ExpertMode
-    global film_type_R8_btn, film_type_S8_btn
     global PTLevel, PTLevelS8
     global MinFrameSteps, MinFrameStepsS8
     global pt_level_str, min_frame_steps_str
@@ -1539,8 +1551,6 @@ def set_s8():
     global ALT_scann_init_done
     global film_hole_frame_1, film_hole_frame_2
 
-    film_type_S8_btn.config(relief=SUNKEN)
-    film_type_R8_btn.config(relief=RAISED)
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
 
@@ -1567,14 +1577,11 @@ def set_s8():
 
 def set_r8():
     global SimulatedRun
-    global film_type_R8_btn, film_type_S8_btn
     global PTLevel, PTLevelR8
     global MinFrameSteps, MinFrameStepsR8
     global pt_level_str, min_frame_steps_str
     global film_hole_frame_1, film_hole_frame_2
 
-    film_type_R8_btn.config(relief=SUNKEN)
-    film_type_S8_btn.config(relief=RAISED)
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
 
@@ -1985,7 +1992,7 @@ def capture_loop_simulated():
         filename, ext = os.path.splitext(simulated_captured_frame_list[frame_to_display])
         if ext == '.jpg':
             raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
-            if NegativeCaptureActive:
+            if negative_image.get():
                 image_array = np.asarray(raw_simulated_capture_image)
                 image_array = np.negative(image_array)
                 raw_simulated_capture_image = Image.fromarray(image_array)
@@ -2377,11 +2384,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
         logging.warning("End of reel reached: Scan terminated")
         ScanStopRequested = True
-    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS and ExpertMode:  # Get auto levels from Arduino, to be displayed in UI, if auto on
-        if (PTLevel_auto):
-            pt_level_str.set(str(ArduinoParam1))
-        if (FrameSteps_auto):
-            min_frame_steps_str.set(str(ArduinoParam2))
+    elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
+        if ExpertMode:
+            if (PTLevel_auto):
+                pt_level_str.set(str(ArduinoParam1))
+            if (FrameSteps_auto):
+                min_frame_steps_str.set(str(ArduinoParam2))
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.debug("Received rewind end event from Arduino")
@@ -2483,13 +2491,11 @@ def load_session_data():
     global CurrentDir
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
-    global NegativeCaptureActive, PosNeg_btn
     global hdr_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global colour_gains_red_value_label, colour_gains_blue_value_label
     global auto_exp_wait_checkbox
-    global film_type_R8_btn, film_type_S8_btn
     global PersistedDataLoaded
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps, frame_extra_steps_str
@@ -2527,14 +2533,11 @@ def load_session_data():
                 FramesToGo = int(SessionData["FramesToGo"])
                 frames_to_go_str.set(str(FramesToGo))
             if 'FilmType' in SessionData:
+                film_type.set(SessionData["FilmType"])
                 if SessionData["FilmType"] == "R8":
                     set_r8()
-                    film_type_R8_btn.config(relief=SUNKEN)
-                    film_type_S8_btn.config(relief=RAISED)
                 elif SessionData["FilmType"] == "S8":
                     set_s8()
-                    film_type_R8_btn.config(relief=RAISED)
-                    film_type_S8_btn.config(relief=SUNKEN)
             if 'FileType' in SessionData:
                 file_type_dropdown_selected.set(SessionData["FileType"])
             if 'CaptureResolution' in SessionData:
@@ -2548,8 +2551,10 @@ def load_session_data():
                 if not SimulatedRun and not CameraDisabled:
                     PiCam2_configure()
             if 'NegativeCaptureActive' in SessionData:
-                NegativeCaptureActive = eval(SessionData["NegativeCaptureActive"])
-                PosNeg_btn.config(text='Positive image' if NegativeCaptureActive else 'Negative image')
+                negative_image.set(eval(SessionData["NegativeCaptureActive"]))
+                set_negative_image()
+            if 'AutoStopActive' in SessionData:
+                auto_stop_enabled.set(eval(SessionData["AutoStopActive"]))
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -2844,7 +2849,7 @@ def tscann8_init():
         FontSize = 8
         PreviewWidth = 650
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 420
+        app_width = PreviewWidth + 430
         app_height = PreviewHeight + 50
         plotter_height -= 55
     if ExpertMode or ExperimentalMode:
@@ -2913,18 +2918,16 @@ def build_ui():
     global AdvanceMovie_btn
     global SingleStep_btn
     global Snapshot_btn
-    global PosNeg_btn
+    global negative_image_checkbox, negative_image
     global Rewind_btn
     global FastForward_btn
     global Free_btn
-    global Focus_btn
     global RPi_temp_value_label
     global Exit_btn
     global Start_btn
     global folder_frame_target_dir
     global exposure_frame
-    global film_type_S8_btn
-    global film_type_R8_btn
+    global film_type_S8_rb, film_type_R8_rb, film_type
     global save_bg, save_fg
     global PreviewStatus
     global auto_exposure_change_pause
@@ -2945,7 +2948,9 @@ def build_ui():
     global rwnd_speed_control_delay
     global match_wait_margin_value
     global sharpness_control_value
-    global PiCam2_preview_btn
+    global real_time_display_checkbox, real_time_display
+    global real_time_zoom_checkbox, real_time_zoom
+    global auto_stop_enabled_checkbox, auto_stop_enabled
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
     global hdr_btn
@@ -2980,6 +2985,8 @@ def build_ui():
     global file_type_dropdown, file_type_dropdown_selected
     global resolution_dropdown, resolution_dropdown_selected
     global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global resolution_label, resolution_dropdown, file_type_label, file_type_dropdown
+    global existing_folder_btn, new_folder_btn
 
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
@@ -3035,29 +3042,38 @@ def build_ui():
     bottom_area_row += 1
 
     # Switch Positive/negative modes
-    PosNeg_btn = Button(top_left_area_frame, text="Negative image", height=3, command=switch_negative_capture,
-                        activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PosNeg_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=4, sticky='NSEW')
-    setup_tooltip(PosNeg_btn, "Enable negative film capture (untested with real negative film).")
+    negative_image = tk.BooleanVar(value=False)
+    #toggle_btn = tk.Checkbutton(root, text="Toggle", variable=var, command=toggle_button, indicatoron=False)
+    negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film', height=1,
+                                                 variable=negative_image, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize), command=set_negative_image,
+                                                 indicatoron=False, selectcolor="sea green")
+    negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+    setup_tooltip(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
     bottom_area_row += 1
 
-    # Pi Camera preview selection: Preview (by PiCamera), disabled, postview (display last captured frame))
-    PiCam2_preview_btn = Button(top_left_area_frame, text="Real Time display ON", height=3, command=PiCamera2_preview,
-                       activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    PiCam2_preview_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5, 0), pady=4, sticky='NSEW')
-    setup_tooltip(PiCam2_preview_btn, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
+    # Real time view to allow focus
+    real_time_display = tk.BooleanVar(value=False)
+    real_time_display_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus view', height=1,
+                                                variable=real_time_display, onvalue=True, offvalue=False,
+                                                font=("Arial", FontSize), command=set_real_time_display,
+                                                indicatoron=False, selectcolor="sea green")
+    real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+    setup_tooltip(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
-    Focus_btn = Button(top_left_area_frame, text="Focus Zoom ON", height=3, command=set_focus_zoom,
-                       activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
-    Focus_btn.config(state=DISABLED)
-    Focus_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, sticky='NSEW')
-    setup_tooltip(Focus_btn, "Zoom in on the real-time film preview. Useful to focus the film.")
+    real_time_zoom = tk.BooleanVar(value=False)
+    real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
+                                             variable=real_time_zoom, onvalue=True, offvalue=False,
+                                             font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
+                                             selectcolor="sea green")
+    real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+    setup_tooltip(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
     bottom_area_row += 1
 
     # Focus zoom control (in out, up, down, left, right)
-    Focus_frame = LabelFrame(top_left_area_frame, text='Focus control', height=3, font=("Arial", FontSize-2))
+    Focus_frame = LabelFrame(top_left_area_frame, text='Zoom control', height=3, font=("Arial", FontSize-2))
     Focus_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, pady=4, ipady=2, sticky='NSEW')
     bottom_area_row += 1
 
@@ -3089,6 +3105,16 @@ def build_ui():
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     setup_tooltip(focus_rt_btn, "Move zoom view to the right.")
+    bottom_area_row += 1
+
+    # Activate focus zoom, to facilitate focusing the camera
+    auto_stop_enabled = tk.BooleanVar(value=False)
+    auto_stop_enabled_checkbox = tk.Checkbutton(top_left_area_frame, text='Automatic stop', height=1,
+                                                 variable=auto_stop_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize), command=set_auto_stop_enabled)
+    auto_stop_enabled_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+    setup_tooltip(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
+    bottom_area_row += 1
 
     # Create vertical button column at right *************************************
     # Application Exit button
@@ -3216,17 +3242,16 @@ def build_ui():
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', height=1, font=("Arial", FontSize-2))
     film_type_frame.grid(row=top_right_area_row, column=0, padx=4, pady=4, sticky='NSEW')
 
-    film_type_buttons = Frame(film_type_frame, width=16, height=1)
-    film_type_buttons.pack(side=TOP, padx=4, pady=6)
-    film_type_S8_btn = Button(film_type_buttons, text='S8', width=4, height=1, font=("Arial", FontSize+2, 'bold'),
-                              command=set_s8, activebackground='#f0f0f0',
-                              relief=SUNKEN)
-    film_type_S8_btn.pack(side=LEFT)
-    setup_tooltip(film_type_S8_btn, "Select Super 8 film.")
-    film_type_R8_btn = Button(film_type_buttons, text='R8', width=4, height=1, font=("Arial", FontSize+2, 'bold'),
-                              command=set_r8, activebackground='#f0f0f0')
-    film_type_R8_btn.pack(side=LEFT)
-    setup_tooltip(film_type_R8_btn, "Select Regular 8 film.")
+    # Radio buttons to select R8/S8. Required to select adequate pattern, and match position
+    film_type = tk.StringVar()
+    film_type_S8_rb = tk.Radiobutton(film_type_frame, text="S8", variable=film_type, command=set_s8,
+                                  value='S8', font=("Arial", FontSize))
+    film_type_S8_rb.pack(side=LEFT, padx=16)
+    setup_tooltip(film_type_S8_rb, "Handle as Super 8 film")
+    film_type_R8_rb = tk.Radiobutton(film_type_frame, text="R8", variable=film_type, command=set_r8,
+                                  value='R8', font=("Arial", FontSize))
+    film_type_R8_rb.pack(side=RIGHT, padx=16)
+    setup_tooltip(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
 
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize-2))
