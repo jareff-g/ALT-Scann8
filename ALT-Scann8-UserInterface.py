@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.1"
-__date__ = "2024-02-06"
+__version__ = "1.9.2"
+__date__ = "2024-02-07"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -371,6 +371,11 @@ def set_focus_zoom():
     global SimulatedRun
     global ZoomSize, real_time_zoom_checkbox
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
+
+    if real_time_zoom.get():
+        real_time_zoom_checkbox.config(fg="white")  # Change background color and text color when checked
+    else:
+        real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
     if not SimulatedRun and not CameraDisabled:
         if real_time_zoom.get():
@@ -1297,7 +1302,7 @@ def capture_display_thread(queue, event, id):
             if negative_image.get():
                 image_array = np.asarray(message[0])
                 image_array = np.negative(image_array)
-                message[0] = Image.fromarray(image_array)
+                message = (Image.fromarray(image_array), message[1], message[2])
             draw_preview_image(message[0], message[2])
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
@@ -1327,7 +1332,7 @@ def capture_save_thread(queue, event, id):
         if negative_image.get():
             image_array = np.asarray(message[0])
             image_array = np.negative(image_array)
-            message[0] = Image.fromarray(image_array)
+            message = (Image.fromarray(image_array), message[1], message[2])
         if message[2] > 1:  # Hdr frame 1 has standard filename
             logging.debug("Saving HDR frame n.%i", message[2])
             message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type_dropdown_selected.get()), quality=95)
@@ -1492,20 +1497,30 @@ def switch_hdr_viewx4():
     SessionData["HdrViewX4Active"] = str(HdrViewX4Active)
 
 
+def set_negative_image():
+    SessionData["NegativeCaptureActive"] = str(negative_image.get())
+    if negative_image.get():
+        negative_image_checkbox.config(fg="white")  # Change background color and text color when checked
+    else:
+        negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
+
+
 # Function to enable 'real' preview with PiCamera2
 # Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
 #  - Focus
 #  - Color adjustment
 #  - Exposure adjustment
-def real_time_display_set():
+def set_real_time_display():
     global win
     global capture_config, preview_config
     global real_time_display, Start_btn
 
     if real_time_display.get():
         logging.debug("Real time display enabled")
+        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
     else:
         logging.debug("Real time display disabled")
+        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
     if not SimulatedRun and not CameraDisabled:
         if real_time_display.get():
             camera.stop_preview()
@@ -2533,6 +2548,7 @@ def load_session_data():
                     PiCam2_configure()
             if 'NegativeCaptureActive' in SessionData:
                 negative_image.set(eval(SessionData["NegativeCaptureActive"]))
+                set_negative_image()
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -3021,28 +3037,32 @@ def build_ui():
 
     # Switch Positive/negative modes
     negative_image = tk.BooleanVar(value=False)
+    #toggle_btn = tk.Checkbutton(root, text="Toggle", variable=var, command=toggle_button, indicatoron=False)
     negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film', height=1,
                                                  variable=negative_image, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize))
-    negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+                                                 font=("Arial", FontSize), command=set_negative_image,
+                                                 indicatoron=False, selectcolor="sea green")
+    negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
     setup_tooltip(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
     bottom_area_row += 1
 
     # Real time view to allow focus
     real_time_display = tk.BooleanVar(value=False)
     real_time_display_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus view', height=1,
-                                                 variable=real_time_display, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize), command=real_time_display_set)
-    real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+                                                variable=real_time_display, onvalue=True, offvalue=False,
+                                                font=("Arial", FontSize), command=set_real_time_display,
+                                                indicatoron=False, selectcolor="sea green")
+    real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
     setup_tooltip(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
     real_time_zoom = tk.BooleanVar(value=False)
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
-                                                 variable=real_time_zoom, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize), command=set_focus_zoom)
-    real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+                                             variable=real_time_zoom, onvalue=True, offvalue=False,
+                                             font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
+                                             selectcolor="sea green")
+    real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
     setup_tooltip(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
     bottom_area_row += 1
 
