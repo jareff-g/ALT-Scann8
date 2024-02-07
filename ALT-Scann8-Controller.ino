@@ -82,6 +82,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_UNCONDITIONAL_FAST_FORWARD 65
 #define CMD_SET_SCAN_SPEED 70
 #define CMD_SET_STALL_TIME 72
+#define CMD_SET_AUTO_STOP 74
 #define CMD_REPORT_PLOTTER_INFO 87
 // I2C responses (Arduino to RPi): Constant definition
 #define RSP_VERSION_ID 1
@@ -186,6 +187,8 @@ boolean PT_Level_Auto = true;   // Automatic calculation of PT level threshold
 boolean Frame_Steps_Auto = true;
 
 boolean IntegratedPlotter = false;
+
+boolean AutoStopEnabled = false;
 
 // Collect outgoing film frequency
 int default_collect_timer = 1000;
@@ -365,6 +368,10 @@ void loop() {
                 }
                 scan_process_ongoing = false;
                 SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                break;
+            case CMD_SET_AUTO_STOP:
+                DebugPrint(">Auto stop", param);
+                AutoStopEnabled = param;
                 break;
         }
 
@@ -786,7 +793,7 @@ boolean SlowForward(){
         LastMove = CurrentTime + 700;
     }
     // Check if film still present (auto stop at end of reel)
-    if (NoFilmDetected) {
+    if (AutoStopEnabled && NoFilmDetected) {
         SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
         return(false);
     }
@@ -922,7 +929,7 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         // Check if film still present (auto stop at end of reel)
-        if (NoFilmDetected) {
+        if (AutoStopEnabled && NoFilmDetected) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);
         }
