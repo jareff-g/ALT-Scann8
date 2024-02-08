@@ -506,27 +506,41 @@ def set_existing_folder():
     global SimulatedRun
 
     if not SimulatedRun:
-        CurrentDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
+        NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
     else:
-        CurrentDir = filedialog.askdirectory(initialdir=CurrentDir,
+        NewDir = filedialog.askdirectory(initialdir=CurrentDir,
                                                 title="Select existing folder with snapshots for simulated run")
-    if not CurrentDir:
+    if not NewDir:
         return
-    else:
-        folder_frame_target_dir.config(text=CurrentDir)
-        SessionData["CurrentDir"] = str(CurrentDir)
+
+    filecount = 0
+    for name in os.listdir(NewDir):
+        if os.path.isfile(os.path.join(NewDir, name)):
+            filecount += 1
 
     current_frame_str = tk.simpledialog.askstring(title="Enter number of last captured frame",
                                                   prompt="Last frame captured?")
     if current_frame_str is None:
-        CurrentFrame = 0
-        return
-    else:
-        if current_frame_str == '':
-            current_frame_str = '0'
-        CurrentFrame = int(current_frame_str)
+        current_frame_str = '0'
+
+    if current_frame_str == '':
+        current_frame_str = '0'
+    NewCurrentFrame = int(current_frame_str)
+
+    if NewCurrentFrame <= filecount:
+        confirm = tk.messagebox.askyesno(title='Files exist in target folder',
+                                         message=f"Newly selected folder already contains {filecount} files."
+                                         f"\r\nSetting {NewCurrentFrame} as initial frame will overwrite some of them."
+                                         f"Are you sure you want to continue?")
+    if confirm:
+        CurrentFrame = NewCurrentFrame
+        CurrentDir = NewDir
+
         Scanned_Images_number_str.set(str(current_frame_str))
         SessionData["CurrentFrame"] = str(CurrentFrame)
+
+        folder_frame_target_dir.config(text=CurrentDir)
+        SessionData["CurrentDir"] = str(CurrentDir)
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
