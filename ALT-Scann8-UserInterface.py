@@ -369,13 +369,15 @@ def set_focus_zoom():
     global FocusZoomActive
     global save_bg, save_fg
     global SimulatedRun
-    global ZoomSize, real_time_zoom_checkbox
+    global ZoomSize
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
 
     if real_time_zoom.get():
         real_time_zoom_checkbox.config(fg="white")  # Change background color and text color when checked
+        real_time_display_checkbox.config(state=DISABLED)
     else:
         real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
+        real_time_display_checkbox.config(state=NORMAL)
 
     if not SimulatedRun and not CameraDisabled:
         if real_time_zoom.get():
