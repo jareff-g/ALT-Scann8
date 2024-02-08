@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.8"
-#define  __date__       "2024-02-07"
-#define  __version_highlight__  "Add Parameter to enable/disable auto-stop"
+#define __version__     "1.0.9"
+#define  __date__       "2024-02-08"
+#define  __version_highlight__  "New algorithm to detect if film present"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -731,10 +731,38 @@ void CollectOutgoingFilm(void) {
     }
 }
 
+// ------------- Detect when PT curve becomes flat ---------------
+boolean film_detected(int pt_value)
+{
+    const int max_values = 20;
+    static int rolling_pt_values[max_values];
+    static int value_idx = 0, counter = 0;
+    int total, max_value, min_value, global_variance, instant_variance;
+
+    rolling_pt_values[value_idx] = pt_value;
+    value_idx = (value_idx+1) % max_values;
+    if (counter < max_values) counter ++;
+    if (counter >= max_values) {
+        total = 0;
+        max_value = MinPT;
+        min_value = MaxPT;
+        for (int i= 0; i < max_values; i++) {
+            max_value = max(max_value, rolling_pt_values[i]);
+            min_value = min(min_value, rolling_pt_values[i]);
+        }
+        global_variance = MaxPT - MinPT;
+        instant_variance = max_value - min_value;
+        if (abs(global_variance-instant_variance) < instant_variance * 4) 
+            return(true);
+        else
+            return(false);
+    }
+    return(true);
+}
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
     float ratio;
-    int user_margin, fixed_margin;
+    int user_margin, fixed_margin, average_pt;
 
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
@@ -753,10 +781,12 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    if (millis() - FilmDetectedTime > MaxFilmStallTime)
+    if (millis() - FilmDetectedTime > MaxFilmStallTime){
         NoFilmDetected = true;
-    else if (MaxPT_Dynamic-MinPT_Dynamic >= MaxPT/4) 
+    }
+    else if (film_detected(PT_SignalLevelRead)) {
         FilmDetectedTime = millis();
+    }
 
     return(PT_SignalLevelRead);
 }
