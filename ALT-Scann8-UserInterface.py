@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.2"
-__date__ = "2024-02-07"
+__version__ = "1.9.3"
+__date__ = "2024-02-08"
 __version_highlight__ = "Multi-resolution capture"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -388,8 +388,6 @@ def set_focus_zoom():
     time.sleep(.2)
     FocusZoomActive = not FocusZoomActive
 
-    # Enable/Disable related buttons
-    button_status_change_except(real_time_zoom_checkbox, real_time_zoom.get())
     # Enable disable buttons for focus move
     if ExpertMode:
         focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
@@ -1505,10 +1503,6 @@ def set_negative_image():
         negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
 
-def set_auto_stop_enabled():
-    SessionData["AutoStopActive"] = str(auto_stop_enabled.get())
-
-
 # Function to enable 'real' preview with PiCamera2
 # Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
 #  - Focus
@@ -1524,7 +1518,7 @@ def set_real_time_display():
         real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
     else:
         logging.debug("Real time display disabled")
-        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
+        real_time_display_checkbox.config(fg="black")  # Change background color and text color when checked
     if not SimulatedRun and not CameraDisabled:
         if real_time_display.get():
             camera.stop_preview()
@@ -2275,9 +2269,11 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
     global plotter_width, plotter_height
 
     if plotter_canvas == None:
+        logging.error("Plotter canvas does not exist, exiting...")
         return
 
     if PTValue > MaxPT * 10:
+        logging.warning("PT level too high, ignoring it")
         return
 
     MaxPT = max(MaxPT,PTValue)
@@ -2403,6 +2399,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
+        logging.debug("Received plotter info from Arduino")
         if PlotterMode:
             UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
@@ -2555,6 +2552,7 @@ def load_session_data():
                 set_negative_image()
             if 'AutoStopActive' in SessionData:
                 auto_stop_enabled.set(eval(SessionData["AutoStopActive"]))
+                set_auto_stop_enabled()
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -3067,7 +3065,7 @@ def build_ui():
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
                                              variable=real_time_zoom, onvalue=True, offvalue=False,
                                              font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
-                                             selectcolor="sea green")
+                                             selectcolor="sea green", state=DISABLED)
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
     setup_tooltip(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
     bottom_area_row += 1
