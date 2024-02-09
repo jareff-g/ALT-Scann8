@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.3"
-__date__ = "2024-02-08"
-__version_highlight__ = "Multi-resolution capture"
+__version__ = "1.9.4"
+__date__ = "2024-02-09"
+__version_highlight__ = "Bugfixes film presence detection"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -331,6 +331,8 @@ def exit_app():  # Exit Application
             camera.close()
     # Set window position for next run
     SessionData["WindowPos"] = win.geometry()
+    SessionData["AutoStopActive"] = auto_stop_enabled.get()
+    SessionData["AutoStopType"] = autostop_type.get()
     # Write session data upon exit
     with open(PersistedDataFilename, 'w') as f:
         json.dump(SessionData, f)
@@ -360,8 +362,11 @@ def set_free_mode():
 
 def set_auto_stop_enabled():
     if not SimulatedRun:
-        send_arduino_command(CMD_SET_AUTO_STOP, auto_stop_enabled.get())
-    logging.debug(f"Set Auto Stop: {auto_stop_enabled.get()}")
+        send_arduino_command(CMD_SET_AUTO_STOP, auto_stop_enabled.get() and autostop_type.get() == 'No_film')
+        logging.debug(f"Sent Auto Stop to Arduino: {auto_stop_enabled.get() and autostop_type.get() == 'No_film'}")
+    autostop_no_film_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
+    autostop_counter_zero_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
+    logging.debug(f"Set Auto Stop: {auto_stop_enabled.get()}, {autostop_type.get()}")
 
 
 # Enable/Disable camera zoom to facilitate focus
@@ -529,11 +534,14 @@ def set_existing_folder():
         current_frame_str = '0'
     NewCurrentFrame = int(current_frame_str)
 
-    if NewCurrentFrame <= filecount:
+    if filecount > 0 and NewCurrentFrame <= filecount:
         confirm = tk.messagebox.askyesno(title='Files exist in target folder',
                                          message=f"Newly selected folder already contains {filecount} files."
                                          f"\r\nSetting {NewCurrentFrame} as initial frame will overwrite some of them."
                                          f"Are you sure you want to continue?")
+    else:
+        confirm = True
+
     if confirm:
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
@@ -2169,6 +2177,10 @@ def capture_loop():
                     if FramesPerMinute != 0:
                         minutes_pending = FramesToGo // FramesPerMinute
                         time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
+                else:
+                    ScanStopRequested = True  # Stop in next capture loop
+                    SessionData["FramesToGo"] = ''
+                    frames_to_go_str.set('')    # clear frames to go box to prevent it stops again in next scan
             CurrentFrame += 1
             session_frames += 1
             register_frame()
@@ -2543,8 +2555,9 @@ def load_session_data():
                 CurrentFrame = int(SessionData["CurrentFrame"])
                 Scanned_Images_number_str.set(SessionData["CurrentFrame"])
             if 'FramesToGo' in SessionData:
-                FramesToGo = int(SessionData["FramesToGo"])
-                frames_to_go_str.set(str(FramesToGo))
+                if SessionData["FramesToGo"].isdigit():
+                    FramesToGo = int(SessionData["FramesToGo"])
+                    frames_to_go_str.set(str(FramesToGo))
             if 'FilmType' in SessionData:
                 film_type.set(SessionData["FilmType"])
                 if SessionData["FilmType"] == "R8":
@@ -2566,8 +2579,10 @@ def load_session_data():
             if 'NegativeCaptureActive' in SessionData:
                 negative_image.set(eval(SessionData["NegativeCaptureActive"]))
                 set_negative_image()
+            if 'AutoStopType' in SessionData:
+                autostop_type.set(SessionData["AutoStopType"])
             if 'AutoStopActive' in SessionData:
-                auto_stop_enabled.set(eval(SessionData["AutoStopActive"]))
+                auto_stop_enabled.set(SessionData["AutoStopActive"])
                 set_auto_stop_enabled()
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
@@ -3001,6 +3016,8 @@ def build_ui():
     global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
     global resolution_label, resolution_dropdown, file_type_label, file_type_dropdown
     global existing_folder_btn, new_folder_btn
+    global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
+
 
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
@@ -3121,13 +3138,33 @@ def build_ui():
     setup_tooltip(focus_rt_btn, "Move zoom view to the right.")
     bottom_area_row += 1
 
+    # Frame for automatic stop & methods
+    autostop_frame = Frame(top_left_area_frame)
+    autostop_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='WE')
+
     # Activate focus zoom, to facilitate focusing the camera
     auto_stop_enabled = tk.BooleanVar(value=False)
-    auto_stop_enabled_checkbox = tk.Checkbutton(top_left_area_frame, text='Automatic stop', height=1,
+    auto_stop_enabled_checkbox = tk.Checkbutton(autostop_frame, text='Auto-stop if', height=1,
                                                  variable=auto_stop_enabled, onvalue=True, offvalue=False,
                                                  font=("Arial", FontSize), command=set_auto_stop_enabled)
-    auto_stop_enabled_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+    #auto_stop_enabled_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
+    auto_stop_enabled_checkbox.pack(side = TOP, anchor=W)
     setup_tooltip(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
+
+    # Radio buttons to select auto-stop method
+    autostop_type = tk.StringVar()
+    autostop_type.set('No_film')
+    autostop_no_film_rb = tk.Radiobutton(autostop_frame, text="No film", variable=autostop_type,
+                                  value='No_film', font=("Arial", FontSize), command=set_auto_stop_enabled)
+    autostop_no_film_rb.pack(side=TOP, anchor=W, padx=10)
+    setup_tooltip(autostop_no_film_rb, "Stop when film is not detected by PT")
+    autostop_counter_zero_rb = tk.Radiobutton(autostop_frame, text="Count zero", variable=autostop_type,
+                                  value='counter_to_zero', font=("Arial", FontSize), command=set_auto_stop_enabled)
+    autostop_counter_zero_rb.pack(side=TOP, anchor=W, padx=10)
+    setup_tooltip(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
+    autostop_no_film_rb.config(state = DISABLED)
+    autostop_counter_zero_rb.config(state = DISABLED)
+
     bottom_area_row += 1
 
     # Create vertical button column at right *************************************
@@ -3244,7 +3281,7 @@ def build_ui():
     frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=4, pady=4, sticky='NSEW')
     top_right_area_row += 1
 
-    frames_to_go_str = tk.StringVar(value=str(FramesToGo))
+    frames_to_go_str = tk.StringVar(value='')
     frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=14, font=("Arial", FontSize-2), justify="right")
     frames_to_go_entry.pack(side=TOP, pady=6)
     setup_tooltip(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of remaining time to finish.")
