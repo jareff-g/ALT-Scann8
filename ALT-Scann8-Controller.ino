@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.9"
-#define  __date__       "2024-02-08"
-#define  __version_highlight__  "New algorithm to detect if film present"
+#define __version__     "1.0.10"
+#define  __date__       "2024-02-09"
+#define  __version_highlight__  "Bugfixes film presence detection"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -395,7 +395,7 @@ void loop() {
                         scan_process_ongoing = true;
                         delay(200);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
-                        FilmDetectedTime = millis();
+                        FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
                         ScanSpeed = OriginalScanSpeed;
                         collect_timer = scan_collect_timer;
@@ -445,7 +445,7 @@ void loop() {
                         break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
-                        FilmDetectedTime = millis();
+                        FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
                         collect_timer = 10;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
@@ -734,35 +734,32 @@ void CollectOutgoingFilm(void) {
 // ------------- Detect when PT curve becomes flat ---------------
 boolean film_detected(int pt_value)
 {
-    const int max_values = 20;
-    static int rolling_pt_values[max_values];
-    static int value_idx = 0, counter = 0;
-    int total, max_value, min_value, global_variance, instant_variance;
+    static int max_value, min_value;
+    int instant_variance;
+    static unsigned long time_to_renew_minmax = 0;
+    unsigned long CurrentTime = millis();
+    int minmax_validity_time = 2000;  // Renew min max values every two seconds
 
-    rolling_pt_values[value_idx] = pt_value;
-    value_idx = (value_idx+1) % max_values;
-    if (counter < max_values) counter ++;
-    if (counter >= max_values) {
-        total = 0;
-        max_value = MinPT;
-        min_value = MaxPT;
-        for (int i= 0; i < max_values; i++) {
-            max_value = max(max_value, rolling_pt_values[i]);
-            min_value = min(min_value, rolling_pt_values[i]);
-        }
-        global_variance = MaxPT - MinPT;
-        instant_variance = max_value - min_value;
-        if (abs(global_variance-instant_variance) < instant_variance * 4) 
-            return(true);
-        else
-            return(false);
+    if (CurrentTime > time_to_renew_minmax || time_to_renew_minmax - CurrentTime > minmax_validity_time) {
+      time_to_renew_minmax = CurrentTime + minmax_validity_time;
+      max_value = MinPT;
+      min_value = MaxPT;
     }
-    return(true);
+    max_value = max(max_value, pt_value);
+    min_value = min(min_value, pt_value);
+
+    instant_variance = max_value - min_value;
+    if (instant_variance > 30)
+        return(true);
+    else
+        return(false);
 }
+
 // ------------- Centralized phototransistor level read ---------------
 int GetLevelPT() {
     float ratio;
     int user_margin, fixed_margin, average_pt;
+    unsigned long CurrentTime = millis();
 
     PT_SignalLevelRead = analogRead(PHOTODETECT);
     MaxPT = max(PT_SignalLevelRead, MaxPT);
@@ -781,11 +778,14 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    if (millis() - FilmDetectedTime > MaxFilmStallTime){
+    if (CurrentTime > FilmDetectedTime) {
         NoFilmDetected = true;
     }
+    else if (FilmDetectedTime - CurrentTime > MaxFilmStallTime) { // Overrun: Normalize value
+        FilmDetectedTime = millis() + MaxFilmStallTime;
+    }
     else if (film_detected(PT_SignalLevelRead)) {
-        FilmDetectedTime = millis();
+        FilmDetectedTime = millis() + MaxFilmStallTime;
     }
 
     return(PT_SignalLevelRead);
