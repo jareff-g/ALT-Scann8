@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.9"
-#define  __date__       "2024-02-08"
-#define  __version_highlight__  "New algorithm to detect if film present"
+#define __version__     "1.0.10"
+#define  __date__       "2024-02-09"
+#define  __version_highlight__  "Bugfixes film presence detection"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -734,7 +734,7 @@ void CollectOutgoingFilm(void) {
 // ------------- Detect when PT curve becomes flat ---------------
 boolean film_detected(int pt_value)
 {
-    const int max_values = 20;
+    const int max_values = 50;
     static int rolling_pt_values[max_values];
     static int value_idx = 0, counter = 0;
     int total, max_value, min_value, global_variance, instant_variance;
@@ -752,7 +752,8 @@ boolean film_detected(int pt_value)
         }
         global_variance = MaxPT - MinPT;
         instant_variance = max_value - min_value;
-        if (abs(global_variance-instant_variance) < instant_variance * 4) 
+        // if (abs(global_variance-instant_variance) < 200)
+        if (instant_variance < 100)
             return(true);
         else
             return(false);
