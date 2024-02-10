@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.8"
+__version__ = "1.9.9"
 __date__ = "2024-02-10"
-__version_highlight__ = "Fix for Automatic white balance (seem to be broken)"
+__version_highlight__ = "Fix for UI toggle button (previous version was not working properly)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -73,7 +73,6 @@ import cv2
 
 #  ######### Global variable definition (I know, too many...) ##########
 win = None
-recreating_window = False
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -1134,8 +1133,6 @@ def button_status_change_except(except_button, active):
         file_type_dropdown.config(state=DISABLED if active else NORMAL)
     if except_button != existing_folder_btn:
         existing_folder_btn.config(state=DISABLED if active else NORMAL)
-    if except_button != full_ui_checkbox:
-        full_ui_checkbox.config(state=DISABLED if active else NORMAL)
 
 
 def advance_movie(from_arduino = False):
@@ -1527,12 +1524,21 @@ def set_negative_image():
 
 
 def toggle_ui_size():
-    global ExpertMode, ExperimentalMode, PlotterMode
-    ExpertMode = not ExpertMode
-    ExperimentalMode = ExpertMode
-    PlotterMode = ExpertMode
-    create_main_window()
+    global app_width, app_height
+    global expert_frame, experimental_frame
 
+    if toggle_ui_small.get():
+        app_height -= 220 if BigSize else 170
+        expert_frame.pack_forget()
+        experimental_frame.pack_forget()
+    else:
+        app_height += 220 if BigSize else 170
+        expert_frame.pack(side=LEFT)
+        experimental_frame.pack(side=LEFT)
+    # Prevent window resize
+    win.minsize(app_width, app_height)
+    win.maxsize(app_width, app_height)
+    win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
 
 # Function to enable 'real' preview with PiCamera2
 # Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
@@ -2304,8 +2310,7 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     temperature_check()
     preview_check()
 
-    if not recreating_window:
-        win.after(1000, onesec_periodic_checks)
+    win.after(1000, onesec_periodic_checks)
 
 
 def set_file_type(event):
@@ -2474,8 +2479,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     if ArduinoTrigger != 0:
         ArduinoTrigger = 0
 
-    if not recreating_window:
-        win.after(10, arduino_listen_loop)
+    win.after(10, arduino_listen_loop)
 
 
 def load_persisted_data_from_disk():
@@ -2859,20 +2863,13 @@ def hdr_reinit():
 
 
 def create_main_window():
-    global win, recreating_window
+    global win
     global plotter_width, plotter_height
     global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
     global ForceSmallSize, ForceBigSize, FontSize, BigSize
     global TopWinX, TopWinY
     global WinInitDone
 
-    if win is not None:
-        if not recreating_window:
-            win.config(cursor="watch")  # Set 'hourglass' cursor while switching
-            recreating_window = True
-            win.after(1100, create_main_window)
-            return
-        win.destroy()   # We can safely destroy the window
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     if SimulatedRun:
         win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
@@ -2922,10 +2919,6 @@ def create_main_window():
     PreviewWinX = 250
     PreviewWinY = 150
     WinInitDone = True
-    # Recreate pending afters
-    recreating_window = False
-    win.after(10, arduino_listen_loop)
-    win.after(1000, onesec_periodic_checks)
 
 
 def tscann8_init():
@@ -3098,8 +3091,9 @@ def create_widgets():
     global resolution_label, resolution_dropdown, file_type_label, file_type_dropdown
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
-    global full_ui_checkbox
+    global full_ui_checkbox, toggle_ui_small
     global AE_enabled, AWB_enabled
+    global expert_frame, experimental_frame
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3249,11 +3243,16 @@ def create_widgets():
     bottom_area_row += 1
 
     # Toggle UI size
-    full_ui_checkbox = tk.Button(top_left_area_frame, text='Toggle UI', height=1,
-                                                 font=("Arial", FontSize), command=toggle_ui_size)
-    full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
-    setup_tooltip(full_ui_checkbox, "Toggle between full/restricted user interface")
-    bottom_area_row += 1
+    if ExpertMode:
+        toggle_ui_small = tk.BooleanVar(value=False)
+        full_ui_checkbox = tk.Checkbutton(top_left_area_frame, text='Toggle UI', height=1,
+                                                 variable=toggle_ui_small, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize), command=toggle_ui_size, indicatoron=False,
+                                                 selectcolor="sea green")
+
+        full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+        setup_tooltip(full_ui_checkbox, "Toggle between full/restricted user interface")
+        bottom_area_row += 1
 
     # Create vertical button column at right *************************************
     # Application Exit button
