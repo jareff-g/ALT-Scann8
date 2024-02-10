@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.4"
-__date__ = "2024-02-09"
-__version_highlight__ = "Bugfixes film presence detection"
+__version__ = "1.9.5"
+__date__ = "2024-02-10"
+__version_highlight__ = "Bugfixes - Frames-to-go persisted value"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -333,6 +333,8 @@ def exit_app():  # Exit Application
     SessionData["WindowPos"] = win.geometry()
     SessionData["AutoStopActive"] = auto_stop_enabled.get()
     SessionData["AutoStopType"] = autostop_type.get()
+    if frames_to_go_str.get() == '':
+        SessionData["FramesToGo"] = -1
     # Write session data upon exit
     with open(PersistedDataFilename, 'w') as f:
         json.dump(SessionData, f)
@@ -2179,7 +2181,7 @@ def capture_loop():
                         time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
                 else:
                     ScanStopRequested = True  # Stop in next capture loop
-                    SessionData["FramesToGo"] = ''
+                    SessionData["FramesToGo"] = -1
                     frames_to_go_str.set('')    # clear frames to go box to prevent it stops again in next scan
             CurrentFrame += 1
             session_frames += 1
@@ -2555,7 +2557,7 @@ def load_session_data():
                 CurrentFrame = int(SessionData["CurrentFrame"])
                 Scanned_Images_number_str.set(SessionData["CurrentFrame"])
             if 'FramesToGo' in SessionData:
-                if SessionData["FramesToGo"].isdigit():
+                if SessionData["FramesToGo"] != -1:
                     FramesToGo = int(SessionData["FramesToGo"])
                     frames_to_go_str.set(str(FramesToGo))
             if 'FilmType' in SessionData:
