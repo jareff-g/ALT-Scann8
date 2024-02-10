@@ -635,7 +635,6 @@ def auto_exposure_change_pause_selection():
 
 
 def wb_red_selection(updown):
-    global colour_gains_red_value_label
     global GainBlue, GainRed
     global wb_red_spinbox, wb_red_str
     global SimulatedRun
@@ -656,7 +655,6 @@ def wb_red_selection(updown):
 
 
 def wb_blue_selection(updown):
-    global colour_gains_blue_value_label
     global GainBlue, GainRed
     global wb_blue_spinbox, wb_blue_str
     global SimulatedRun
@@ -676,7 +674,6 @@ def wb_blue_selection(updown):
 
 
 def wb_spinbox_auto():
-    global colour_gains_red_value_label
     global wb_red_spinbox, wb_red_str
     global wb_blue_spinbox, wb_blue_str
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
@@ -685,7 +682,6 @@ def wb_spinbox_auto():
     global colour_gains_auto_btn, awb_frame
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
-    global colour_gains_red_value_label, colour_gains_blue_value_label
 
     if not ExpertMode:
         return
@@ -709,8 +705,8 @@ def wb_spinbox_auto():
             camera_colour_gains = metadata["ColourGains"]
             GainRed = camera_colour_gains[0]
             GainBlue = camera_colour_gains[1]
-            colour_gains_red_value_label.config(text=str(round(GainRed, 1)))
-            colour_gains_blue_value_label.config(text=str(round(GainBlue, 1)))
+            wb_red_spinbox.config(text=str(round(GainRed, 1)))
+            wb_blue_spinbox.config(text=str(round(GainBlue, 1)))
             camera.set_controls({"AwbEnable": 0})
 
     arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
@@ -764,7 +760,6 @@ def manual_scan_take_snap():
 
 
 def match_wait_margin_selection(updown):
-    global colour_gains_red_value_label
     global MatchWaitMargin, match_wait_margin_spinbox
     global wb_red_spinbox, wb_red_str
     global SimulatedRun
@@ -1871,8 +1866,8 @@ def capture(mode):
                     logging.debug("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
                 if ExpertMode:
-                    colour_gains_red_value_label.config(text=str(round(aux_gain_red, 1)))
-                    colour_gains_blue_value_label.config(text=str(round(aux_gain_blue, 1)))
+                    wb_red_str.set(str(round(aux_gain_red, 1)))
+                    wb_blue_str.set(str(round(aux_gain_blue, 1)))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 time.sleep(0.2)
@@ -2561,7 +2556,6 @@ def load_session_data():
     global hdr_btn
     global CurrentAwbAuto, AwbPause, GainRed, GainBlue
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
-    global colour_gains_red_value_label, colour_gains_blue_value_label
     global auto_exp_wait_checkbox
     global PersistedDataLoaded
     global min_frame_steps_str, frame_fine_tune_str, pt_level_str
@@ -3046,8 +3040,6 @@ def create_widgets():
     global ExposureAdaptPause
     global temp_in_fahrenheit
     global TempInFahrenheit
-    global colour_gains_red_value_label
-    global colour_gains_blue_value_label
     global colour_gains_auto_btn, awb_frame
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
     global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
@@ -3472,8 +3464,8 @@ def create_widgets():
                                                     state=NORMAL, font=("Arial", FontSize-1))
         wb_red_btn.grid(row=2, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
-        wb_red_str = tk.StringVar(value=str(GainRed))
 
+        wb_red_str = tk.StringVar(value=str(GainRed))
         wb_red_selection_aux = exp_wb_frame.register(wb_red_selection)
         wb_red_spinbox = tk.Spinbox(
             exp_wb_frame,
@@ -3488,8 +3480,8 @@ def create_widgets():
                                                     state=NORMAL, font=("Arial", FontSize-1))
         wb_blue_btn.grid(row=3, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_blue_btn, "Toggle automatic white balance for blue channel (on/off).")
-        wb_blue_str = tk.StringVar(value=str(GainBlue))
 
+        wb_blue_str = tk.StringVar(value=str(GainBlue))
         wb_blue_selection_aux = exp_wb_frame.register(wb_blue_selection)
         wb_blue_spinbox = tk.Spinbox(
             exp_wb_frame,
