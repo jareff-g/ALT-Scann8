@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.7"
+__version__ = "1.9.8"
 __date__ = "2024-02-10"
-__version_highlight__ = "Dynamic UI toggle + Catch preview window manual close"
+__version_highlight__ = "Fix for Automatic white balance (seem to be broken)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -238,7 +238,6 @@ CurrentExposure = 0     # Zero means automatic exposure
 ExposureAdaptPause = True   # by default (non-expert) we wait for camera to stabilize when AE changes
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 CurrentExposureStr = "Auto"
-CurrentAwbAuto = False   # AWB disabled by default
 AwbPause = False   # by default (non-expert) we wait for camera to stabilize when AWB changes
 GainRed = 2.2  # 2.4
 GainBlue = 2.2  # 2.8
@@ -572,7 +571,7 @@ def exposure_selection(updown):
     if not ExpertMode:
         return
 
-    if CurrentExposure == 0:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     CurrentExposure = CurrentExposure + 2000 if updown=='up' else CurrentExposure - 2000
@@ -582,35 +581,34 @@ def exposure_selection(updown):
     else:
         CurrentExposure = CurrentExposure / 2000 * 2000 # in case we are starting from 1
 
-    if CurrentExposure == 0:
-        CurrentExposureStr = "Auto"
-    else:
-        CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
+    CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
 
     SessionData["CurrentExposure"] = str(CurrentExposure)
 
-    exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
+    ###exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
 
     if not SimulatedRun and not CameraDisabled:
         camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
 
-    auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
+    ###auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
     exposure_spinbox.config(value=CurrentExposureStr)
 
 
 def exposure_spinbox_auto():
-    global exposure_spinbox, exposure_str
+    global exposure_spinbox
     global CurrentExposure, CurrentExposureStr
     global SimulatedRun
     global auto_exp_wait_checkbox
     global exposure_btn, exposure_spinbox
 
-    if CurrentExposure != 0:  # Not in automatic mode, activate auto
+    if AE_enabled.get():  # Not in automatic mode, activate auto
         CurrentExposure = 0
         CurrentExposureStr = "Auto"
         SessionData["CurrentExposure"] = str(CurrentExposure)
+        exposure_btn.config(fg="white", text="AUTO Exposure:")
+        auto_exp_wait_checkbox.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
-            camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
+            camera.controls.ExposureTime = 0  # Set auto exposure (maybe will not work, check pag 26 of picamera2 specs)
     else:
         if not SimulatedRun and not CameraDisabled:
             # Since we are in auto exposure mode, retrieve current value to start from there
@@ -620,7 +618,10 @@ def exposure_spinbox_auto():
             CurrentExposure = 3500  # Arbitrary Value for Simulated run
         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
         SessionData["CurrentExposure"] = str(CurrentExposure)
+        exposure_btn.config(fg="black", text="Exposure:")
+        auto_exp_wait_checkbox.config(state=DISABLED)
 
+    exposure_str.set(CurrentExposureStr)
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
     exposure_spinbox.config(value=CurrentExposureStr)
     arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
@@ -634,50 +635,48 @@ def auto_exposure_change_pause_selection():
 
 
 
-def wb_red_selection(updown):
+def wb_red_selection():
     global GainBlue, GainRed
-    global wb_red_spinbox, wb_red_str
+    global wb_red_spinbox
     global SimulatedRun
 
     if not ExpertMode:
         return
 
-    if CurrentAwbAuto:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     GainRed = float(wb_red_spinbox.get())
     SessionData["GainRed"] = GainRed
 
-    if not SimulatedRun and not CurrentAwbAuto and not CameraDisabled:
-        # camera.set_controls({"AwbEnable": 0})
+    if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
         camera.set_controls({"ColourGains": (GainRed, GainBlue)})
 
 
 
-def wb_blue_selection(updown):
+def wb_blue_selection():
     global GainBlue, GainRed
-    global wb_blue_spinbox, wb_blue_str
+    global wb_blue_spinbox
     global SimulatedRun
 
     if not ExpertMode:
         return
 
-    if CurrentAwbAuto:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     GainBlue = float(wb_blue_spinbox.get())
     SessionData["GainBlue"] = GainBlue
 
-    if not SimulatedRun and not CurrentAwbAuto and not CameraDisabled:
+    if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
         # camera.set_controls({"AwbEnable": 0})
         camera.set_controls({"ColourGains": (GainRed, GainBlue)})
 
 
 def wb_spinbox_auto():
-    global wb_red_spinbox, wb_red_str
-    global wb_blue_spinbox, wb_blue_str
+    global wb_red_spinbox
+    global wb_blue_spinbox
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
-    global CurrentAwbAuto
     global GainBlue, GainRed
     global colour_gains_auto_btn, awb_frame
     global colour_gains_red_btn_plus, colour_gains_red_btn_minus
@@ -686,19 +685,22 @@ def wb_spinbox_auto():
     if not ExpertMode:
         return
 
-    CurrentAwbAuto = not CurrentAwbAuto
-    SessionData["CurrentAwbAuto"] = str(CurrentAwbAuto)
+    SessionData["CurrentAwbAuto"] = str(AWB_enabled.get())
     SessionData["GainRed"] = str(GainRed)
     SessionData["GainBlue"] = str(GainBlue)
 
-    if CurrentAwbAuto:
+    if AWB_enabled.get():
         awb_red_wait_checkbox.config(state=NORMAL)
         awb_blue_wait_checkbox.config(state=NORMAL)
+        wb_red_btn.config(fg="white", text="AUTO AWB Red:")
+        wb_blue_btn.config(fg="white", text="AUTO AWB Blue:")
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AwbEnable": 1})
     else:
         awb_red_wait_checkbox.config(state=DISABLED)
         awb_blue_wait_checkbox.config(state=DISABLED)
+        wb_red_btn.config(fg="black", text="AWB Red:")
+        wb_blue_btn.config(fg="black", text="AWB Blue:")
         if not SimulatedRun and not CameraDisabled:
             # Retrieve current gain values from Camera
             metadata = camera.capture_metadata()
@@ -709,8 +711,8 @@ def wb_spinbox_auto():
             wb_blue_spinbox.config(text=str(round(GainBlue, 1)))
             camera.set_controls({"AwbEnable": 0})
 
-    arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
-    arrange_widget_state(CurrentAwbAuto, [wb_red_btn, wb_red_spinbox])
+    arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
+    arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox])
 
 
 
@@ -761,7 +763,7 @@ def manual_scan_take_snap():
 
 def match_wait_margin_selection(updown):
     global MatchWaitMargin, match_wait_margin_spinbox
-    global wb_red_spinbox, wb_red_str
+    global wb_red_spinbox
     global SimulatedRun
 
     if not ExpertMode:
@@ -1495,11 +1497,10 @@ def switch_hdr_capture():
         arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
     else:    # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
-        if CurrentExposure == 0:  # Automatic mode
-            SessionData["CurrentExposure"] = str(CurrentExposure)
+        if AE_enabled.get():  # Automatic mode
+            SessionData["CurrentExposure"] = str(0)
             if not SimulatedRun and not CameraDisabled:
-                camera.controls.ExposureTime = int(
-                    CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
+                camera.controls.ExposureTime = 0    # maybe will not work, check pag 26 of picamera2 specs
         else:
             if not SimulatedRun:
                 # Since we are in auto exposure mode, retrieve current value to start from there
@@ -1809,7 +1810,6 @@ def capture(mode):
     global raw_simulated_capture_image
     global simulated_capture_image
     global ExposureAdaptPause
-    global CurrentAwbAuto
     global AwbPause
     global PreviousGainRed, PreviousGainBlue
     global total_wait_time_autoexp, total_wait_time_awb
@@ -1823,7 +1823,7 @@ def capture(mode):
     os.chdir(CurrentDir)
 
     # Wait for auto exposure to adapt only if allowed (and if not using HDR)
-    if CurrentExposure == 0 and ExposureAdaptPause and not HdrCaptureActive:
+    if AE_enabled.get() and ExposureAdaptPause and not HdrCaptureActive:
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1832,11 +1832,12 @@ def capture(mode):
             # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000, then to 4000
             # Finally changed to allow a percentage of the value used previously
             # As we initialize this percentage to 50%, we start with double the original value
-            #if abs(aux_current_exposure - PreviousCurrentExposure) > 4000:
             if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
-                    aux_exposure_str = "Auto (" + str(round((aux_current_exposure - 20000) / 2000)) + ")"
-                    logging.debug("AE match: (%i,%s)",aux_current_exposure, aux_exposure_str)
+                    aux_exposure_str = f"{round((aux_current_exposure - 20000) / 2000)}"
+                    logging.debug(f"AE match: ({aux_current_exposure},Auto {aux_exposure_str})")
+                    exposure_str.set(aux_exposure_str)
+                    print(f"Updated exposure with {aux_exposure_str}")
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
                 time.sleep(0.2)
@@ -1849,7 +1850,7 @@ def capture(mode):
             logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
     # Wait for auto white balance to adapt only if allowed
-    if CurrentAwbAuto and AwbPause:
+    if AWB_enabled.get() and AwbPause:
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1868,6 +1869,7 @@ def capture(mode):
                 if ExpertMode:
                     wb_red_str.set(str(round(aux_gain_red, 1)))
                     wb_blue_str.set(str(round(aux_gain_blue, 1)))
+                    print(f"Updated wb with {str(round(aux_gain_red, 1))}, {str(round(aux_gain_blue, 1))}")
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 time.sleep(0.2)
@@ -1981,7 +1983,7 @@ def stop_scan_simulated():
 
 
 def capture_loop_simulated():
-    global CurrentDir, CurrentFrame, CurrentExposure
+    global CurrentDir, CurrentFrame
     global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str, frames_to_go_entry, time_to_go_time
     global NewFrameAvailable
     global ScanOngoing
@@ -2554,7 +2556,7 @@ def load_session_data():
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
     global hdr_btn
-    global CurrentAwbAuto, AwbPause, GainRed, GainBlue
+    global AwbPause, GainRed, GainBlue
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global auto_exp_wait_checkbox
     global PersistedDataLoaded
@@ -2562,8 +2564,6 @@ def load_session_data():
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps, frame_extra_steps_str
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
     global ScanSpeed, scan_speed_str
-    global exposure_str
-    global wb_red_str, wb_blue_str
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
@@ -2663,24 +2663,35 @@ def load_session_data():
                     if CurrentExposureStr == "Auto" or CurrentExposureStr == "0":
                         CurrentExposure = 0
                         CurrentExposureStr == "Auto"
+                        AE_enabled.set(True)
+                        exposure_btn.config(fg="white", text="AUTO Exposure:")
+                        auto_exp_wait_checkbox.config(state=NORMAL)
                     else:
                         CurrentExposure = int(float(CurrentExposureStr))
                         CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-                    exposure_str = CurrentExposureStr
+                        AE_enabled.set(False)
+                        exposure_btn.config(fg="black", text="Exposure:")
+                        auto_exp_wait_checkbox.config(state=DISABLED)
+                    exposure_str.set(CurrentExposureStr)
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
                     if ExposureAdaptPause:
                         auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
-                    CurrentAwbAuto = eval(SessionData["CurrentAwbAuto"])
-                    #if not CurrentAwbAuto:  # AWB on by default, if not call button to disable and perform needed actions
-                    wb_blue_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
-                    wb_red_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
-                    awb_red_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
-                    awb_blue_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
-                    arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
-                    arrange_widget_state(CurrentAwbAuto, [wb_red_btn, wb_red_spinbox])
+                    AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
+                    wb_blue_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
+                    wb_red_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
+                    awb_red_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
+                    awb_blue_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
+                    arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
+                    arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox])
+                    if AWB_enabled.get():
+                        wb_red_btn.config(fg="white", text="AUTO AWB Red:")
+                        wb_blue_btn.config(fg="white", text="AUTO AWB Blue:")
+                    else:
+                        wb_red_btn.config(fg="black", text="AWB Red:")
+                        wb_blue_btn.config(fg="black", text="AWB Blue:")
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
@@ -2688,10 +2699,10 @@ def load_session_data():
                         awb_blue_wait_checkbox.select()
                 if 'GainRed' in SessionData:
                     GainRed = float(SessionData["GainRed"])
-                    wb_red_str.set(GainRed)
+                    wb_red_str.set(str(round(GainRed,1)))
                 if 'GainBlue' in SessionData:
                     GainBlue = float(SessionData["GainBlue"])
-                    wb_blue_str.set(GainBlue)
+                    wb_blue_str.set(str(round(GainBlue,1)))
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = SessionData["MinFrameSteps"]
@@ -2740,7 +2751,7 @@ def load_session_data():
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
-        arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
+        arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
         arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
     if ExperimentalMode:
@@ -2795,7 +2806,7 @@ def PiCam2_change_resolution():
 
 def PiCam2_configure():
     global camera, capture_config, preview_config
-    global CurrentExposure, CurrentAwbAuto, SharpnessValue
+    global CurrentExposure, SharpnessValue
 
     camera.stop()
     target_res = resolution_dropdown_selected.get()
@@ -2815,7 +2826,7 @@ def PiCam2_configure():
     camera.configure(capture_config)
     camera.set_controls({"ExposureTime": CurrentExposure})
     camera.set_controls({"AnalogueGain": 1.0})
-    camera.set_controls({"AwbEnable": 1 if CurrentAwbAuto else 0})
+    camera.set_controls({"AwbEnable": 1 if AWB_enabled.get() else 0})
     camera.set_controls({"ColourGains": (2.2, 2.2)})  # Red 2.2, Blue 2.2 seem to be OK
     # In PiCamera2, '1' is the standard sharpness
     # It can be a floating point number from 0.0 to 16.0
@@ -3091,6 +3102,7 @@ def create_widgets():
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
     global full_ui_checkbox
+    global AE_enabled, AWB_enabled
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3432,15 +3444,17 @@ def create_widgets():
                                          text='Catch-up\ndelay',
                                          width=10, font=("Arial", FontSize-1))
         catch_up_delay_label.grid(row=0, column=2, padx=5, pady=1)
-        exposure_btn = Button(exp_wb_frame, text="Exposure:", width=12, height=1,
-                                                    command=exposure_spinbox_auto,
-                                                    activebackground='#f0f0f0',
-                                                    state=NORMAL, font=("Arial", FontSize-1))
+
+        # Automatic exposure
+        AE_enabled = tk.BooleanVar(value=False)
+        exposure_btn = tk.Checkbutton(exp_wb_frame, text='Exposure:', width=16, height=1,
+                                                 variable=AE_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize-1), command=exposure_spinbox_auto,
+                                                 indicatoron=False, selectcolor="sea green")
         exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
         exposure_str = tk.StringVar(value=str(CurrentExposure))
-
         exposure_selection_aux = exp_wb_frame.register(exposure_selection)
         exposure_spinbox = tk.Spinbox(
             exp_wb_frame,
@@ -3455,37 +3469,36 @@ def create_widgets():
                                                 command=auto_exposure_change_pause_selection, font=("Arial", FontSize-1))
         auto_exp_wait_checkbox.grid(row=1, column=2, padx=5, pady=1)
         setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
-        arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
+        arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
 
         # Automatic White Balance
-        wb_red_btn = Button(exp_wb_frame, text="AWB Red:", width=12, height=1,
-                                                    command=wb_spinbox_auto,
-                                                    activebackground='#f0f0f0',
-                                                    state=NORMAL, font=("Arial", FontSize-1))
+        AWB_enabled = tk.BooleanVar(value=False)
+        wb_red_btn = tk.Checkbutton(exp_wb_frame, text='AWB Red:', width=16, height=1,
+                                                 variable=AWB_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize-1), command=wb_spinbox_auto,
+                                                 indicatoron=False, selectcolor="sea green")
         wb_red_btn.grid(row=2, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
 
         wb_red_str = tk.StringVar(value=str(GainRed))
-        wb_red_selection_aux = exp_wb_frame.register(wb_red_selection)
         wb_red_spinbox = tk.Spinbox(
             exp_wb_frame,
-            command=(wb_red_selection_aux, '%d'), width=8,
+            command=wb_red_selection, width=8,
             textvariable=wb_red_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=2, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
 
-        wb_blue_btn = Button(exp_wb_frame, text="AWB Blue:", width=12, height=1,
-                                                    command=wb_spinbox_auto,
-                                                    activebackground='#f0f0f0',
-                                                    state=NORMAL, font=("Arial", FontSize-1))
+        wb_blue_btn = tk.Checkbutton(exp_wb_frame, text='AWB Blue:', width=16, height=1,
+                                                 variable=AWB_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize-1), command=wb_spinbox_auto,
+                                                 indicatoron=False, selectcolor="sea green")
         wb_blue_btn.grid(row=3, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_blue_btn, "Toggle automatic white balance for blue channel (on/off).")
 
         wb_blue_str = tk.StringVar(value=str(GainBlue))
-        wb_blue_selection_aux = exp_wb_frame.register(wb_blue_selection)
         wb_blue_spinbox = tk.Spinbox(
             exp_wb_frame,
-            command=(wb_blue_selection_aux, '%d'), width=8,
+            command=wb_blue_selection, width=8,
             textvariable=wb_blue_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=3, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
