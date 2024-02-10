@@ -585,12 +585,9 @@ def exposure_selection(updown):
 
     SessionData["CurrentExposure"] = str(CurrentExposure)
 
-    ###exposure_spinbox.config(state='readonly' if CurrentExposure == 0 else NORMAL)
-
     if not SimulatedRun and not CameraDisabled:
         camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
 
-    ###auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
     exposure_spinbox.config(value=CurrentExposureStr)
 
 
