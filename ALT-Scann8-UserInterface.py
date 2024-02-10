@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.6"
+__version__ = "1.9.7"
 __date__ = "2024-02-10"
-__version_highlight__ = "Bugfixes"
+__version_highlight__ = "Dynamic UI toggle + Catch preview window manual close"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -72,6 +72,8 @@ import cv2
 
 
 #  ######### Global variable definition (I know, too many...) ##########
+win = None
+recreating_window = False
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -220,8 +222,8 @@ ExpertMode = False
 ExperimentalMode = False
 PlotterMode = False
 plotter_canvas = None
-plotter_width=240
-plotter_height=180
+plotter_width = 240
+plotter_height = 180
 PrevPTValue = 0
 PrevThresholdLevel = 0
 MaxPT = 100
@@ -1138,6 +1140,8 @@ def button_status_change_except(except_button, active):
         file_type_dropdown.config(state=DISABLED if active else NORMAL)
     if except_button != existing_folder_btn:
         existing_folder_btn.config(state=DISABLED if active else NORMAL)
+    if except_button != full_ui_checkbox:
+        full_ui_checkbox.config(state=DISABLED if active else NORMAL)
 
 
 def advance_movie(from_arduino = False):
@@ -1529,6 +1533,14 @@ def set_negative_image():
         negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
 
+def toggle_ui_size():
+    global ExpertMode, ExperimentalMode, PlotterMode
+    ExpertMode = not ExpertMode
+    ExperimentalMode = ExpertMode
+    PlotterMode = ExpertMode
+    create_main_window()
+
+
 # Function to enable 'real' preview with PiCamera2
 # Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
 #  - Focus
@@ -1547,13 +1559,17 @@ def set_real_time_display():
         real_time_display_checkbox.config(fg="black")  # Change background color and text color when checked
     if not SimulatedRun and not CameraDisabled:
         if real_time_display.get():
-            camera.stop_preview()
+            if camera._preview:
+                camera.stop_preview()
+            time.sleep(0.1)
             camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
             time.sleep(0.1)
             camera.switch_mode(preview_config)
         else:
-            camera.stop_preview()
-            camera.start_preview(False)
+            if camera._preview:
+                camera.stop_preview()
+            camera.stop()
+            camera.start()
             time.sleep(0.1)
             camera.switch_mode(capture_config)
 
@@ -2252,7 +2268,7 @@ def temp_in_fahrenheit_selection():
     SessionData["TempInFahrenheit"] = str(TempInFahrenheit)
 
 
-def temperature_loop():  # Update RPi temperature every 10 seconds
+def temperature_check():
     global last_temp
     global RPi_temp_value_label
     global RPiTemp
@@ -2272,7 +2288,30 @@ def temperature_loop():  # Update RPi temperature every 10 seconds
         last_temp = RPiTemp
         LastTempInFahrenheit = TempInFahrenheit
 
-    win.after(1000, temperature_loop)
+
+def preview_check():
+    global real_time_display
+
+    if SimulatedRun or CameraDisabled:
+        return
+
+    if real_time_display.get() and not camera._preview:
+        real_time_display_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
+        real_time_display.set(False)
+        real_time_display_checkbox.config(fg="black")  # Change background color and text color when checked
+        Start_btn.config(state=NORMAL)
+        real_time_zoom.set(False)
+        real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
+        real_time_zoom_checkbox.config(state=DISABLED)
+
+
+def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
+
+    temperature_check()
+    preview_check()
+
+    if not recreating_window:
+        win.after(1000, onesec_periodic_checks)
 
 
 def set_file_type(event):
@@ -2290,7 +2329,7 @@ def set_resolution(event):
     logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
 
     if not SimulatedRun and not CameraDisabled:
-        PiCam2_configure()
+        PiCam2_change_resolution()
 
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
@@ -2441,7 +2480,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     if ArduinoTrigger != 0:
         ArduinoTrigger = 0
 
-    win.after(10, arduino_listen_loop)
+    if not recreating_window:
+        win.after(10, arduino_listen_loop)
 
 
 def load_persisted_data_from_disk():
@@ -2577,7 +2617,7 @@ def load_session_data():
                 send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
                 logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
                 if not SimulatedRun and not CameraDisabled:
-                    PiCam2_configure()
+                    PiCam2_change_resolution()
             if 'NegativeCaptureActive' in SessionData:
                 negative_image.set(eval(SessionData["NegativeCaptureActive"]))
                 set_negative_image()
@@ -2740,6 +2780,25 @@ def reinit_controller():
     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
+
+def PiCam2_change_resolution():
+    global camera, capture_config, preview_config
+
+    target_res = resolution_dropdown_selected.get()
+    target_res_list = target_res.split('x')
+    target_res_tuple = tuple(map(int, target_res_list))
+
+    capture_config["main"]["size"] = target_res_tuple
+    capture_config["raw"]["size"] = target_res_tuple
+    if target_res == "1332x990":
+        capture_config["raw"]["format"] = "SRGGB10_CSI2P"
+    else:
+        capture_config["raw"]["format"] = "SRGGB12_CSI2P"
+    camera.stop()
+    camera.configure(capture_config)
+    camera.start()
+
+
 def PiCam2_configure():
     global camera, capture_config, preview_config
     global CurrentExposure, CurrentAwbAuto, SharpnessValue
@@ -2797,25 +2856,88 @@ def hdr_reinit():
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
 
 
+def create_main_window():
+    global win, recreating_window
+    global plotter_width, plotter_height
+    global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
+    global ForceSmallSize, ForceBigSize, FontSize, BigSize
+    global TopWinX, TopWinY
+    global WinInitDone
+
+    if win is not None:
+        if not recreating_window:
+            win.config(cursor="watch")  # Set 'hourglass' cursor while switching
+            recreating_window = True
+            win.after(1100, create_main_window)
+            return
+        win.destroy()   # We can safely destroy the window
+    win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
+    if SimulatedRun:
+        win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
+    else:
+        win.title('ALT-Scann8 v' + __version__)  # setting title of the window
+    # Get screen size - maxsize gives the usable screen size
+    screen_width, screen_height = win.maxsize()
+    # Set plotter default dimensions
+    plotter_width = 240
+    plotter_height = 180
+    # Set dimensions of UI elements adapted to screen size
+    if (screen_height >= 1000 and not ForceSmallSize) or ForceBigSize:
+        BigSize = True
+        FontSize = 11
+        PreviewWidth = 844
+        PreviewHeight = int(PreviewWidth/(4/3))
+        app_width = PreviewWidth + 500
+        app_height = PreviewHeight + 50
+        plotter_width += 50
+    else:
+        BigSize = False
+        FontSize = 8
+        PreviewWidth = 650
+        PreviewHeight = int(PreviewWidth/(4/3))
+        app_width = PreviewWidth + 430
+        app_height = PreviewHeight + 50
+        plotter_height -= 55
+    if ExpertMode or ExperimentalMode:
+        app_height += 220 if BigSize else 170
+    # Prevent window resize
+    win.minsize(app_width, app_height)
+    win.maxsize(app_width, app_height)
+    win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
+    if 'WindowPos' in SessionData:
+        win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
+
+    create_widgets()
+
+    # Init ToolTips
+    init_tooltips(FontSize)
+
+    # Get Top window coordinates
+    TopWinX = win.winfo_x()
+    TopWinY = win.winfo_y()
+
+    # Change preview coordinated for PiCamera2 to avoid confusion with overlay mode in PiCamera legacy
+    PreviewWinX = 250
+    PreviewWinY = 150
+    WinInitDone = True
+    # Recreate pending afters
+    recreating_window = False
+    win.after(10, arduino_listen_loop)
+    win.after(1000, onesec_periodic_checks)
+
+
 def tscann8_init():
-    global win
     global camera
     global CurrentExposure
-    global TopWinX
-    global TopWinY
     global i2c
-    global WinInitDone
     global CurrentDir
     global CurrentFrame
     global ZoomSize
     global capture_config
     global preview_config
-    global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
     global LogLevel, ExperimentalMode, PlotterMode
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
-    global ForceSmallSize, ForceBigSize, FontSize, BigSize
-    global plotter_width, plotter_height
     global MergeMertens
 
     # Initialize logging
@@ -2864,40 +2986,7 @@ def tscann8_init():
         i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
         i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
-    win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
-    win.title('ALT-Scann8 v' + __version__)  # setting title of the window
-    # Get screen size - maxsize gives the usable screen size
-    screen_width, screen_height = win.maxsize()
-    # Set dimensions of UI elements adapted to screen size
-    if (screen_height >= 1000 and not ForceSmallSize) or ForceBigSize:
-        BigSize = True
-        FontSize = 11
-        PreviewWidth = 844
-        PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 500
-        app_height = PreviewHeight + 50
-        plotter_width += 50
-    else:
-        BigSize = False
-        FontSize = 8
-        PreviewWidth = 650
-        PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 430
-        app_height = PreviewHeight + 50
-        plotter_height -= 55
-    if ExpertMode or ExperimentalMode:
-        app_height += 220 if BigSize else 170
-    # Prevent window resize
-    win.minsize(app_width, app_height)
-    win.maxsize(app_width, app_height)
-    win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
-    if 'WindowPos' in SessionData:
-        win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
-
-    build_ui()
-
-    if SimulatedRun:
-        win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
+    create_main_window()
 
     reset_controller()
 
@@ -2907,19 +2996,7 @@ def tscann8_init():
 
     win.update_idletasks()
 
-    # Init ToolTips
-    init_tooltips(FontSize)
-
-    # Get Top window coordinates
-    TopWinX = win.winfo_x()
-    TopWinY = win.winfo_y()
-
-    WinInitDone = True
-
     if not SimulatedRun and not CameraDisabled:
-        # Change preview coordinated for PiCamera2 to avoid confusion with overlay mode in PiCamera legacy
-        PreviewWinX = 250
-        PreviewWinY = 150
         camera = Picamera2()
         logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
         PiCam2_configure()
@@ -2944,7 +3021,7 @@ def tscann8_init():
     logging.debug("ALT-Scann 8 initialized")
 
 
-def build_ui():
+def create_widgets():
     global win
     global ExperimentalMode
     global app_width
@@ -3021,8 +3098,7 @@ def build_ui():
     global resolution_label, resolution_dropdown, file_type_label, file_type_dropdown
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
-
-
+    global full_ui_checkbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3169,6 +3245,13 @@ def build_ui():
     autostop_no_film_rb.config(state = DISABLED)
     autostop_counter_zero_rb.config(state = DISABLED)
 
+    bottom_area_row += 1
+
+    # Toggle UI size
+    full_ui_checkbox = tk.Button(top_left_area_frame, text='Toggle UI', height=1,
+                                                 font=("Arial", FontSize), command=toggle_ui_size)
+    full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+    setup_tooltip(full_ui_checkbox, "Toggle between full/restricted user interface")
     bottom_area_row += 1
 
     # Create vertical button column at right *************************************
@@ -3799,7 +3882,7 @@ def main(argv):
 
     ALT_scann_init_done = True
 
-    temperature_loop()
+    onesec_periodic_checks()
 
     # Main Loop
     win.mainloop()  # running3 the loop that works as a trigger
