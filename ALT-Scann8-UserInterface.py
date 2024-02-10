@@ -2645,6 +2645,8 @@ def load_session_data():
                     wb_red_spinbox.config(state='readonly' if CurrentAwbAuto else NORMAL)
                     awb_red_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
                     awb_blue_wait_checkbox.config(state=NORMAL if CurrentAwbAuto else DISABLED)
+                    arrange_widget_state(CurrentAwbAuto, [wb_blue_btn, wb_blue_spinbox])
+                    arrange_widget_state(CurrentAwbAuto, [wb_red_btn, wb_red_spinbox])
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
@@ -3298,12 +3300,18 @@ def build_ui():
     # Radio buttons to select R8/S8. Required to select adequate pattern, and match position
     film_type = tk.StringVar()
     film_type_S8_rb = tk.Radiobutton(film_type_frame, text="S8", variable=film_type, command=set_s8,
-                                  value='S8', font=("Arial", FontSize))
-    film_type_S8_rb.pack(side=LEFT, padx=16)
+                                  value='S8', font=("Arial", FontSize),
+                                  indicatoron=0, width=8, height=2,
+                                  compound='left', padx=0, pady=0,
+                                  relief="raised", borderwidth=3)
+    film_type_S8_rb.pack(side=LEFT, padx=2)
     setup_tooltip(film_type_S8_rb, "Handle as Super 8 film")
     film_type_R8_rb = tk.Radiobutton(film_type_frame, text="R8", variable=film_type, command=set_r8,
-                                  value='R8', font=("Arial", FontSize))
-    film_type_R8_rb.pack(side=RIGHT, padx=16)
+                                  value='R8', font=("Arial", FontSize),
+                                  indicatoron=0, width=8, height=2,
+                                  compound='left', padx=0, pady=0,
+                                  relief="raised", borderwidth=3)
+    film_type_R8_rb.pack(side=RIGHT, padx=2)
     setup_tooltip(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
 
     # Create frame to display RPi temperature
