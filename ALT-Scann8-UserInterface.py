@@ -789,33 +789,33 @@ def stabilization_delay_spinbox_focus_out(event):
     SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
-def sharpness_control_selection(updown):
+def sharpness_control_selection():
     global sharpness_control_label
     global SharpnessValue
-    global sharpness_control_spinbox, sharpness_control_str
+    global sharpness_control_spinbox
     global SimulatedRun
 
     if not ExpertMode:
         return
 
-    SharpnessValue = int(sharpness_control_spinbox.get())
-    SessionData["SharpnessValue"] = str(SharpnessValue)
+    SharpnessValue = sharpness_control_value.get()
+    SessionData["SharpnessValue"] = SharpnessValue
 
 
 def sharpness_control_spinbox_focus_out(event):
     global sharpness_control_label
     global SharpnessValue
-    global sharpness_control_spinbox, sharpness_control_str
+    global sharpness_control_spinbox
     global SimulatedRun
 
-    SharpnessValue = int(sharpness_control_spinbox.get())
-    SessionData["SharpnessValue"] = str(SharpnessValue)
+    SharpnessValue = sharpness_control_value.get()
+    SessionData["SharpnessValue"] = SharpnessValue
 
 
 def rwnd_speed_control_selection(updown):
     global rwnd_speed_control_label
     global rwnd_speed_delay
-    global rwnd_speed_control_spinbox, rwnd_speed_control_str
+    global rwnd_speed_control_spinbox
     global SimulatedRun
 
     if not ExpertMode:
@@ -972,17 +972,17 @@ def scan_speed_spinbox_focus_out(event):
     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
 
-def hdr_check_min_exp(event):
-    global hdr_min_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
-    global hdr_max_exp, hdr_max_exp_str
-    global hdr_bracket_width, hdr_bracket_width_str
+def hdr_check_min_exp():
+    global hdr_min_exp_spinbox, hdr_min_exp, recalculate_hdr_exp_list
+    global hdr_max_exp
+    global hdr_bracket_width
     global force_adjust_hdr_bracket
 
     if not ExpertMode:
         return
 
     save_value = hdr_min_exp
-    hdr_min_exp = int(hdr_min_exp_str.get())
+    hdr_min_exp = hdr_min_exp_value.get()
     if hdr_min_exp < hdr_lower_exp:
         hdr_min_exp = hdr_lower_exp
     hdr_max_exp = hdr_min_exp + hdr_bracket_width
@@ -990,9 +990,9 @@ def hdr_check_min_exp(event):
         hdr_bracket_width -= hdr_max_exp-1000  # Reduce bracket
         hdr_max_exp = 1000
         force_adjust_hdr_bracket = True
-    hdr_min_exp_str.set(str(hdr_min_exp))
-    hdr_max_exp_str.set(hdr_max_exp)
-    hdr_bracket_width_str.set(hdr_bracket_width)
+    hdr_min_exp_value.set(hdr_min_exp)
+    hdr_max_exp_value.set(hdr_max_exp)
+    hdr_bracket_width_value.set(hdr_bracket_width)
     if save_value != hdr_min_exp:
         recalculate_hdr_exp_list = True
     SessionData["HdrMinExp"] = hdr_min_exp
@@ -1000,17 +1000,17 @@ def hdr_check_min_exp(event):
     SessionData["HdrBracketWidth"] = hdr_max_exp
 
 
-def hdr_check_max_exp(event):
-    global hdr_max_exp_spinbox, hdr_min_exp_str, hdr_min_exp, recalculate_hdr_exp_list
-    global hdr_max_exp, hdr_max_exp_str
-    global hdr_bracket_width, hdr_bracket_width_str
+def hdr_check_max_exp():
+    global hdr_min_exp, recalculate_hdr_exp_list
+    global hdr_max_exp
+    global hdr_bracket_width
     global force_adjust_hdr_bracket
 
     if not ExpertMode:
         return
 
     save_value = hdr_max_exp
-    hdr_max_exp = int(hdr_max_exp_str.get())
+    hdr_max_exp = hdr_max_exp_value.get()
     if hdr_max_exp > 1000:
         hdr_max_exp = 1000
     if (hdr_max_exp > hdr_min_exp):
@@ -1022,9 +1022,9 @@ def hdr_check_max_exp(event):
         hdr_min_exp = hdr_lower_exp
         hdr_bracket_width = hdr_max_exp - hdr_min_exp  # Reduce bracket
         force_adjust_hdr_bracket = True
-    hdr_min_exp_str.set(str(hdr_min_exp))
-    hdr_max_exp_str.set(hdr_max_exp)
-    hdr_bracket_width_str.set(hdr_bracket_width)
+    hdr_min_exp_value.set(hdr_min_exp)
+    hdr_max_exp_value.set(hdr_max_exp)
+    hdr_bracket_width_value.set(hdr_bracket_width)
     if save_value != hdr_max_exp:
         recalculate_hdr_exp_list = True
     SessionData["HdrMinExp"] = hdr_min_exp
@@ -1033,9 +1033,9 @@ def hdr_check_max_exp(event):
 
 
 def hdr_check_bracket_width():
-    global hdr_bracket_width_spinbox, hdr_bracket_width_str, hdr_bracket_width
-    global hdr_min_exp, hdr_min_exp_str
-    global hdr_max_exp, hdr_max_exp_str
+    global hdr_bracket_width_spinbox, hdr_bracket_width
+    global hdr_min_exp
+    global hdr_max_exp
     global recalculate_hdr_exp_list
     global force_adjust_hdr_bracket
 
@@ -1043,14 +1043,14 @@ def hdr_check_bracket_width():
         return
 
     save_value = hdr_bracket_width
-    hdr_bracket_width = int(hdr_bracket_width_str.get())
+    hdr_bracket_width = hdr_bracket_width_value.get()
 
     if (hdr_bracket_width < hdr_min_bracket_width):
         hdr_bracket_width = hdr_min_bracket_width
-        hdr_bracket_width_str.set(hdr_bracket_width)
+        hdr_bracket_width_value.set(hdr_bracket_width)
     if (hdr_bracket_width > hdr_max_bracket_width):
         hdr_bracket_width = hdr_max_bracket_width
-        hdr_bracket_width_str.set(hdr_bracket_width)
+        hdr_bracket_width_value.set(hdr_bracket_width)
 
     if save_value != hdr_bracket_width:
         force_adjust_hdr_bracket = True
@@ -1061,16 +1061,16 @@ def hdr_check_bracket_width():
             hdr_max_exp = hdr_min_exp + hdr_bracket_width
         else:
             hdr_max_exp = int(middle_exp + (hdr_bracket_width/2))
-        hdr_min_exp_str.set(str(hdr_min_exp))
-        hdr_max_exp_str.set(hdr_max_exp)
+        hdr_min_exp_value.set(hdr_min_exp)
+        hdr_max_exp_value.set(hdr_max_exp)
         SessionData["HdrMinExp"] = hdr_min_exp
         SessionData["HdrMaxExp"] = hdr_max_exp
         SessionData["HdrBracketWidth"] = hdr_bracket_width
 
 
 def hdr_check_bracket_shift():
-    global hdr_bracket_shift_str, hdr_bracket_shift
-    hdr_bracket_shift = int(hdr_bracket_shift_str.get())
+    global hdr_bracket_shift
+    hdr_bracket_shift = hdr_bracket_shift_value.get()
 
 
 
@@ -1461,10 +1461,6 @@ def disk_space_available():
 
 
 def hdr_set_controls():
-    global hdr_capture_active
-    global hdr_bracket_width_label, hdr_bracket_shift_label, hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox
-    global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
-    global hdr_merge_in_place_checkbox
 
     if not ExpertMode:
         return
@@ -1769,7 +1765,6 @@ def adjust_hdr_bracket():
     global camera, HdrCaptureActive
     global recalculate_hdr_exp_list, dry_run_iterations
     global hdr_min_exp, hdr_max_exp, hdr_best_exp, hdr_bracket_width
-    global hdr_min_exp_str, hdr_max_exp_str
     global PreviousCurrentExposure, HdrBracketAuto
     global hdr_max_exp_spinbox, hdr_min_exp_spinbox
     global save_bg, save_fg
@@ -1795,9 +1790,9 @@ def adjust_hdr_bracket():
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = aux_current_exposure
         hdr_min_exp = max(hdr_best_exp-int(hdr_bracket_width/2), hdr_lower_exp)
-        hdr_min_exp_str.set(str(hdr_min_exp))
+        hdr_min_exp_value.set(hdr_min_exp)
         hdr_max_exp = hdr_min_exp + hdr_bracket_width
-        hdr_max_exp_str.set(hdr_max_exp)
+        hdr_max_exp_value.set(hdr_max_exp)
         SessionData["HdrMinExp"] = hdr_min_exp
         SessionData["HdrMaxExp"] = hdr_max_exp
         recalculate_hdr_exp_list = True
@@ -2316,7 +2311,10 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
           f"match_wait_margin_value: {match_wait_margin_value.get()}, min_frame_steps_value: {min_frame_steps_value.get()}, "
           f"pt_level_value: {pt_level_value.get()}, frame_fine_tune_value: {frame_fine_tune_value.get()}, "
           f"frame_extra_steps_value: {frame_extra_steps_value.get()}, scan_speed_value: {scan_speed_value.get()}, "
-          f"stabilization_delay_value: {stabilization_delay_value.get()}")
+          f"stabilization_delay_value: {stabilization_delay_value.get()}, hdr_min_exp_value: {hdr_min_exp_value.get()}, "
+          f"hdr_max_exp_value: {hdr_max_exp_value.get()}, hdr_bracket_width_value: {hdr_bracket_width_value.get()}, "
+          f"hdr_bracket_shift_value: {hdr_bracket_shift_value.get()}, sharpness_control_value: {sharpness_control_value.get()}, "
+          f"rwnd_speed_control_value: {rwnd_speed_control_value.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -2574,7 +2572,7 @@ def load_session_data():
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
-    global hdr_min_exp_str, hdr_max_exp_str, hdr_bracket_width
+    global hdr_bracket_width
     global HdrBracketAuto, hdr_bracket_auto, hdr_min_exp, hdr_max_exp, hdr_max_exp_spinbox, hdr_min_exp_spinbox
     global HdrMergeInPlace, hdr_merge_in_place
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
@@ -2642,13 +2640,13 @@ def load_session_data():
                     if HdrViewX4Active and ExpertMode:
                         hdr_viewx4_active_checkbox.select()
                 if 'HdrMinExp' in SessionData:
-                    hdr_min_exp = SessionData["HdrMinExp"]
+                    hdr_min_exp = int(SessionData["HdrMinExp"])
                     if ExpertMode:
-                        hdr_min_exp_str.set(hdr_min_exp)
+                        hdr_min_exp_value.set(hdr_min_exp)
                 if 'HdrMaxExp' in SessionData:
-                    hdr_max_exp = SessionData["HdrMaxExp"]
+                    hdr_max_exp = int(SessionData["HdrMaxExp"])
                     if ExpertMode:
-                        hdr_max_exp_str.set(hdr_max_exp)
+                        hdr_max_exp_value.set(hdr_max_exp)
                 if 'HdrBracketAuto' in SessionData:
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
@@ -2660,11 +2658,11 @@ def load_session_data():
                 if 'HdrMaxExp' in SessionData:
                     hdr_max_exp = SessionData["HdrMaxExp"]
                 if 'HdrBracketWidth' in SessionData:
-                    hdr_bracket_width = SessionData["HdrBracketWidth"]
-                    hdr_bracket_width_str.set(str(hdr_bracket_width))
+                    hdr_bracket_width = int(SessionData["HdrBracketWidth"])
+                    hdr_bracket_width_value.set(hdr_bracket_width)
                 if 'HdrBracketShift' in SessionData:
                     hdr_bracket_shift = SessionData["HdrBracketShift"]
-                    hdr_bracket_shift_str.set(str(hdr_bracket_shift))
+                    hdr_bracket_shift_value.set(hdr_bracket_shift)
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     aux = SessionData["CurrentExposure"]
@@ -3086,17 +3084,16 @@ def create_widgets():
     global wb_red_spinbox, wb_blue_spinbox, wb_red_str, wb_blue_str
     global match_wait_margin_spinbox, match_wait_margin_value
     global stabilization_delay_spinbox, stabilization_delay_value
-    global sharpness_control_spinbox, sharpness_control_str
-    global rwnd_speed_control_spinbox, rwnd_speed_control_str
+    global sharpness_control_spinbox, sharpness_control_value
+    global rwnd_speed_control_spinbox, rwnd_speed_control_value
     global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
     global plotter_canvas
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
-    global hdr_min_exp_str, hdr_max_exp_str
-    global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
+    global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox, hdr_max_exp_value, hdr_min_exp_value
     global min_frame_steps_btn, auto_framesteps_enabled, pt_level_btn, auto_pt_level_enabled
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
-    global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
+    global hdr_bracket_width_value, hdr_bracket_shift_value, hdr_bracket_width, hdr_bracket_shift
     global hdr_bracket_auto, hdr_bracket_width_auto_checkbox
     global hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
@@ -3670,42 +3667,38 @@ def create_widgets():
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
-        hdr_min_exp_str = tk.StringVar(value=str(hdr_min_exp))
-        hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_min_exp, '%d'), width=8,
-            textvariable=hdr_min_exp_str, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_min_exp_value = tk.IntVar(value=hdr_min_exp)
+        hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_min_exp, width=8,
+            textvariable=hdr_min_exp_value, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
-        hdr_min_exp_spinbox.bind("<FocusOut>", hdr_check_min_exp)
         hdr_row +=1
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
-        hdr_max_exp_str = tk.StringVar(value=str(hdr_max_exp))
-        hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=(hdr_check_max_exp, '%d'), width=8,
-            textvariable=hdr_max_exp_str, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
+        hdr_max_exp_value = tk.IntVar(value=hdr_max_exp)
+        hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_max_exp, width=8,
+            textvariable=hdr_max_exp_value, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
-        hdr_max_exp_spinbox.bind("<FocusOut>", hdr_check_max_exp)
         hdr_row += 1
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
-        hdr_bracket_width_str = tk.StringVar(value=str(hdr_bracket_width))
+        hdr_bracket_width_value = tk.IntVar(value=hdr_bracket_width)
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
-            textvariable=hdr_bracket_width_str, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize-1), state=DISABLED)
+            textvariable=hdr_bracket_width_value, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
-        hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
         hdr_row += 1
 
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
-        hdr_bracket_shift_str = tk.StringVar(value=str(hdr_bracket_shift))
+        hdr_bracket_shift_value = tk.IntVar(value=hdr_bracket_shift)
         hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
-            textvariable=hdr_bracket_shift_str, from_=-100, to=100, increment=10, font=("Arial", FontSize-1), state=DISABLED)
+            textvariable=hdr_bracket_shift_value, from_=-100, to=100, increment=10, font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
-        hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_shift())
         hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
@@ -3732,30 +3725,22 @@ def create_widgets():
                                              text='Sharpness:',
                                              font=("Arial", FontSize-1))
         sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
-        sharpness_control_str = tk.StringVar(value=str(SharpnessValue))
-        sharpness_control_selection_aux = experimental_miscellaneous_frame.register(
-            sharpness_control_selection)
-        sharpness_control_spinbox = tk.Spinbox(
-            experimental_miscellaneous_frame,
-            command=(sharpness_control_selection_aux, '%d'), width=8,
-            textvariable=sharpness_control_str, from_=0, to=16, increment=1, font=("Arial", FontSize-1))
+        sharpness_control_value = tk.IntVar(value=SharpnessValue)
+        sharpness_control_spinbox = tk.Spinbox(experimental_miscellaneous_frame, command=sharpness_control_selection,
+                                               width=8, textvariable=sharpness_control_value, from_=0, to=16,
+                                               increment=1, font=("Arial", FontSize-1))
         sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
         setup_tooltip(sharpness_control_spinbox,
                       "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
-        sharpness_control_spinbox.bind("<FocusOut>", sharpness_control_spinbox_focus_out)
         # Display entry to throttle Rwnd/FF speed
         rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame,
                                              text='RW/FF speed rpm):',
                                              font=("Arial", FontSize-1))
         rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
-        rwnd_speed_control_str = tk.StringVar(value=str(round(60 / (rwnd_speed_delay * 375 / 1000000))))
-
-        rwnd_speed_control_selection_aux = experimental_miscellaneous_frame.register(
-            rwnd_speed_control_selection)
-        rwnd_speed_control_spinbox = tk.Spinbox(
-            experimental_miscellaneous_frame, state='readonly',
-            command=(rwnd_speed_control_selection_aux, '%d'), width=8,
-            textvariable=rwnd_speed_control_str, from_=40, to=800, increment=50, font=("Arial", FontSize-1))
+        rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
+        rwnd_speed_control_spinbox = tk.Spinbox(experimental_miscellaneous_frame, state='readonly', width=8,
+                                                command=(rwnd_speed_control_selection, '%d'), from_=40, to=800, increment=50,
+                                                textvariable=rwnd_speed_control_value, font=("Arial", FontSize-1))
         rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
         setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
 
