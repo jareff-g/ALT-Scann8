@@ -757,7 +757,7 @@ def manual_scan_take_snap():
         time.sleep(0.2)
 
 
-def match_wait_margin_selection(updown):
+def match_wait_margin_selection():
     global MatchWaitMargin, match_wait_margin_spinbox
     global wb_red_spinbox
     global SimulatedRun
@@ -2307,7 +2307,7 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     temperature_check()
     preview_check()
 
-    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}")
+    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}, match_wait_margin_value: {match_wait_margin_value.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -2500,7 +2500,7 @@ def load_config_data():
     global TempInFahrenheit
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
-    global MatchWaitMargin, match_wait_margin_str
+    global MatchWaitMargin
     global SharpnessValue, sharpness_control_spinbox
     global CaptureStabilizationDelay, stabilization_delay_str
 
@@ -2515,7 +2515,7 @@ def load_config_data():
         if ExpertMode:
             if 'MatchWaitMargin' in SessionData:
                 MatchWaitMargin = int(SessionData["MatchWaitMargin"])
-                match_wait_margin_str.set(str(MatchWaitMargin))
+                match_wait_margin_value.set(MatchWaitMargin)
             if 'CaptureStabilizationDelay' in SessionData:
                 CaptureStabilizationDelay = float(SessionData["CaptureStabilizationDelay"])
                 stabilization_delay_str.set(str(round(CaptureStabilizationDelay * 1000)))
@@ -3072,7 +3072,7 @@ def create_widgets():
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
     global exposure_spinbox, exposure_value
     global wb_red_spinbox, wb_blue_spinbox, wb_red_str, wb_blue_str
-    global match_wait_margin_spinbox, match_wait_margin_str
+    global match_wait_margin_spinbox, match_wait_margin_value
     global stabilization_delay_spinbox, stabilization_delay_str
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
@@ -3519,13 +3519,11 @@ def create_widgets():
                                          width=15, font=("Arial", FontSize-1))
         match_wait_margin_label.grid(row=4, column=0, padx=5, pady=1, sticky=E)
 
-        match_wait_margin_str = tk.StringVar(value=str(MatchWaitMargin))
-
-        match_wait_margin_selection_aux = exp_wb_frame.register(match_wait_margin_selection)
+        match_wait_margin_value = tk.IntVar(value=MatchWaitMargin)
         match_wait_margin_spinbox = tk.Spinbox(
             exp_wb_frame,
-            command=(match_wait_margin_selection_aux, '%d'), width=8,
-            textvariable=match_wait_margin_str, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
+            command=match_wait_margin_selection, width=8,
+            textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
         match_wait_margin_spinbox.grid(row=4, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and stabilization wait is selected, select the level to match before terminating wait.")
 
