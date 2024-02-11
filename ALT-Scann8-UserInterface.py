@@ -73,6 +73,7 @@ import cv2
 
 #  ######### Global variable definition (I know, too many...) ##########
 win = None
+ExitingApp = False
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -317,7 +318,12 @@ def exit_app():  # Exit Application
     global SimulatedRun
     global camera
     global PreviewMode
+    global ExitingApp
 
+    win.config(cursor="watch")
+    win.update()
+    # Flag app is exiting for all outstanding afters to expire
+    ExitingApp = True
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
         send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
@@ -326,6 +332,8 @@ def exit_app():  # Exit Application
             if PiCam2PreviewEnabled:
                 camera.stop_preview()
             camera.close()
+    # Wait a few seconds to give time for Afters to die
+    time.sleep(3)
     # Set window position for next run
     SessionData["WindowPos"] = win.geometry()
     SessionData["AutoStopActive"] = auto_stop_enabled.get()
@@ -335,6 +343,8 @@ def exit_app():  # Exit Application
     # Write session data upon exit
     with open(PersistedDataFilename, 'w') as f:
         json.dump(SessionData, f)
+
+    win.config(cursor="")
 
     win.destroy()
 
@@ -513,12 +523,10 @@ def set_existing_folder():
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
-        print(f">>>>>> Selected Folder {NewDir} with 'existing button")
     else:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir,
                                                 title="Select existing folder with snapshots for simulated run")
     if not NewDir:
-        print(f">>>>>> Folder {NewDir} has a problem, exiting")
         return
 
     filecount = 0
@@ -546,15 +554,12 @@ def set_existing_folder():
     if confirm:
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
-        print(f">>>>>> Folder {NewDir} accepted, current dir is now {CurrentDir}")
 
         Scanned_Images_number_str.set(str(current_frame_str))
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         folder_frame_target_dir.config(text=CurrentDir)
         SessionData["CurrentDir"] = str(CurrentDir)
-    else:
-        print(f">>>>>> Folder {NewDir} not accepted, current dir is now {CurrentDir}")
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -579,7 +584,6 @@ def exposure_selection():
     CurrentExposure = exposure_value.get() * 1000
     if CurrentExposure <= 0:
         CurrentExposure = 1     # Minimum exposure is 1us, zero means automatic
-    print(f"CurrentExposure: {CurrentExposure}")
     SessionData["CurrentExposure"] = CurrentExposure
 
     if not SimulatedRun and not CameraDisabled:
@@ -636,10 +640,10 @@ def wb_red_selection():
         return
 
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
-        wb_red_str.set(str(GainRed))
+        wb_red_value.set(GainRed)
         return
 
-    GainRed = float(wb_red_str.get())
+    GainRed = wb_red_value.get()
     SessionData["GainRed"] = GainRed
 
     if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
@@ -656,10 +660,10 @@ def wb_blue_selection():
         return
 
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
-        wb_blue_str.set(str(GainBlue))
+        wb_blue_value.set(GainBlue)
         return
 
-    GainBlue = float(wb_blue_str.get())
+    GainBlue = wb_blue_value.get()
     SessionData["GainBlue"] = GainBlue
 
     if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
@@ -701,8 +705,8 @@ def wb_spinbox_auto():
             camera_colour_gains = metadata["ColourGains"]
             GainRed = camera_colour_gains[0]
             GainBlue = camera_colour_gains[1]
-            wb_red_str.set(str(GainRed))
-            wb_blue_str.set(str(GainBlue))
+            wb_red_value.set(GainRed)
+            wb_blue_value.set(GainBlue)
             camera.set_controls({"AwbEnable": 0})
 
     arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
@@ -779,16 +783,6 @@ def stabilization_delay_selection():
     SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
-def stabilization_delay_spinbox_focus_out(event):
-    global stabilization_delay_label
-    global CaptureStabilizationDelay
-    global stabilization_delay_spinbox
-    global SimulatedRun
-
-    CaptureStabilizationDelay = stabilization_delay_value.get()/1000
-    SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
-
-
 def sharpness_control_selection():
     global sharpness_control_label
     global SharpnessValue
@@ -797,16 +791,6 @@ def sharpness_control_selection():
 
     if not ExpertMode:
         return
-
-    SharpnessValue = sharpness_control_value.get()
-    SessionData["SharpnessValue"] = SharpnessValue
-
-
-def sharpness_control_spinbox_focus_out(event):
-    global sharpness_control_label
-    global SharpnessValue
-    global sharpness_control_spinbox
-    global SimulatedRun
 
     SharpnessValue = sharpness_control_value.get()
     SessionData["SharpnessValue"] = SharpnessValue
@@ -854,22 +838,13 @@ def rwnd_speed_up():
 def min_frame_steps_selection():
     global MinFrameSteps
 
-    if auto_framesteps_enabled:
+    if auto_framesteps_enabled.get():
         min_frame_steps_value.set(MinFrameSteps)
         return
     MinFrameSteps = min_frame_steps_value.get()
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
-
-
-def min_frame_steps_spinbox_focus_out(event):
-    global MinFrameSteps
-    MinFrameSteps = min_frame_steps_value.get()
-    SessionData["MinFrameSteps"] = MinFrameSteps
-    SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    if not auto_framesteps_enabled.get(): # Not sure that we can have a focus out event for a disabled control, but just in case
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_auto():
@@ -895,24 +870,7 @@ def frame_fine_tune_selection():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
-def frame_fine_tune_spinbox_focus_out(event):
-    global frame_fine_tune_spinbox
-    global FrameFineTune
-    FrameFineTune = frame_fine_tune_value.get()
-    SessionData["FrameFineTune"] = FrameFineTune
-    SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
-    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
-
-
 def frame_extra_steps_selection():
-    global frame_extra_steps_spinbox
-    global FrameExtraSteps
-    FrameExtraSteps = frame_extra_steps_value.get()
-    SessionData["FrameExtraSteps"] = FrameExtraSteps
-    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
-
-
-def frame_extra_steps_spinbox_focus_out(event):
     global frame_extra_steps_spinbox
     global FrameExtraSteps
     FrameExtraSteps = frame_extra_steps_value.get()
@@ -932,16 +890,6 @@ def pt_level_selection():
     send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
-def pt_level_spinbox_focus_out(event):
-    global pt_level_spinbox
-    global PTLevel
-    PTLevel = pt_level_value.get()
-    SessionData["PTLevel"] = PTLevel
-    SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    if not auto_pt_level_enabled.get(): # Not sure that we can have a focus out event for a disabled control, but just in case
-        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
-
-
 def pt_level_spinbox_auto():
     global pt_level_spinbox, pt_level_btn
     global PTLevel
@@ -957,14 +905,6 @@ def pt_level_spinbox_auto():
 
 
 def scan_speed_selection():
-    global scan_speed_spinbox, scan_speed_label_str
-    global ScanSpeed
-    ScanSpeed = int(scan_speed_spinbox.get())
-    SessionData["ScanSpeed"] = ScanSpeed
-    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
-
-
-def scan_speed_spinbox_focus_out(event):
     global scan_speed_spinbox, scan_speed_label_str
     global ScanSpeed
     ScanSpeed = int(scan_speed_spinbox.get())
@@ -1867,9 +1807,8 @@ def capture(mode):
                     logging.debug("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
                 if ExpertMode:
-                    wb_red_str.set(str(round(aux_gain_red, 1)))
-                    wb_blue_str.set(str(round(aux_gain_blue, 1)))
-                    print(f"Updated wb with {str(round(aux_gain_red, 1))}, {str(round(aux_gain_blue, 1))}")
+                    wb_red_value.set(round(aux_gain_red, 1))
+                    wb_blue_value.set(round(aux_gain_blue, 1))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 time.sleep(0.2)
@@ -2307,16 +2246,8 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     temperature_check()
     preview_check()
 
-    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}, "
-          f"match_wait_margin_value: {match_wait_margin_value.get()}, min_frame_steps_value: {min_frame_steps_value.get()}, "
-          f"pt_level_value: {pt_level_value.get()}, frame_fine_tune_value: {frame_fine_tune_value.get()}, "
-          f"frame_extra_steps_value: {frame_extra_steps_value.get()}, scan_speed_value: {scan_speed_value.get()}, "
-          f"stabilization_delay_value: {stabilization_delay_value.get()}, hdr_min_exp_value: {hdr_min_exp_value.get()}, "
-          f"hdr_max_exp_value: {hdr_max_exp_value.get()}, hdr_bracket_width_value: {hdr_bracket_width_value.get()}, "
-          f"hdr_bracket_shift_value: {hdr_bracket_shift_value.get()}, sharpness_control_value: {sharpness_control_value.get()}, "
-          f"rwnd_speed_control_value: {rwnd_speed_control_value.get()}")
-
-    win.after(1000, onesec_periodic_checks)
+    if not ExitingApp:
+        win.after(1000, onesec_periodic_checks)
 
 
 def set_file_type(event):
@@ -2484,7 +2415,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     if ArduinoTrigger != 0:
         ArduinoTrigger = 0
 
-    win.after(10, arduino_listen_loop)
+    if not ExitingApp:
+        win.after(10, arduino_listen_loop)
 
 
 def load_persisted_data_from_disk():
@@ -2590,7 +2522,6 @@ def load_session_data():
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
                 if not os.path.isdir(CurrentDir):
-                    print(f">>>>>> Folder {CurrentDir} is not a folder, setting {os.getcwd()} instead")
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
@@ -2668,7 +2599,6 @@ def load_session_data():
                     aux = SessionData["CurrentExposure"]
                     if isinstance(aux, str) and (aux == "Auto" or aux == "0") or isinstance(aux, int) and aux == 0:
                         CurrentExposure = 0
-                        ###CurrentExposureStr == "Auto"
                         AE_enabled.set(True)
                         exposure_btn.config(fg="white", text="AUTO Exposure:")
                         auto_exp_wait_checkbox.config(state=NORMAL)
@@ -2676,7 +2606,7 @@ def load_session_data():
                         if isinstance(aux, str):
                             CurrentExposure = int(float(aux))
                         else:
-                            CurrentExposure = aux * 1000
+                            CurrentExposure = aux
                         ###CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                         AE_enabled.set(False)
                         exposure_btn.config(fg="black", text="Exposure:")
@@ -2711,10 +2641,10 @@ def load_session_data():
                         awb_blue_wait_checkbox.select()
                 if 'GainRed' in SessionData:
                     GainRed = float(SessionData["GainRed"])
-                    wb_red_str.set(str(round(GainRed,1)))
+                    wb_red_value.set(round(GainRed,1))
                 if 'GainBlue' in SessionData:
                     GainBlue = float(SessionData["GainBlue"])
-                    wb_blue_str.set(str(round(GainBlue,1)))
+                    wb_blue_value.set(round(GainBlue,1))
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = int(SessionData["MinFrameSteps"])
@@ -3031,7 +2961,206 @@ def tscann8_init():
 
     logging.debug("ALT-Scann 8 initialized")
 
+# *************************
+# Widget entries validators
+# *************************
+def exposure_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = float(new_value)
+        if aux >= 0 and aux < 10000:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
 
+
+def wb_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = float(new_value)
+        if aux >= -9.9 and aux <= 9.9:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def match_margin_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 0 and aux <= 100:
+            return True
+        else:
+            return False
+    except:
+        return False
+
+
+def steps_per_frame_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 100 and aux <= 600:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def pt_level_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 0 and aux <= 900:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def fine_tune_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 5 and aux <= 95:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def extra_steps_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= -30 and aux <= 30:
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def scan_speed_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 1 and aux <= 10:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def stabilization_delay_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 0 and aux <= 1000:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def hdr_min_exp_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= hdr_lower_exp and aux <= 999:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def hdr_max_exp_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 2 and aux <= 1000:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def hdr_bracket_width_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= hdr_min_bracket_width and aux <= hdr_max_bracket_width:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def hdr_bracket_shift_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= -100 and aux <= 100:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def sharpness_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 0 and aux <= 16:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
+def rewind_speed_validation(new_value):
+    try:
+        if new_value == '':
+            new_value = 0
+        aux = int(new_value)
+        if aux >= 40 and aux <= 800:
+            return True  # Input is valid
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+# ***************
+# Widget creation
+# ***************
 def create_widgets():
     global win
     global ExperimentalMode
@@ -3065,7 +3194,6 @@ def create_widgets():
     global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
-    global match_wait_margin_value
     global sharpness_control_value
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
@@ -3081,7 +3209,7 @@ def create_widgets():
     global frame_extra_steps_spinbox, frame_extra_steps_value
     global ScanSpeed, scan_speed_spinbox, scan_speed_value
     global exposure_spinbox, exposure_value
-    global wb_red_spinbox, wb_blue_spinbox, wb_red_str, wb_blue_str
+    global wb_red_spinbox, wb_blue_spinbox, wb_red_value, wb_blue_value
     global match_wait_margin_spinbox, match_wait_margin_value
     global stabilization_delay_spinbox, stabilization_delay_value
     global sharpness_control_spinbox, sharpness_control_value
@@ -3464,10 +3592,12 @@ def create_widgets():
         exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
-        exposure_value = tk.IntVar(value=CurrentExposure/1000)
+        exposure_value = tk.DoubleVar(value=CurrentExposure/1000)
         exposure_spinbox = tk.Spinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
-                                      from_=0, to=10000, increment=1, font=("Arial", FontSize-1))
+                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1))
         exposure_spinbox.grid(row=1, column=1, padx=5, pady=1, sticky=W)
+        exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
+        exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
         setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
 
         auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
@@ -3487,12 +3617,12 @@ def create_widgets():
         wb_red_btn.grid(row=2, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
 
-        wb_red_str = tk.StringVar(value=str(GainRed))
-        wb_red_spinbox = tk.Spinbox(
-            exp_wb_frame,
-            command=wb_red_selection, width=8,
-            textvariable=wb_red_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
+        wb_red_value = tk.DoubleVar(value=GainRed)
+        wb_red_spinbox = tk.Spinbox(exp_wb_frame, command=wb_red_selection, width=8,
+            textvariable=wb_red_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=2, column=1, padx=5, pady=1, sticky=W)
+        wb_red_validation_cmd = wb_red_spinbox.register(wb_validation)
+        wb_red_spinbox.configure(validate="key", validatecommand=(wb_red_validation_cmd, '%P'))
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
 
         wb_blue_btn = tk.Checkbutton(exp_wb_frame, text='AWB Blue:', width=16, height=1,
@@ -3502,12 +3632,12 @@ def create_widgets():
         wb_blue_btn.grid(row=3, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(wb_blue_btn, "Toggle automatic white balance for blue channel (on/off).")
 
-        wb_blue_str = tk.StringVar(value=str(GainBlue))
-        wb_blue_spinbox = tk.Spinbox(
-            exp_wb_frame,
-            command=wb_blue_selection, width=8,
-            textvariable=wb_blue_str, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
+        wb_blue_value = tk.DoubleVar(value=GainBlue)
+        wb_blue_spinbox = tk.Spinbox(exp_wb_frame, command=wb_blue_selection, width=8,
+            textvariable=wb_blue_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=3, column=1, padx=5, pady=1, sticky=W)
+        wb_blue_validation_cmd = wb_blue_spinbox.register(wb_validation)
+        wb_blue_spinbox.configure(validate="key", validatecommand=(wb_blue_validation_cmd, '%P'))
         setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
@@ -3529,11 +3659,11 @@ def create_widgets():
         match_wait_margin_label.grid(row=4, column=0, padx=5, pady=1, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=MatchWaitMargin)
-        match_wait_margin_spinbox = tk.Spinbox(
-            exp_wb_frame,
-            command=match_wait_margin_selection, width=8,
+        match_wait_margin_spinbox = tk.Spinbox(exp_wb_frame, command=match_wait_margin_selection, width=8,
             textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
         match_wait_margin_spinbox.grid(row=4, column=1, padx=5, pady=1, sticky=W)
+        match_margin_validation_cmd = match_wait_margin_spinbox.register(match_margin_validation)
+        match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_margin_validation_cmd, '%P'))
         setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and stabilization wait is selected, select the level to match before terminating wait.")
 
         # Display markers for film hole reference
@@ -3570,8 +3700,10 @@ def create_widgets():
             command=min_frame_steps_selection, width=8,
             textvariable=min_frame_steps_value, from_=100, to=600, font=("Arial", FontSize-1))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
+        steps_per_frame_validation_cmd = min_frame_steps_spinbox.register(steps_per_frame_validation)
+        min_frame_steps_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
         setup_tooltip(min_frame_steps_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
-        min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
+
         # Spinbox to select PTLevel on Arduino
         auto_pt_level_enabled = tk.BooleanVar(value=False)
         pt_level_btn = tk.Checkbutton(frame_alignment_frame, text='PT Level:', width=18, height=1,
@@ -3582,13 +3714,13 @@ def create_widgets():
         setup_tooltip(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         pt_level_value = tk.IntVar(value=PTLevel)
-        pt_level_spinbox = tk.Spinbox(
-            frame_alignment_frame,
-            command=pt_level_selection, width=8,
+        pt_level_spinbox = tk.Spinbox(frame_alignment_frame, command=pt_level_selection, width=8,
             textvariable=pt_level_value, from_=0, to=900, font=("Arial", FontSize-1))
         pt_level_spinbox.grid(row=1, column=1, padx=2, pady=3, sticky=W)
+        pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
+        pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
         setup_tooltip(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
-        pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
+
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
                                          text='Fine tune:',
@@ -3598,8 +3730,10 @@ def create_widgets():
         frame_fine_tune_spinbox = tk.Spinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8,
                         textvariable=frame_fine_tune_value, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
         frame_fine_tune_spinbox.grid(row=2, column=1, padx=2, pady=3, sticky=W)
+        fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
+        frame_fine_tune_spinbox.configure(validate="key", validatecommand=(fine_tune_validation_cmd, '%P'))
         setup_tooltip(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
-        frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
+
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame,
                                          text='Extra Steps:',
@@ -3609,8 +3743,9 @@ def create_widgets():
         frame_extra_steps_spinbox = tk.Spinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8,
                         textvariable=frame_extra_steps_value, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=3, sticky=W)
+        extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
+        frame_extra_steps_spinbox.configure(validate="key", validatecommand=(extra_steps_validation_cmd, '%P'))
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
-        frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
 
         # Frame to add scan speed control
         speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
@@ -3626,8 +3761,9 @@ def create_widgets():
         scan_speed_spinbox = tk.Spinbox(speed_quality_frame, command=scan_speed_selection, width=3,
                     textvariable=scan_speed_value, from_=1, to=10, font=("Arial", FontSize-1))
         scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=4, sticky=W)
+        scan_speed_validation_cmd = scan_speed_spinbox.register(scan_speed_validation)
+        scan_speed_spinbox.configure(validate="key", validatecommand=(scan_speed_validation_cmd, '%P'))
         setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
-        scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
@@ -3638,8 +3774,9 @@ def create_widgets():
         stabilization_delay_spinbox = tk.Spinbox(speed_quality_frame, command=stabilization_delay_selection, width=4,
                     textvariable=stabilization_delay_value, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
         stabilization_delay_spinbox.grid(row=1, column=1, padx=4, sticky='W')
+        stabilization_delay_validation_cmd = stabilization_delay_spinbox.register(stabilization_delay_validation)
+        stabilization_delay_spinbox.configure(validate="key", validatecommand=(stabilization_delay_validation_cmd, '%P'))
         setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
-        stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
 
     if ExperimentalMode:
         experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
@@ -3671,6 +3808,8 @@ def create_widgets():
         hdr_min_exp_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_min_exp, width=8,
             textvariable=hdr_min_exp_value, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
+        hdr_min_exp_spinbox.configure(validate="key", validatecommand=(hdr_min_exp_validation_cmd, '%P'))
         setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
         hdr_row +=1
 
@@ -3680,6 +3819,8 @@ def create_widgets():
         hdr_max_exp_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_max_exp, width=8,
             textvariable=hdr_max_exp_value, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
+        hdr_max_exp_spinbox.configure(validate="key", validatecommand=(hdr_max_exp_validation_cmd, '%P'))
         setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
         hdr_row += 1
 
@@ -3689,6 +3830,8 @@ def create_widgets():
         hdr_bracket_width_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_width, width=8,
             textvariable=hdr_bracket_width_value, from_=hdr_min_bracket_width, to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
+        hdr_bracket_width_spinbox.configure(validate="key", validatecommand=(hdr_bracket_width_validation_cmd, '%P'))
         setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
         hdr_row += 1
 
@@ -3698,6 +3841,8 @@ def create_widgets():
         hdr_bracket_shift_spinbox = tk.Spinbox(hdr_frame, command=hdr_check_bracket_shift, width=8,
             textvariable=hdr_bracket_shift_value, from_=-100, to=100, increment=10, font=("Arial", FontSize-1), state=DISABLED)
         hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
+        hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
+        hdr_bracket_shift_spinbox.configure(validate="key", validatecommand=(hdr_bracket_shift_validation_cmd, '%P'))
         setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
         hdr_row += 1
 
@@ -3730,6 +3875,8 @@ def create_widgets():
                                                width=8, textvariable=sharpness_control_value, from_=0, to=16,
                                                increment=1, font=("Arial", FontSize-1))
         sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
+        sharpness_validation_cmd = sharpness_control_spinbox.register(sharpness_validation)
+        sharpness_control_spinbox.configure(validate="key", validatecommand=(sharpness_validation_cmd, '%P'))
         setup_tooltip(sharpness_control_spinbox,
                       "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
         # Display entry to throttle Rwnd/FF speed
@@ -3742,6 +3889,8 @@ def create_widgets():
                                                 command=(rwnd_speed_control_selection, '%d'), from_=40, to=800, increment=50,
                                                 textvariable=rwnd_speed_control_value, font=("Arial", FontSize-1))
         rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
+        rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
+        rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(rewind_speed_validation_cmd, '%P'))
         setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
 
         # Damaged film helpers, to help handling damaged film (broken perforations)
