@@ -575,6 +575,7 @@ def exposure_selection():
         return
 
     if AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        exposure_value.set(CurrentExposure / 1000)
         return
 
     CurrentExposure = exposure_value.get() * 1000
@@ -637,6 +638,7 @@ def wb_red_selection():
         return
 
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        wb_red_str.set(str(GainRed))
         return
 
     GainRed = float(wb_red_str.get())
@@ -656,6 +658,7 @@ def wb_blue_selection():
         return
 
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+        wb_blue_str.set(str(GainBlue))
         return
 
     GainBlue = float(wb_blue_str.get())
@@ -2680,7 +2683,10 @@ def load_session_data():
                     if ExposureAdaptPause:
                         auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
-                    AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
+                    if isinstance(AWB_enabled, bool):
+                        AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
+                    else:
+                        AWB_enabled.set(SessionData["CurrentAwbAuto"])
                     wb_blue_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     awb_red_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
