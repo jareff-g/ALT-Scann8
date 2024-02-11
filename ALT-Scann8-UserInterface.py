@@ -121,7 +121,6 @@ max_inactivity_delay = reference_inactivity_delay
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 MinFrameSteps = MinFrameStepsS8     # Minimum number of steps per frame, to be passed to Arduino
-FrameSteps_auto = True
 FrameExtraSteps = 0     # Extra steps manually added after frame detected
 FrameFineTune = 70      # Frame fine tune: PT threshold value as % between min adn max PT values
 PTLevelS8 = 80
@@ -853,35 +852,35 @@ def rwnd_speed_up():
     rwnd_speed_control_spinbox.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
 
 
-def min_frame_steps_selection(updown):
-    global min_frame_steps_spinbox, min_frame_steps_str
+def min_frame_steps_selection():
     global MinFrameSteps
-    MinFrameSteps = int(min_frame_steps_spinbox.get())
+    MinFrameSteps = min_frame_steps_value.get()
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_focus_out(event):
-    global min_frame_steps_spinbox, min_frame_steps_str
     global MinFrameSteps
-    MinFrameSteps = int(min_frame_steps_spinbox.get())
+    MinFrameSteps = min_frame_steps_value.get()
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
-    if not FrameSteps_auto: # Not sure that we can have a focus out event for a disabled control, but just in case
+    if not auto_framesteps_enabled.get(): # Not sure that we can have a focus out event for a disabled control, but just in case
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
 def min_frame_steps_spinbox_auto():
-    global min_frame_steps_spinbox, min_frame_steps_str, min_frame_steps_btn
-    global MinFrameSteps, FrameSteps_auto
+    global MinFrameSteps
 
-    FrameSteps_auto = not FrameSteps_auto
+    if auto_framesteps_enabled.get():
+        min_frame_steps_btn.config(fg="white", text="AUTO Steps/Frame:")
+    else:
+        min_frame_steps_btn.config(fg="black", text="Steps/Frame:")
 
-    arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
+    arrange_widget_state(auto_framesteps_enabled.get(), [min_frame_steps_btn, min_frame_steps_spinbox])
 
-    SessionData["FrameStepsAuto"] = FrameSteps_auto
-    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+    SessionData["FrameStepsAuto"] = auto_framesteps_enabled.get()
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 def frame_fine_tune_selection(updown):
@@ -1581,7 +1580,7 @@ def set_s8():
     global SimulatedRun, ExpertMode
     global PTLevel, PTLevelS8
     global MinFrameSteps, MinFrameStepsS8
-    global pt_level_str, min_frame_steps_str
+    global pt_level_str
     global FilmHoleY1, FilmHoleY2
     global ALT_scann_init_done
     global film_hole_frame_1, film_hole_frame_2
@@ -1596,7 +1595,7 @@ def set_s8():
     MinFrameSteps = MinFrameStepsS8
     if ExpertMode:
         pt_level_str.set(str(PTLevel))
-        min_frame_steps_str.set(str(MinFrameSteps))
+        min_frame_steps_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 260 if BigSize else 210
     FilmHoleY2 = 260 if BigSize else 210
@@ -1606,7 +1605,7 @@ def set_s8():
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 
@@ -1614,7 +1613,7 @@ def set_r8():
     global SimulatedRun
     global PTLevel, PTLevelR8
     global MinFrameSteps, MinFrameStepsR8
-    global pt_level_str, min_frame_steps_str
+    global pt_level_str
     global film_hole_frame_1, film_hole_frame_2
 
     SessionData["FilmType"] = "R8"
@@ -1627,7 +1626,7 @@ def set_r8():
     MinFrameSteps = MinFrameStepsR8
     if ExpertMode:
         pt_level_str.set(str(PTLevel))
-        min_frame_steps_str.set(str(MinFrameSteps))
+        min_frame_steps_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 20 if BigSize else 20
     FilmHoleY2 = 540 if BigSize else 380
@@ -1637,7 +1636,7 @@ def set_r8():
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if FrameSteps_auto else MinFrameSteps)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 
@@ -2307,7 +2306,8 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     temperature_check()
     preview_check()
 
-    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}, match_wait_margin_value: {match_wait_margin_value.get()}")
+    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}, "
+          f"match_wait_margin_value: {match_wait_margin_value.get()}, min_frame_steps_value: {min_frame_steps_value.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -2399,7 +2399,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanOngoing
     global ALT_Scann8_controller_detected
     global last_frame_time, max_inactivity_delay
-    global pt_level_str, min_frame_steps_str
+    global pt_level_str
     global Controller_Id
     global ScanStopRequested
     global i2c
@@ -2451,8 +2451,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         if ExpertMode:
             if (PTLevel_auto):
                 pt_level_str.set(str(ArduinoParam1))
-            if (FrameSteps_auto):
-                min_frame_steps_str.set(str(ArduinoParam2))
+            if (auto_framesteps_enabled.get()):
+                min_frame_steps_value.set(ArduinoParam2)
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.debug("Received rewind end event from Arduino")
@@ -2560,8 +2560,8 @@ def load_session_data():
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global auto_exp_wait_checkbox
     global PersistedDataLoaded
-    global min_frame_steps_str, frame_fine_tune_str, pt_level_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameSteps_auto, FrameExtraSteps, frame_extra_steps_str
+    global frame_fine_tune_str, pt_level_str
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameExtraSteps, frame_extra_steps_str
     global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
     global ScanSpeed, scan_speed_str
     global hdr_capture_active_checkbox, HdrCaptureActive
@@ -2712,15 +2712,18 @@ def load_session_data():
                     wb_blue_str.set(str(round(GainBlue,1)))
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
-                    MinFrameSteps = SessionData["MinFrameSteps"]
-                    min_frame_steps_str.set(str(MinFrameSteps))
+                    MinFrameSteps = int(SessionData["MinFrameSteps"])
+                    min_frame_steps_value.set(MinFrameSteps)
                     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
-                    FrameSteps_auto = SessionData["FrameStepsAuto"]
-                    min_frame_steps_str.set(str(MinFrameSteps))
-                    if FrameSteps_auto:
+                    aux = SessionData["FrameStepsAuto"]
+                    auto_framesteps_enabled.set(aux)
+                    min_frame_steps_value.set(MinFrameSteps)
+                    if auto_framesteps_enabled.get():
+                        min_frame_steps_btn.config(fg="white", text="AUTO Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
+                        min_frame_steps_btn.config(fg="black", text="Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
@@ -2760,7 +2763,7 @@ def load_session_data():
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
-        arrange_widget_state(FrameSteps_auto, [min_frame_steps_btn, min_frame_steps_spinbox])
+        arrange_widget_state(auto_framesteps_enabled.get(), [min_frame_steps_btn, min_frame_steps_spinbox])
     if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
@@ -2769,7 +2772,7 @@ def load_session_data():
 
 def reinit_controller():
     global PTLevel_auto, PTLevel
-    global FrameSteps_auto, MinFrameSteps
+    global MinFrameSteps
     global FrameFineTune, ScanSpeed, FrameExtraSteps
 
     if PTLevel_auto:
@@ -2777,7 +2780,7 @@ def reinit_controller():
     else:
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
-    if FrameSteps_auto:
+    if auto_framesteps_enabled.get():
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
     else:
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
@@ -3063,7 +3066,7 @@ def create_widgets():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
     global hdr_btn
-    global min_frame_steps_str, frame_fine_tune_str
+    global min_frame_steps_value, frame_fine_tune_str
     global MinFrameSteps
     global pt_level_spinbox, pt_level_str
     global PTLevel
@@ -3081,7 +3084,7 @@ def create_widgets():
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
     global hdr_min_exp_str, hdr_max_exp_str
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
-    global min_frame_steps_btn, pt_level_btn
+    global min_frame_steps_btn, auto_framesteps_enabled, pt_level_btn
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
@@ -3547,19 +3550,19 @@ def create_widgets():
                                            font=("Arial", FontSize-1))
         frame_alignment_frame.grid(row=0, column=2, padx=4, sticky='NSEW')
         # Spinbox to select MinFrameSteps on Arduino
-        min_frame_steps_btn = Button(frame_alignment_frame, text="Steps/frame:", width=14, height=1,
-                                                    command=min_frame_steps_spinbox_auto,
-                                                    activebackground='#f0f0f0',
-                                                    state=NORMAL, font=("Arial", FontSize-1))
+        auto_framesteps_enabled = tk.BooleanVar(value=False)
+        min_frame_steps_btn = tk.Checkbutton(frame_alignment_frame, text='Steps/frame:', width=18, height=1,
+                                                 variable=auto_framesteps_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize-1), command=min_frame_steps_spinbox_auto,
+                                                 indicatoron=False, selectcolor="sea green")
         min_frame_steps_btn.grid(row=0, column=0, padx=2, pady=3, sticky=E)
         setup_tooltip(min_frame_steps_btn, "Toggle automatic steps/frame calculation.")
-        min_frame_steps_str = tk.StringVar(value=str(MinFrameSteps))
-        min_frame_steps_selection_aux = frame_alignment_frame.register(
-            min_frame_steps_selection)
+
+        min_frame_steps_value = tk.IntVar(value=MinFrameSteps)
         min_frame_steps_spinbox = tk.Spinbox(
             frame_alignment_frame,
-            command=(min_frame_steps_selection_aux, '%d'), width=8,
-            textvariable=min_frame_steps_str, from_=100, to=600, font=("Arial", FontSize-1))
+            command=min_frame_steps_selection, width=8,
+            textvariable=min_frame_steps_value, from_=100, to=600, font=("Arial", FontSize-1))
         min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(min_frame_steps_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
