@@ -639,7 +639,7 @@ def wb_red_selection():
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    GainRed = float(wb_red_spinbox.get())
+    GainRed = float(wb_red_str.get())
     SessionData["GainRed"] = GainRed
 
     if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
@@ -658,7 +658,7 @@ def wb_blue_selection():
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    GainBlue = float(wb_blue_spinbox.get())
+    GainBlue = float(wb_blue_str.get())
     SessionData["GainBlue"] = GainBlue
 
     if not SimulatedRun and not AWB_enabled.get() and not CameraDisabled:
@@ -678,9 +678,9 @@ def wb_spinbox_auto():
     if not ExpertMode:
         return
 
-    SessionData["CurrentAwbAuto"] = str(AWB_enabled.get())
-    SessionData["GainRed"] = str(GainRed)
-    SessionData["GainBlue"] = str(GainBlue)
+    SessionData["CurrentAwbAuto"] = AWB_enabled.get()
+    SessionData["GainRed"] = GainRed
+    SessionData["GainBlue"] = GainBlue
 
     if AWB_enabled.get():
         awb_red_wait_checkbox.config(state=NORMAL)
@@ -700,8 +700,8 @@ def wb_spinbox_auto():
             camera_colour_gains = metadata["ColourGains"]
             GainRed = camera_colour_gains[0]
             GainBlue = camera_colour_gains[1]
-            wb_red_spinbox.config(text=str(round(GainRed, 1)))
-            wb_blue_spinbox.config(text=str(round(GainBlue, 1)))
+            wb_red_str.set(str(GainRed))
+            wb_blue_str.set(str(GainBlue))
             camera.set_controls({"AwbEnable": 0})
 
     arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
@@ -1857,7 +1857,6 @@ def capture(mode):
             aux_gain_red = camera_colour_gains[0]
             aux_gain_blue = camera_colour_gains[1]
             # Same as for exposure, difference allowed is a percentage of the maximum value
-            #if abs(aux_gain_red-PreviousGainRed) >= 0.5 or abs(aux_gain_blue-PreviousGainBlue) >= 0.5:
             if abs(aux_gain_red-PreviousGainRed) >= (MatchWaitMargin * Tolerance_AWB/100) or \
                abs(aux_gain_blue-PreviousGainBlue) >= (MatchWaitMargin * Tolerance_AWB/100):
                 if (wait_loop_count % 10 == 0):
@@ -2305,7 +2304,7 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     temperature_check()
     preview_check()
 
-    print(f"exposure_value: {exposure_value.get()}")
+    print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -3066,8 +3065,7 @@ def create_widgets():
     global frame_extra_steps_spinbox, frame_extra_steps_str
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
     global exposure_spinbox, exposure_value
-    global wb_red_spinbox, wb_red_str
-    global wb_blue_spinbox, wb_blue_str
+    global wb_red_spinbox, wb_blue_spinbox, wb_red_str, wb_blue_str
     global match_wait_margin_spinbox, match_wait_margin_str
     global stabilization_delay_spinbox, stabilization_delay_str
     global sharpness_control_spinbox, sharpness_control_str
