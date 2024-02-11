@@ -126,7 +126,6 @@ FrameFineTune = 70      # Frame fine tune: PT threshold value as % between min a
 PTLevelS8 = 80
 PTLevelR8 = 120
 PTLevel = PTLevelS8     # Phototransistor reported level when hole is detected
-PTLevel_auto = True
 # Token to be sent on program closure, to allow threads to shut down cleanly
 END_TOKEN = object()
 FrameArrivalTime = 0
@@ -854,6 +853,10 @@ def rwnd_speed_up():
 
 def min_frame_steps_selection():
     global MinFrameSteps
+
+    if auto_framesteps_enabled:
+        min_frame_steps_value.set(MinFrameSteps)
+        return
     MinFrameSteps = min_frame_steps_value.get()
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
@@ -917,35 +920,40 @@ def frame_extra_steps_spinbox_focus_out(event):
     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
 
 
-def pt_level_selection(updown):
-    global pt_level_spinbox, pt_level_str
+def pt_level_selection():
     global PTLevel
-    PTLevel = int(pt_level_spinbox.get())
+
+    if auto_pt_level_enabled.get():
+        pt_level_value.set(PTLevel)
+        return
+    PTLevel = pt_level_value.get()
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
     send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_focus_out(event):
-    global pt_level_spinbox, pt_level_str
+    global pt_level_spinbox
     global PTLevel
-    PTLevel = int(pt_level_spinbox.get())
+    PTLevel = pt_level_value.get()
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
-    if not PTLevel_auto: # Not sure that we can have a focus out event for a disabled control, but just in case
+    if not auto_pt_level_enabled.get(): # Not sure that we can have a focus out event for a disabled control, but just in case
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
 
 
 def pt_level_spinbox_auto():
-    global pt_level_spinbox, pt_level_str, pt_level_btn
-    global PTLevel, PTLevel_auto
+    global pt_level_spinbox, pt_level_btn
+    global PTLevel
 
-    PTLevel_auto = not PTLevel_auto
+    if auto_pt_level_enabled.get():
+        pt_level_btn.config(fg="white", text="AUTO PT Level:")
+    else:
+        pt_level_btn.config(fg="black", text="PT Level:")
+    arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
 
-    arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
-
-    SessionData["PTLevelAuto"] = PTLevel_auto
-    send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+    SessionData["PTLevelAuto"] = auto_pt_level_enabled.get()
+    send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
 
 
 def scan_speed_selection(updown):
@@ -1580,7 +1588,6 @@ def set_s8():
     global SimulatedRun, ExpertMode
     global PTLevel, PTLevelS8
     global MinFrameSteps, MinFrameStepsS8
-    global pt_level_str
     global FilmHoleY1, FilmHoleY2
     global ALT_scann_init_done
     global film_hole_frame_1, film_hole_frame_2
@@ -1594,7 +1601,7 @@ def set_s8():
         SessionData["MinFrameSteps"] = MinFrameSteps
     MinFrameSteps = MinFrameStepsS8
     if ExpertMode:
-        pt_level_str.set(str(PTLevel))
+        pt_level_value.set(PTLevel)
         min_frame_steps_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 260 if BigSize else 210
@@ -1604,7 +1611,7 @@ def set_s8():
         film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
@@ -1613,7 +1620,6 @@ def set_r8():
     global SimulatedRun
     global PTLevel, PTLevelR8
     global MinFrameSteps, MinFrameStepsR8
-    global pt_level_str
     global film_hole_frame_1, film_hole_frame_2
 
     SessionData["FilmType"] = "R8"
@@ -1625,7 +1631,7 @@ def set_r8():
         SessionData["MinFrameSteps"] = MinFrameSteps
     MinFrameSteps = MinFrameStepsR8
     if ExpertMode:
-        pt_level_str.set(str(PTLevel))
+        pt_level_value.set(PTLevel)
         min_frame_steps_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 20 if BigSize else 20
@@ -1635,7 +1641,7 @@ def set_r8():
         film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=110 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, 0 if PTLevel_auto else PTLevel)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
@@ -2399,7 +2405,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanOngoing
     global ALT_Scann8_controller_detected
     global last_frame_time, max_inactivity_delay
-    global pt_level_str
     global Controller_Id
     global ScanStopRequested
     global i2c
@@ -2449,8 +2454,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         ScanStopRequested = True
     elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
         if ExpertMode:
-            if (PTLevel_auto):
-                pt_level_str.set(str(ArduinoParam1))
+            if (auto_pt_level_enabled.get()):
+                pt_level_value.set(ArduinoParam1)
             if (auto_framesteps_enabled.get()):
                 min_frame_steps_value.set(ArduinoParam2)
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
@@ -2560,9 +2565,9 @@ def load_session_data():
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global auto_exp_wait_checkbox
     global PersistedDataLoaded
-    global frame_fine_tune_str, pt_level_str
+    global frame_fine_tune_str
     global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameExtraSteps, frame_extra_steps_str
-    global PTLevel, PTLevelS8, PTLevelR8, PTLevel_auto
+    global PTLevel, PTLevelS8, PTLevelR8
     global ScanSpeed, scan_speed_str
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
@@ -2739,16 +2744,18 @@ def load_session_data():
                     frame_extra_steps_str.set(str(FrameExtraSteps))
                     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
                 if 'PTLevelAuto' in SessionData:
-                    PTLevel_auto = SessionData["PTLevelAuto"]
-                    pt_level_str.set(str(PTLevel))
-                    if PTLevel_auto:
+                    auto_pt_level_enabled.set(SessionData["PTLevelAuto"])
+                    pt_level_value.set(PTLevel)
+                    if auto_pt_level_enabled.get():
+                        pt_level_btn.config(fg="white", text="AUTO PT Level:")
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
+                        pt_level_btn.config(fg="black", text="PT Level:")
                         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevel' in SessionData:
-                    PTLevel = SessionData["PTLevel"]
-                    if not PTLevel_auto:
-                        pt_level_str.set(str(PTLevel))
+                    PTLevel = int(SessionData["PTLevel"])
+                    pt_level_value.set(PTLevel)
+                    if not auto_pt_level_enabled.get():
                         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevelS8' in SessionData:
                     PTLevelS8 = SessionData["PTLevelS8"]
@@ -2762,7 +2769,7 @@ def load_session_data():
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
-        arrange_widget_state(PTLevel_auto, [pt_level_btn, pt_level_spinbox])
+        arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
         arrange_widget_state(auto_framesteps_enabled.get(), [min_frame_steps_btn, min_frame_steps_spinbox])
     if ExperimentalMode:
         hdr_set_controls()
@@ -2771,11 +2778,11 @@ def load_session_data():
 
 
 def reinit_controller():
-    global PTLevel_auto, PTLevel
+    global PTLevel
     global MinFrameSteps
     global FrameFineTune, ScanSpeed, FrameExtraSteps
 
-    if PTLevel_auto:
+    if auto_pt_level_enabled.get():
         send_arduino_command(CMD_SET_PT_LEVEL, 0)
     else:
         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
@@ -3068,9 +3075,9 @@ def create_widgets():
     global hdr_btn
     global min_frame_steps_value, frame_fine_tune_str
     global MinFrameSteps
-    global pt_level_spinbox, pt_level_str
+    global pt_level_spinbox
     global PTLevel
-    global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
+    global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
     global frame_extra_steps_spinbox, frame_extra_steps_str
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
     global exposure_spinbox, exposure_value
@@ -3084,7 +3091,7 @@ def create_widgets():
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
     global hdr_min_exp_str, hdr_max_exp_str
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox
-    global min_frame_steps_btn, auto_framesteps_enabled, pt_level_btn
+    global min_frame_steps_btn, auto_framesteps_enabled, pt_level_btn, auto_pt_level_enabled
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_str, hdr_bracket_shift_str, hdr_bracket_width, hdr_bracket_shift
@@ -3567,19 +3574,19 @@ def create_widgets():
         setup_tooltip(min_frame_steps_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
         min_frame_steps_spinbox.bind("<FocusOut>", min_frame_steps_spinbox_focus_out)
         # Spinbox to select PTLevel on Arduino
-        pt_level_btn = Button(frame_alignment_frame, text="PT Level:", width=14, height=1,
-                                                    command=pt_level_spinbox_auto,
-                                                    activebackground='#f0f0f0',
-                                                    state=NORMAL, font=("Arial", FontSize-1))
+        auto_pt_level_enabled = tk.BooleanVar(value=False)
+        pt_level_btn = tk.Checkbutton(frame_alignment_frame, text='PT Level:', width=18, height=1,
+                                                 variable=auto_pt_level_enabled, onvalue=True, offvalue=False,
+                                                 font=("Arial", FontSize-1), command=pt_level_spinbox_auto,
+                                                 indicatoron=False, selectcolor="sea green")
         pt_level_btn.grid(row=1, column=0, padx=2, pady=3, sticky=E)
         setup_tooltip(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
-        pt_level_str = tk.StringVar(value=str(PTLevel))
-        pt_level_selection_aux = frame_alignment_frame.register(
-            pt_level_selection)
+
+        pt_level_value = tk.IntVar(value=PTLevel)
         pt_level_spinbox = tk.Spinbox(
             frame_alignment_frame,
-            command=(pt_level_selection_aux, '%d'), width=8,
-            textvariable=pt_level_str, from_=0, to=900, font=("Arial", FontSize-1))
+            command=pt_level_selection, width=8,
+            textvariable=pt_level_value, from_=0, to=900, font=("Arial", FontSize-1))
         pt_level_spinbox.grid(row=1, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
         pt_level_spinbox.bind("<FocusOut>", pt_level_spinbox_focus_out)
