@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.10"
+__version__ = "1.9.12"
 __date__ = "2024-02-11"
-__version_highlight__ = "Harmonize all edit and spinboxes"
+__version_highlight__ = "Fixes after harmonization of all edit and spinboxes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -107,8 +107,8 @@ ScanStopRequested = False  # To handle stopping scan process asynchronously, wit
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
 ScanProcessError = False  # To be set to true upon reception of Arduino event
 ScanProcessError_LastTime = 0
-ScriptDir = os.path.dirname(
-    sys.argv[0])  # Directory where python scrips run, to store the json file with persistent data
+# Directory where python scrips run, to store the json file with persistent data
+ScriptDir = os.path.dirname(__file__)
 PersistedDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 PersistedDataLoaded = False
 # Variables to deal with remaining disk space
@@ -216,9 +216,9 @@ RSP_FILM_FORWARD_ENDED = 89
 
 
 # Expert mode variables - By default Exposure and white balance are set as automatic, with adapt delay
-ExpertMode = False
-ExperimentalMode = False
-PlotterMode = False
+ExpertMode = True
+ExperimentalMode = True
+PlotterMode = True
 plotter_canvas = None
 plotter_width = 240
 plotter_height = 180
@@ -1069,7 +1069,7 @@ def button_status_change_except(except_button, active):
     if except_button != real_time_display_checkbox:
         real_time_display_checkbox.config(state=DISABLED if active else NORMAL)
     if except_button != real_time_zoom_checkbox:
-        real_time_zoom_checkbox.config(state=DISABLED if active else NORMAL)
+        real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
     if except_button != resolution_label:
         resolution_label.config(state=DISABLED if active else NORMAL)
     if except_button != resolution_dropdown:
@@ -1459,7 +1459,7 @@ def switch_hdr_viewx4():
 
 
 def set_negative_image():
-    SessionData["NegativeCaptureActive"] = str(negative_image.get())
+    SessionData["NegativeCaptureActive"] = negative_image.get()
     if negative_image.get():
         negative_image_checkbox.config(fg="white")  # Change background color and text color when checked
     else:
@@ -1518,6 +1518,8 @@ def set_real_time_display():
     # Do not allow scan to start while PiCam2 preview is active
     Start_btn.config(state=DISABLED if real_time_display.get() else NORMAL)
     real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
+    real_time_zoom_checkbox.deselect()
+    real_time_display_checkbox.config(state=NORMAL)
 
 
 def set_s8():
@@ -1547,8 +1549,9 @@ def set_s8():
         film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
+        if ExpertMode:
+            send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
+            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 
@@ -1577,8 +1580,9 @@ def set_r8():
         film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=110 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
-        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
+        if ExpertMode:
+            send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
+            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 
@@ -2232,14 +2236,8 @@ def preview_check():
         return
 
     if real_time_display.get() and not camera._preview:
-        real_time_display_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
         real_time_display.set(False)
-        real_time_display_checkbox.config(fg="black")  # Change background color and text color when checked
-        Start_btn.config(state=NORMAL)
-        real_time_zoom.set(False)
-        real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
-        real_time_zoom_checkbox.config(state=DISABLED)
-
+        set_real_time_display()
 
 def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
 
@@ -2403,7 +2401,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
-        logging.debug("Received plotter info from Arduino")
         if PlotterMode:
             UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
@@ -2550,7 +2547,7 @@ def load_session_data():
                 if not SimulatedRun and not CameraDisabled:
                     PiCam2_change_resolution()
             if 'NegativeCaptureActive' in SessionData:
-                negative_image.set(eval(SessionData["NegativeCaptureActive"]))
+                negative_image.set(SessionData["NegativeCaptureActive"])
                 set_negative_image()
             if 'AutoStopType' in SessionData:
                 autostop_type.set(SessionData["AutoStopType"])
@@ -2712,6 +2709,9 @@ def reinit_controller():
     global MinFrameSteps
     global FrameFineTune, ScanSpeed, FrameExtraSteps
 
+    if not ExpertMode:
+        return
+
     if auto_pt_level_enabled.get():
         send_arduino_command(CMD_SET_PT_LEVEL, 0)
     else:
@@ -2773,7 +2773,7 @@ def PiCam2_configure():
     camera.configure(capture_config)
     camera.set_controls({"ExposureTime": CurrentExposure})
     camera.set_controls({"AnalogueGain": 1.0})
-    camera.set_controls({"AwbEnable": 1 if AWB_enabled.get() else 0})
+    camera.set_controls({"AwbEnable": 0})
     camera.set_controls({"ColourGains": (2.2, 2.2)})  # Red 2.2, Blue 2.2 seem to be OK
     # In PiCamera2, '1' is the standard sharpness
     # It can be a floating point number from 0.0 to 16.0
@@ -2897,6 +2897,7 @@ def tscann8_init():
 
     logging.info("ALT-Scann8 %s (%s)", __version__, __date__)
     logging.info("Log file: %s", log_file_fullpath)
+    logging.info("Config file: %s", PersistedDataFilename)
 
     if SimulatedRun:
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
@@ -3664,7 +3665,7 @@ def create_widgets():
         match_wait_margin_spinbox.grid(row=4, column=1, padx=5, pady=1, sticky=W)
         match_margin_validation_cmd = match_wait_margin_spinbox.register(match_margin_validation)
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_margin_validation_cmd, '%P'))
-        setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and stabilization wait is selected, select the level to match before terminating wait.")
+        setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
 
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
