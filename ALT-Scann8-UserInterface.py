@@ -766,26 +766,26 @@ def match_wait_margin_selection():
     MatchWaitMargin = int(match_wait_margin_spinbox.get())
     SessionData["MatchWaitMargin"] = MatchWaitMargin
 
-def stabilization_delay_selection(updown):
+def stabilization_delay_selection():
     global stabilization_delay_label
     global CaptureStabilizationDelay
-    global stabilization_delay_spinbox, stabilization_delay_str
+    global stabilization_delay_spinbox
     global SimulatedRun
 
     if not ExpertMode:
         return
 
-    CaptureStabilizationDelay = int(stabilization_delay_spinbox.get())/1000
+    CaptureStabilizationDelay = stabilization_delay_value.get()/1000
     SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
 def stabilization_delay_spinbox_focus_out(event):
     global stabilization_delay_label
     global CaptureStabilizationDelay
-    global stabilization_delay_spinbox, stabilization_delay_str
+    global stabilization_delay_spinbox
     global SimulatedRun
 
-    CaptureStabilizationDelay = int(stabilization_delay_spinbox.get())/1000
+    CaptureStabilizationDelay = stabilization_delay_value.get()/1000
     SessionData["CaptureStabilizationDelay"] = str(CaptureStabilizationDelay)
 
 
@@ -886,36 +886,36 @@ def min_frame_steps_spinbox_auto():
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
-def frame_fine_tune_selection(updown):
-    global frame_fine_tune_spinbox, frame_fine_tune_str
+def frame_fine_tune_selection():
+    global frame_fine_tune_spinbox
     global FrameFineTune
-    FrameFineTune = int(frame_fine_tune_spinbox.get())
+    FrameFineTune = frame_fine_tune_value.get()
     SessionData["FrameFineTune"] = FrameFineTune
     SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
 def frame_fine_tune_spinbox_focus_out(event):
-    global frame_fine_tune_spinbox, frame_fine_tune_str
+    global frame_fine_tune_spinbox
     global FrameFineTune
-    FrameFineTune = int(frame_fine_tune_spinbox.get())
+    FrameFineTune = frame_fine_tune_value.get()
     SessionData["FrameFineTune"] = FrameFineTune
     SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTune
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
 
 
-def frame_extra_steps_selection(updown):
-    global frame_extra_steps_spinbox, frame_extra_steps_str
+def frame_extra_steps_selection():
+    global frame_extra_steps_spinbox
     global FrameExtraSteps
-    FrameExtraSteps = int(frame_extra_steps_spinbox.get())
+    FrameExtraSteps = frame_extra_steps_value.get()
     SessionData["FrameExtraSteps"] = FrameExtraSteps
     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
 
 
 def frame_extra_steps_spinbox_focus_out(event):
-    global frame_extra_steps_spinbox, frame_extra_steps_str
+    global frame_extra_steps_spinbox
     global FrameExtraSteps
-    FrameExtraSteps = int(frame_extra_steps_spinbox.get())
+    FrameExtraSteps = frame_extra_steps_value.get()
     SessionData["FrameExtraSteps"] = FrameExtraSteps
     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
 
@@ -956,7 +956,7 @@ def pt_level_spinbox_auto():
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
 
 
-def scan_speed_selection(updown):
+def scan_speed_selection():
     global scan_speed_spinbox, scan_speed_label_str
     global ScanSpeed
     ScanSpeed = int(scan_speed_spinbox.get())
@@ -2313,7 +2313,10 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     preview_check()
 
     print(f"exposure_value: {exposure_value.get()}, wb_red_str: {wb_red_str.get()}, wb_blue_str: {wb_blue_str.get()}, "
-          f"match_wait_margin_value: {match_wait_margin_value.get()}, min_frame_steps_value: {min_frame_steps_value.get()}")
+          f"match_wait_margin_value: {match_wait_margin_value.get()}, min_frame_steps_value: {min_frame_steps_value.get()}, "
+          f"pt_level_value: {pt_level_value.get()}, frame_fine_tune_value: {frame_fine_tune_value.get()}, "
+          f"frame_extra_steps_value: {frame_extra_steps_value.get()}, scan_speed_value: {scan_speed_value.get()}, "
+          f"stabilization_delay_value: {stabilization_delay_value.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -2507,7 +2510,7 @@ def load_config_data():
     global PersistedDataLoaded
     global MatchWaitMargin
     global SharpnessValue, sharpness_control_spinbox
-    global CaptureStabilizationDelay, stabilization_delay_str
+    global CaptureStabilizationDelay
 
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
@@ -2523,7 +2526,7 @@ def load_config_data():
                 match_wait_margin_value.set(MatchWaitMargin)
             if 'CaptureStabilizationDelay' in SessionData:
                 CaptureStabilizationDelay = float(SessionData["CaptureStabilizationDelay"])
-                stabilization_delay_str.set(str(round(CaptureStabilizationDelay * 1000)))
+                stabilization_delay_value.set(round(CaptureStabilizationDelay * 1000))
 
         if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
@@ -2565,10 +2568,9 @@ def load_session_data():
     global awb_red_wait_checkbox, awb_blue_wait_checkbox
     global auto_exp_wait_checkbox
     global PersistedDataLoaded
-    global frame_fine_tune_str
-    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameExtraSteps, frame_extra_steps_str
+    global MinFrameSteps, MinFrameStepsS8, MinFrameStepsR8, FrameFineTune, FrameExtraSteps
     global PTLevel, PTLevelS8, PTLevelR8
-    global ScanSpeed, scan_speed_str
+    global ScanSpeed
     global hdr_capture_active_checkbox, HdrCaptureActive
     global hdr_viewx4_active_checkbox, HdrViewX4Active
     global hdr_min_exp, hdr_max_exp, hdr_bracket_width_auto_checkbox
@@ -2736,12 +2738,12 @@ def load_session_data():
                     MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
                 if 'FrameFineTune' in SessionData:
                     FrameFineTune = SessionData["FrameFineTune"]
-                    frame_fine_tune_str.set(str(FrameFineTune))
+                    frame_fine_tune_value.set(FrameFineTune)
                     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTune)
                 if 'FrameExtraSteps' in SessionData:
                     FrameExtraSteps = SessionData["FrameExtraSteps"]
                     FrameExtraSteps = min(FrameExtraSteps, 20)
-                    frame_extra_steps_str.set(str(FrameExtraSteps))
+                    frame_extra_steps_value.set(FrameExtraSteps)
                     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraSteps)
                 if 'PTLevelAuto' in SessionData:
                     auto_pt_level_enabled.set(SessionData["PTLevelAuto"])
@@ -2762,8 +2764,8 @@ def load_session_data():
                 if 'PTLevelR8' in SessionData:
                     PTLevelR8 = SessionData["PTLevelR8"]
                 if 'ScanSpeed' in SessionData:
-                    ScanSpeed = SessionData["ScanSpeed"]
-                    scan_speed_str.set(str(ScanSpeed))
+                    ScanSpeed = int(SessionData["ScanSpeed"])
+                    scan_speed_value.set(ScanSpeed)
                     send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeed)
 
     # Update widget state whether or not config loaded (to honor app default values)
@@ -3073,17 +3075,17 @@ def create_widgets():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
     global hdr_btn
-    global min_frame_steps_value, frame_fine_tune_str
+    global min_frame_steps_value, frame_fine_tune_value
     global MinFrameSteps
     global pt_level_spinbox
     global PTLevel
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
-    global frame_extra_steps_spinbox, frame_extra_steps_str
-    global scan_speed_str, ScanSpeed, scan_speed_spinbox
+    global frame_extra_steps_spinbox, frame_extra_steps_value
+    global ScanSpeed, scan_speed_spinbox, scan_speed_value
     global exposure_spinbox, exposure_value
     global wb_red_spinbox, wb_blue_spinbox, wb_red_str, wb_blue_str
     global match_wait_margin_spinbox, match_wait_margin_value
-    global stabilization_delay_spinbox, stabilization_delay_str
+    global stabilization_delay_spinbox, stabilization_delay_value
     global sharpness_control_spinbox, sharpness_control_str
     global rwnd_speed_control_spinbox, rwnd_speed_control_str
     global Manual_scan_activated, ManualScanEnabled, manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
@@ -3595,13 +3597,9 @@ def create_widgets():
                                          text='Fine tune:',
                                          font=("Arial", FontSize-1))
         frame_fine_tune_label.grid(row=2, column=0, padx=2, pady=3, sticky=E)
-        frame_fine_tune_str = tk.StringVar(value=str(FrameFineTune))
-        frame_fine_tune_selection_aux = frame_alignment_frame.register(
-            frame_fine_tune_selection)
-        frame_fine_tune_spinbox = tk.Spinbox(
-            frame_alignment_frame,
-            command=(frame_fine_tune_selection_aux, '%d'), width=8,
-            textvariable=frame_fine_tune_str, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
+        frame_fine_tune_value = tk.IntVar(value=FrameFineTune)
+        frame_fine_tune_spinbox = tk.Spinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8,
+                        textvariable=frame_fine_tune_value, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
         frame_fine_tune_spinbox.grid(row=2, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
         frame_fine_tune_spinbox.bind("<FocusOut>", frame_fine_tune_spinbox_focus_out)
@@ -3610,13 +3608,9 @@ def create_widgets():
                                          text='Extra Steps:',
                                          font=("Arial", FontSize-1))
         frame_extra_steps_label.grid(row=3, column=0, padx=2, pady=3, sticky=E)
-        frame_extra_steps_str = tk.StringVar(value=str(FrameExtraSteps))
-        frame_extra_steps_selection_aux = frame_alignment_frame.register(
-            frame_extra_steps_selection)
-        frame_extra_steps_spinbox = tk.Spinbox(
-            frame_alignment_frame,
-            command=(frame_extra_steps_selection_aux, '%d'), width=8,
-            textvariable=frame_extra_steps_str, from_=-30, to=30, font=("Arial", FontSize-1))
+        frame_extra_steps_value = tk.IntVar(value=FrameExtraSteps)
+        frame_extra_steps_spinbox = tk.Spinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8,
+                        textvariable=frame_extra_steps_value, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=3, sticky=W)
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
         frame_extra_steps_spinbox.bind("<FocusOut>", frame_extra_steps_spinbox_focus_out)
@@ -3631,30 +3625,21 @@ def create_widgets():
                                          text='Scan Speed:',
                                          font=("Arial", FontSize-1))
         scan_speed_label.grid(row=0, column=0, padx=3, pady=(20, 10), sticky=E)
-        scan_speed_str = tk.StringVar(value=str(ScanSpeed))
-        scan_speed_selection_aux = speed_quality_frame.register(
-            scan_speed_selection)
-        scan_speed_spinbox = tk.Spinbox(
-            speed_quality_frame,
-            command=(scan_speed_selection_aux, '%d'), width=3,
-            textvariable=scan_speed_str, from_=1, to=10, font=("Arial", FontSize-1))
+        scan_speed_value = tk.IntVar(value=ScanSpeed)
+        scan_speed_spinbox = tk.Spinbox(speed_quality_frame, command=scan_speed_selection, width=3,
+                    textvariable=scan_speed_value, from_=1, to=10, font=("Arial", FontSize-1))
         scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=4, sticky=W)
         setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
         scan_speed_spinbox.bind("<FocusOut>", scan_speed_spinbox_focus_out)
-        scan_speed_selection('down')
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
                                          text='Stabilization\ndelay (ms):',
                                          font=("Arial", FontSize-1))
         stabilization_delay_label.grid(row=1, column=0, padx=4, pady=4, sticky=E)
-        stabilization_delay_str = tk.StringVar(value=str(round(CaptureStabilizationDelay*1000)))
-        stabilization_delay_selection_aux = speed_quality_frame.register(
-            stabilization_delay_selection)
-        stabilization_delay_spinbox = tk.Spinbox(
-            speed_quality_frame,
-            command=(stabilization_delay_selection_aux, '%d'), width=4,
-            textvariable=stabilization_delay_str, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
+        stabilization_delay_value = tk.IntVar(value=round(CaptureStabilizationDelay*1000))
+        stabilization_delay_spinbox = tk.Spinbox(speed_quality_frame, command=stabilization_delay_selection, width=4,
+                    textvariable=stabilization_delay_value, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
         stabilization_delay_spinbox.grid(row=1, column=1, padx=4, sticky='W')
         setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
         stabilization_delay_spinbox.bind("<FocusOut>", stabilization_delay_spinbox_focus_out)
