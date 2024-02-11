@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.9"
-__date__ = "2024-02-10"
-__version_highlight__ = "Fix for UI toggle button (previous version was not working properly)"
+__version__ = "1.9.10"
+__date__ = "2024-02-11"
+__version_highlight__ = "Harmonize all edit and spinboxes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -236,7 +236,6 @@ Tolerance_AWB = 1
 CurrentExposure = 0     # Zero means automatic exposure
 ExposureAdaptPause = True   # by default (non-expert) we wait for camera to stabilize when AE changes
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
-CurrentExposureStr = "Auto"
 AwbPause = False   # by default (non-expert) we wait for camera to stabilize when AWB changes
 GainRed = 2.2  # 2.4
 GainBlue = 2.2  # 2.8
@@ -516,10 +515,12 @@ def set_existing_folder():
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
+        print(f">>>>>> Selected Folder {NewDir} with 'existing button")
     else:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir,
                                                 title="Select existing folder with snapshots for simulated run")
     if not NewDir:
+        print(f">>>>>> Folder {NewDir} has a problem, exiting")
         return
 
     filecount = 0
@@ -547,12 +548,15 @@ def set_existing_folder():
     if confirm:
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
+        print(f">>>>>> Folder {NewDir} accepted, current dir is now {CurrentDir}")
 
         Scanned_Images_number_str.set(str(current_frame_str))
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         folder_frame_target_dir.config(text=CurrentDir)
         SessionData["CurrentDir"] = str(CurrentDir)
+    else:
+        print(f">>>>>> Folder {NewDir} not accepted, current dir is now {CurrentDir}")
 
 
 # In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
@@ -561,9 +565,9 @@ def set_existing_folder():
 # 'CurrentExposure' = zero wil always be displayed as 'Auto'
 
 
-def exposure_selection(updown):
-    global exposure_spinbox, exposure_str
-    global CurrentExposure, CurrentExposureStr
+def exposure_selection():
+    global exposure_spinbox
+    global CurrentExposure
     global SimulatedRun
     global auto_exp_wait_checkbox
 
@@ -573,34 +577,29 @@ def exposure_selection(updown):
     if AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    CurrentExposure = CurrentExposure + 2000 if updown=='up' else CurrentExposure - 2000
-
+    CurrentExposure = exposure_value.get() * 1000
     if CurrentExposure <= 0:
-        CurrentExposure = 1  # Do not allow zero or below
-    else:
-        CurrentExposure = CurrentExposure / 2000 * 2000 # in case we are starting from 1
-
-    CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-
-    SessionData["CurrentExposure"] = str(CurrentExposure)
+        CurrentExposure = 1     # Minimum exposure is 1us, zero means automatic
+    print(f"CurrentExposure: {CurrentExposure}")
+    SessionData["CurrentExposure"] = CurrentExposure
 
     if not SimulatedRun and not CameraDisabled:
         camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
 
-    exposure_spinbox.config(value=CurrentExposureStr)
+    ###exposure_spinbox.config(value=CurrentExposureStr)
+    exposure_value.set(CurrentExposure/1000)
 
 
 def exposure_spinbox_auto():
     global exposure_spinbox
-    global CurrentExposure, CurrentExposureStr
+    global CurrentExposure
     global SimulatedRun
     global auto_exp_wait_checkbox
     global exposure_btn, exposure_spinbox
 
     if AE_enabled.get():  # Not in automatic mode, activate auto
         CurrentExposure = 0
-        CurrentExposureStr = "Auto"
-        SessionData["CurrentExposure"] = str(CurrentExposure)
+        SessionData["CurrentExposure"] = CurrentExposure
         exposure_btn.config(fg="white", text="AUTO Exposure:")
         auto_exp_wait_checkbox.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
@@ -612,14 +611,12 @@ def exposure_spinbox_auto():
             CurrentExposure = metadata["ExposureTime"]
         else:
             CurrentExposure = 3500  # Arbitrary Value for Simulated run
-        CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
-        SessionData["CurrentExposure"] = str(CurrentExposure)
+        SessionData["CurrentExposure"] = CurrentExposure
         exposure_btn.config(fg="black", text="Exposure:")
         auto_exp_wait_checkbox.config(state=DISABLED)
 
-    exposure_str.set(CurrentExposureStr)
+    exposure_value.set(CurrentExposure/1000)
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
-    exposure_spinbox.config(value=CurrentExposureStr)
     arrange_widget_state(CurrentExposure == 0, [exposure_btn, exposure_spinbox])
 
 
@@ -1492,7 +1489,7 @@ def switch_hdr_capture():
     else:    # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
         if AE_enabled.get():  # Automatic mode
-            SessionData["CurrentExposure"] = str(0)
+            SessionData["CurrentExposure"] = 0
             if not SimulatedRun and not CameraDisabled:
                 camera.controls.ExposureTime = 0    # maybe will not work, check pag 26 of picamera2 specs
         else:
@@ -1505,7 +1502,7 @@ def switch_hdr_capture():
                     CurrentExposure = camera.exposure_speed
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
-            SessionData["CurrentExposure"] = str(CurrentExposure)
+            SessionData["CurrentExposure"] = CurrentExposure
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
     logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
 
@@ -1837,10 +1834,8 @@ def capture(mode):
             # As we initialize this percentage to 50%, we start with double the original value
             if abs(aux_current_exposure - PreviousCurrentExposure) > (MatchWaitMargin * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
-                    aux_exposure_str = f"{round((aux_current_exposure - 20000) / 2000)}"
-                    logging.debug(f"AE match: ({aux_current_exposure},Auto {aux_exposure_str})")
-                    exposure_str.set(aux_exposure_str)
-                    print(f"Updated exposure with {aux_exposure_str}")
+                    logging.debug(f"AE match: ({aux_current_exposure/1000},Auto {PreviousCurrentExposure/1000})")
+                    exposure_value.set(aux_current_exposure/1000)
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
                 time.sleep(0.2)
@@ -2222,7 +2217,7 @@ def capture_loop():
             SessionData["CurrentDate"] = str(datetime.now())
             SessionData["CurrentDir"] = CurrentDir
             SessionData["CurrentFrame"] = str(CurrentFrame)
-            SessionData["CurrentExposure"] = str(CurrentExposure)
+            SessionData["CurrentExposure"] = CurrentExposure
             # with open(PersistedDataFilename, 'w') as f:
             #     json.dump(SessionData, f)
 
@@ -2309,6 +2304,8 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
 
     temperature_check()
     preview_check()
+
+    print(f"exposure_value: {exposure_value.get()}")
 
     win.after(1000, onesec_periodic_checks)
 
@@ -2552,7 +2549,7 @@ def arrange_widget_state(auto_state, widget_list):
 
 def load_session_data():
     global SessionData
-    global CurrentExposure, CurrentExposureStr, ExposureAdaptPause
+    global CurrentExposure, ExposureAdaptPause
     global CurrentDir
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
@@ -2586,6 +2583,7 @@ def load_session_data():
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
                 if not os.path.isdir(CurrentDir):
+                    print(f">>>>>> Folder {CurrentDir} is not a folder, setting {os.getcwd()} instead")
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
@@ -2660,20 +2658,23 @@ def load_session_data():
                     hdr_bracket_shift_str.set(str(hdr_bracket_shift))
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
-                    CurrentExposureStr = SessionData["CurrentExposure"]
-                    if CurrentExposureStr == "Auto" or CurrentExposureStr == "0":
+                    aux = SessionData["CurrentExposure"]
+                    if isinstance(aux, str) and (aux == "Auto" or aux == "0") or isinstance(aux, int) and aux == 0:
                         CurrentExposure = 0
-                        CurrentExposureStr == "Auto"
+                        ###CurrentExposureStr == "Auto"
                         AE_enabled.set(True)
                         exposure_btn.config(fg="white", text="AUTO Exposure:")
                         auto_exp_wait_checkbox.config(state=NORMAL)
                     else:
-                        CurrentExposure = int(float(CurrentExposureStr))
-                        CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
+                        if isinstance(aux, str):
+                            CurrentExposure = int(float(aux))
+                        else:
+                            CurrentExposure = aux * 1000
+                        ###CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                         AE_enabled.set(False)
                         exposure_btn.config(fg="black", text="Exposure:")
                         auto_exp_wait_checkbox.config(state=DISABLED)
-                    exposure_str.set(CurrentExposureStr)
+                    exposure_value.set(CurrentExposure/1000)
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
@@ -3064,7 +3065,7 @@ def create_widgets():
     global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox
     global frame_extra_steps_spinbox, frame_extra_steps_str
     global scan_speed_str, ScanSpeed, scan_speed_spinbox
-    global exposure_spinbox, exposure_str
+    global exposure_spinbox, exposure_value
     global wb_red_spinbox, wb_red_str
     global wb_blue_spinbox, wb_blue_str
     global match_wait_margin_spinbox, match_wait_margin_str
@@ -3450,12 +3451,9 @@ def create_widgets():
         exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
-        exposure_str = tk.StringVar(value=str(CurrentExposure))
-        exposure_selection_aux = exp_wb_frame.register(exposure_selection)
-        exposure_spinbox = tk.Spinbox(
-            exp_wb_frame,
-            command=(exposure_selection_aux, '%d'), width=8,
-            textvariable=exposure_str, from_=-100, to=100, font=("Arial", FontSize-1))
+        exposure_value = tk.IntVar(value=CurrentExposure/1000)
+        exposure_spinbox = tk.Spinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
+                                      from_=0, to=10000, increment=1, font=("Arial", FontSize-1))
         exposure_spinbox.grid(row=1, column=1, padx=5, pady=1, sticky=W)
         setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
 
