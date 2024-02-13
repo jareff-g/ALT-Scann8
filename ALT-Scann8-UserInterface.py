@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.20"
+__version__ = "1.9.21"
 __date__ = "2024-02-13"
-__version_highlight__ = "Enhanced field validation (spinboxes mainly)"
+__version_highlight__ = "Enhanced field validation (spinboxes mainly) - Fix"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1327,7 +1327,7 @@ def capture_hdr():
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp*1000)})
         else:
-            time.sleep(stabilization_delay_value.get())  # Allow time to stabilize image only if no dry run
+            time.sleep(stabilization_delay_value.get()/1000)  # Allow time to stabilize image only if no dry run
         if perform_dry_run:
             for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
                 camera.capture_image("main")
@@ -1507,7 +1507,7 @@ def capture(mode):
                 # This one should not happen, will not allow PiCam2 scan in preview mode
                 camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
         else:
-            time.sleep(stabilization_delay_value.get())   # Allow time to stabilize image, it can get too fast with PiCamera2
+            time.sleep(stabilization_delay_value.get()/1000)   # Allow time to stabilize image, it can get too fast with PiCamera2
             if mode == 'still':
                 captured_snapshot = camera.capture_image("main")
                 captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
@@ -2127,7 +2127,7 @@ def load_config_data():
                 aux = float(SessionData["CaptureStabilizationDelay"])
                 stabilization_delay_value.set(round(aux * 1000))
             else:
-                stabilization_delay_value.set(100000)
+                stabilization_delay_value.set(100)
 
         if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
