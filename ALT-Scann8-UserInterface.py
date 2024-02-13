@@ -168,7 +168,6 @@ simulated_capture_image = ''
 simulated_images_in_list = 0
 FilmHoleY1 = 260 if BigSize else 210
 FilmHoleY2 = 260 if BigSize else 210
-SharpnessValue = 1
 
 # Commands (RPI to Arduino)
 CMD_VERSION_ID = 1
@@ -785,7 +784,6 @@ def stabilization_delay_selection():
 
 def sharpness_control_selection():
     global sharpness_control_label
-    global SharpnessValue
     global sharpness_control_spinbox
     global SimulatedRun
 
@@ -794,6 +792,8 @@ def sharpness_control_selection():
 
     SharpnessValue = sharpness_control_value.get()
     SessionData["SharpnessValue"] = SharpnessValue
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"Sharpness": SharpnessValue})
 
 
 def rwnd_speed_control_selection(updown):
@@ -2436,8 +2436,8 @@ def load_config_data():
     global temp_in_fahrenheit_checkbox
     global PersistedDataLoaded
     global MatchWaitMargin
-    global SharpnessValue, sharpness_control_spinbox
     global CaptureStabilizationDelay
+    global camera
 
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
@@ -2457,8 +2457,11 @@ def load_config_data():
 
         if ExperimentalMode:
             if 'SharpnessValue' in SessionData:
-                SharpnessValue = int(SessionData["SharpnessValue"])
-                sharpness_control_spinbox.config(text=str(SharpnessValue))
+                SharpnessValue = int(SessionData["SharpnessValue"])     # In case it is stored as string
+                sharpness_control_value.set(SharpnessValue)
+                if not SimulatedRun and not CameraDisabled:
+                    camera.set_controls({"Sharpness": SharpnessValue})
+
 
 def arrange_widget_state(auto_state, widget_list):
     for widget in widget_list:
@@ -2753,7 +2756,6 @@ def PiCam2_change_resolution():
 
 def PiCam2_configure():
     global camera, capture_config, preview_config
-    global CurrentExposure, SharpnessValue
 
     camera.stop()
     target_res = resolution_dropdown_selected.get()
@@ -2771,13 +2773,13 @@ def PiCam2_configure():
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
-    camera.set_controls({"ExposureTime": CurrentExposure})
+    camera.set_controls({"ExposureTime": 0})    # Auto exposure by default, overridden by configuration if any
     camera.set_controls({"AnalogueGain": 1.0})
     camera.set_controls({"AwbEnable": 0})
     camera.set_controls({"ColourGains": (2.2, 2.2)})  # Red 2.2, Blue 2.2 seem to be OK
     # In PiCamera2, '1' is the standard sharpness
     # It can be a floating point number from 0.0 to 16.0
-    camera.set_controls({"Sharpness": SharpnessValue})
+    camera.set_controls({"Sharpness": 1})   # Set default, overridden by configuration if any
     # draft.NoiseReductionModeEnum.HighQuality not defined, yet
     # However, looking at the PiCamera2 Source Code, it seems the default value for still configuration
     # is already HighQuality, so not much to worry about
@@ -3195,7 +3197,6 @@ def create_widgets():
     global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
     global rwnd_speed_control_delay
-    global sharpness_control_value
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
     global auto_stop_enabled_checkbox, auto_stop_enabled
@@ -3871,7 +3872,7 @@ def create_widgets():
                                              text='Sharpness:',
                                              font=("Arial", FontSize-1))
         sharpness_control_label.grid(row=0, column=0, padx=2, sticky=E)
-        sharpness_control_value = tk.IntVar(value=SharpnessValue)
+        sharpness_control_value = tk.IntVar(value=1)    # Default value, overridden by configuration if any
         sharpness_control_spinbox = tk.Spinbox(experimental_miscellaneous_frame, command=sharpness_control_selection,
                                                width=8, textvariable=sharpness_control_value, from_=0, to=16,
                                                increment=1, font=("Arial", FontSize-1))
