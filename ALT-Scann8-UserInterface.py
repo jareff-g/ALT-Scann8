@@ -231,7 +231,6 @@ MatchWaitMargin = 50    # Margin allowed to consider exposure/WB matches previou
                         # than a percentage of the tolerance value
 Tolerance_AE = 8000
 Tolerance_AWB = 1
-CurrentExposure = 0     # Zero means automatic exposure
 ExposureAdaptPause = True   # by default (non-expert) we wait for camera to stabilize when AE changes
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 AwbPause = False   # by default (non-expert) we wait for camera to stabilize when AWB changes
@@ -289,7 +288,7 @@ SessionData = {
     "CurrentDate": str(datetime.now()),
     "CurrentDir": CurrentDir,
     "CurrentFrame": str(CurrentFrame),
-    "CurrentExposure": str(CurrentExposure),
+    "CurrentExposure": 0,
     "NegativeCaptureActive": False,
     "HdrCaptureActive": str(HdrCaptureActive),
     "FilmType": 'S8',
@@ -561,15 +560,8 @@ def set_existing_folder():
         SessionData["CurrentDir"] = str(CurrentDir)
 
 
-# In order to display a non-too-cryptic value for the exposure (what we keep in 'CurrentExposure')
-# we will convert it to a higher level by using a similar algorythm as the one used by Torulf in his original code:
-# We take '20000' as the base reference of zero, with chunks of 2000's up and down moving the counter by one unit
-# 'CurrentExposure' = zero wil always be displayed as 'Auto'
-
-
 def exposure_selection():
     global exposure_spinbox
-    global CurrentExposure
     global SimulatedRun
     global auto_exp_wait_checkbox
 
@@ -577,24 +569,19 @@ def exposure_selection():
         return
 
     if AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
-        exposure_value.set(CurrentExposure / 1000)
         return
 
     CurrentExposure = exposure_value.get() * 1000
     if CurrentExposure <= 0:
-        CurrentExposure = 1     # Minimum exposure is 1us, zero means automatic
+        CurrentExposure = 1     # Minimum exposure is 1µs, zero means automatic
     SessionData["CurrentExposure"] = CurrentExposure
 
     if not SimulatedRun and not CameraDisabled:
-        camera.controls.ExposureTime = int(CurrentExposure)  # maybe will not work, check pag 26 of picamera2 specs
-
-    ###exposure_spinbox.config(value=CurrentExposureStr)
-    exposure_value.set(CurrentExposure/1000)
+        camera.controls.ExposureTime = CurrentExposure  # maybe will not work, check pag 26 of picamera2 specs
 
 
 def exposure_spinbox_auto():
     global exposure_spinbox
-    global CurrentExposure
     global SimulatedRun
     global auto_exp_wait_checkbox
     global exposure_btn, exposure_spinbox
@@ -604,6 +591,7 @@ def exposure_spinbox_auto():
         SessionData["CurrentExposure"] = CurrentExposure
         exposure_btn.config(fg="white", text="AUTO Exposure:")
         auto_exp_wait_checkbox.config(state=NORMAL)
+        # Do not set 'exposure_value', since ti will be updated dynamically with the current AE value from camera
         if not SimulatedRun and not CameraDisabled:
             camera.controls.ExposureTime = 0  # Set auto exposure (maybe will not work, check pag 26 of picamera2 specs)
     else:
@@ -615,7 +603,6 @@ def exposure_spinbox_auto():
             CurrentExposure = 3500  # Arbitrary Value for Simulated run
         SessionData["CurrentExposure"] = CurrentExposure
         exposure_btn.config(fg="black", text="Exposure:")
-        auto_exp_wait_checkbox.config(state=DISABLED)
 
     exposure_value.set(CurrentExposure/1000)
     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
@@ -835,27 +822,27 @@ def rwnd_speed_up():
     rwnd_speed_control_spinbox.config(text=str(round(60/(rwnd_speed_delay * 375 / 1000000))) + 'rpm')
 
 
-def min_frame_steps_selection():
+def steps_per_frame_selection():
     global MinFrameSteps
 
     if auto_framesteps_enabled.get():
-        min_frame_steps_value.set(MinFrameSteps)
+        steps_per_frame_value.set(MinFrameSteps)
         return
-    MinFrameSteps = min_frame_steps_value.get()
+    MinFrameSteps = steps_per_frame_value.get()
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
 
 
-def min_frame_steps_spinbox_auto():
+def steps_per_frame_auto():
     global MinFrameSteps
 
     if auto_framesteps_enabled.get():
-        min_frame_steps_btn.config(fg="white", text="AUTO Steps/Frame:")
+        steps_per_frame_btn.config(fg="white", text="AUTO Steps/Frame:")
     else:
-        min_frame_steps_btn.config(fg="black", text="Steps/Frame:")
+        steps_per_frame_btn.config(fg="black", text="Steps/Frame:")
 
-    arrange_widget_state(auto_framesteps_enabled.get(), [min_frame_steps_btn, min_frame_steps_spinbox])
+    arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
 
     SessionData["FrameStepsAuto"] = auto_framesteps_enabled.get()
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
@@ -1418,7 +1405,6 @@ def hdr_set_controls():
 
 
 def switch_hdr_capture():
-    global CurrentExposure
     global SimulatedRun
     global hdr_capture_active, HdrCaptureActive, HdrBracketAuto
     global hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox
@@ -1435,20 +1421,18 @@ def switch_hdr_capture():
     else:    # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
         if AE_enabled.get():  # Automatic mode
-            SessionData["CurrentExposure"] = 0
+            CurrentExposure = 0
             if not SimulatedRun and not CameraDisabled:
                 camera.controls.ExposureTime = 0    # maybe will not work, check pag 26 of picamera2 specs
         else:
-            if not SimulatedRun:
+            if not SimulatedRun and not CameraDisabled:
                 # Since we are in auto exposure mode, retrieve current value to start from there
-                if not CameraDisabled:
-                    metadata = camera.capture_metadata()
-                    CurrentExposure = metadata["ExposureTime"]
-                else:
-                    CurrentExposure = camera.exposure_speed
+                metadata = camera.capture_metadata()
+                CurrentExposure = metadata["ExposureTime"]
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
-            SessionData["CurrentExposure"] = CurrentExposure
+        SessionData["CurrentExposure"] = CurrentExposure
+        exposure_value.set(CurrentExposure)
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
     logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
 
@@ -1540,7 +1524,7 @@ def set_s8():
     MinFrameSteps = MinFrameStepsS8
     if ExpertMode:
         pt_level_value.set(PTLevel)
-        min_frame_steps_value.set(MinFrameSteps)
+        steps_per_frame_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 260 if BigSize else 210
     FilmHoleY2 = 260 if BigSize else 210
@@ -1571,7 +1555,7 @@ def set_r8():
     MinFrameSteps = MinFrameStepsR8
     if ExpertMode:
         pt_level_value.set(PTLevel)
-        min_frame_steps_value.set(MinFrameSteps)
+        steps_per_frame_value.set(MinFrameSteps)
     # Set reference film holes
     FilmHoleY1 = 20 if BigSize else 20
     FilmHoleY2 = 540 if BigSize else 380
@@ -1750,7 +1734,7 @@ def adjust_hdr_bracket():
 # 'still': Button to capture still (specific filename)
 # 'preview': Manual scan, display only, do not save
 def capture(mode):
-    global CurrentDir, CurrentFrame, CurrentExposure
+    global CurrentDir, CurrentFrame
     global SessionData
     global PreviousCurrentExposure
     global SimulatedRun
@@ -2088,7 +2072,6 @@ def stop_scan():
 def capture_loop():
     global CurrentDir
     global CurrentFrame
-    global CurrentExposure
     global SessionData
     global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str
     global NewFrameAvailable
@@ -2162,7 +2145,6 @@ def capture_loop():
             SessionData["CurrentDate"] = str(datetime.now())
             SessionData["CurrentDir"] = CurrentDir
             SessionData["CurrentFrame"] = str(CurrentFrame)
-            SessionData["CurrentExposure"] = CurrentExposure
             # with open(PersistedDataFilename, 'w') as f:
             #     json.dump(SessionData, f)
 
@@ -2387,7 +2369,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             if (auto_pt_level_enabled.get()):
                 pt_level_value.set(ArduinoParam1)
             if (auto_framesteps_enabled.get()):
-                min_frame_steps_value.set(ArduinoParam2)
+                steps_per_frame_value.set(ArduinoParam2)
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
         logging.debug("Received rewind end event from Arduino")
@@ -2489,7 +2471,7 @@ def arrange_widget_state(auto_state, widget_list):
 
 def load_session_data():
     global SessionData
-    global CurrentExposure, ExposureAdaptPause
+    global ExposureAdaptPause
     global CurrentDir
     global CurrentFrame, FramesToGo
     global folder_frame_target_dir
@@ -2607,11 +2589,14 @@ def load_session_data():
                             CurrentExposure = int(float(aux))
                         else:
                             CurrentExposure = aux
-                        ###CurrentExposureStr = str(round((CurrentExposure - 20000) / 2000))
                         AE_enabled.set(False)
                         exposure_btn.config(fg="black", text="Exposure:")
                         auto_exp_wait_checkbox.config(state=DISABLED)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.controls.ExposureTime = CurrentExposure
                     exposure_value.set(CurrentExposure/1000)
+                else:
+                    CurrentExposure = 0
                 if 'ExposureAdaptPause' in SessionData:
                     ExposureAdaptPause = eval(SessionData["ExposureAdaptPause"])
                     auto_exp_wait_checkbox.config(state=NORMAL if CurrentExposure == 0 else DISABLED)
@@ -2648,17 +2633,17 @@ def load_session_data():
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = int(SessionData["MinFrameSteps"])
-                    min_frame_steps_value.set(MinFrameSteps)
+                    steps_per_frame_value.set(MinFrameSteps)
                     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
                     aux = SessionData["FrameStepsAuto"]
                     auto_framesteps_enabled.set(aux)
-                    min_frame_steps_value.set(MinFrameSteps)
+                    steps_per_frame_value.set(MinFrameSteps)
                     if auto_framesteps_enabled.get():
-                        min_frame_steps_btn.config(fg="white", text="AUTO Steps/Frame:")
+                        steps_per_frame_btn.config(fg="white", text="AUTO Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
-                        min_frame_steps_btn.config(fg="black", text="Steps/Frame:")
+                        steps_per_frame_btn.config(fg="black", text="Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
@@ -2700,7 +2685,7 @@ def load_session_data():
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
-        arrange_widget_state(auto_framesteps_enabled.get(), [min_frame_steps_btn, min_frame_steps_spinbox])
+        arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
     if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
@@ -2871,7 +2856,6 @@ def create_main_window():
 
 def tscann8_init():
     global camera
-    global CurrentExposure
     global i2c
     global CurrentDir
     global CurrentFrame
@@ -2972,7 +2956,7 @@ def exposure_validation(new_value):
         if new_value == '':
             new_value = 0
         aux = float(new_value)
-        if aux >= 0 and aux < 10000:
+        if aux >= 0 and aux <= 10000:
             return True
         else:
             return False
@@ -3203,11 +3187,11 @@ def create_widgets():
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
     global hdr_btn
-    global min_frame_steps_value, frame_fine_tune_value
+    global steps_per_frame_value, frame_fine_tune_value
     global MinFrameSteps
     global pt_level_spinbox
     global PTLevel
-    global min_frame_steps_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
+    global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
     global frame_extra_steps_spinbox, frame_extra_steps_value
     global ScanSpeed, scan_speed_spinbox, scan_speed_value
     global exposure_spinbox, exposure_value
@@ -3220,7 +3204,7 @@ def create_widgets():
     global plotter_canvas
     global hdr_capture_active_checkbox, hdr_capture_active, hdr_viewx4_active
     global hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox, hdr_max_exp_value, hdr_min_exp_value
-    global min_frame_steps_btn, auto_framesteps_enabled, pt_level_btn, auto_pt_level_enabled
+    global steps_per_frame_btn, auto_framesteps_enabled, pt_level_btn, auto_pt_level_enabled
     global exposure_btn, wb_red_btn, wb_blue_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_value, hdr_bracket_shift_value, hdr_bracket_width, hdr_bracket_shift
@@ -3594,13 +3578,14 @@ def create_widgets():
         exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
-        exposure_value = tk.DoubleVar(value=CurrentExposure/1000)
+        exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = tk.Spinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
                                       from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1))
         exposure_spinbox.grid(row=1, column=1, padx=5, pady=1, sticky=W)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
         setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
+        exposure_spinbox.bind("<FocusOut>", lambda event: exposure_selection())
 
         auto_exposure_change_pause = tk.BooleanVar(value=ExposureAdaptPause)
         auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
@@ -3626,6 +3611,7 @@ def create_widgets():
         wb_red_validation_cmd = wb_red_spinbox.register(wb_validation)
         wb_red_spinbox.configure(validate="key", validatecommand=(wb_red_validation_cmd, '%P'))
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
+        wb_red_spinbox.bind("<FocusOut>", lambda event: wb_red_selection())
 
         wb_blue_btn = tk.Checkbutton(exp_wb_frame, text='AWB Blue:', width=16, height=1,
                                                  variable=AWB_enabled, onvalue=True, offvalue=False,
@@ -3641,6 +3627,7 @@ def create_widgets():
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_validation)
         wb_blue_spinbox.configure(validate="key", validatecommand=(wb_blue_validation_cmd, '%P'))
         setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
+        wb_blue_spinbox.bind("<FocusOut>", lambda event: wb_blue_selection())
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
@@ -3667,6 +3654,7 @@ def create_widgets():
         match_margin_validation_cmd = match_wait_margin_spinbox.register(match_margin_validation)
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_margin_validation_cmd, '%P'))
         setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
+        match_wait_margin_spinbox.bind("<FocusOut>", lambda event: match_wait_margin_selection())
 
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
@@ -3689,22 +3677,23 @@ def create_widgets():
         frame_alignment_frame.grid(row=0, column=2, padx=4, sticky='NSEW')
         # Spinbox to select MinFrameSteps on Arduino
         auto_framesteps_enabled = tk.BooleanVar(value=False)
-        min_frame_steps_btn = tk.Checkbutton(frame_alignment_frame, text='Steps/frame:', width=18, height=1,
+        steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, text='Steps/frame:', width=18, height=1,
                                                  variable=auto_framesteps_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=min_frame_steps_spinbox_auto,
+                                                 font=("Arial", FontSize-1), command=steps_per_frame_auto,
                                                  indicatoron=False, selectcolor="sea green")
-        min_frame_steps_btn.grid(row=0, column=0, padx=2, pady=3, sticky=E)
-        setup_tooltip(min_frame_steps_btn, "Toggle automatic steps/frame calculation.")
+        steps_per_frame_btn.grid(row=0, column=0, padx=2, pady=3, sticky=E)
+        setup_tooltip(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
-        min_frame_steps_value = tk.IntVar(value=MinFrameSteps)
-        min_frame_steps_spinbox = tk.Spinbox(
+        steps_per_frame_value = tk.IntVar(value=MinFrameSteps)
+        steps_per_frame_spinbox = tk.Spinbox(
             frame_alignment_frame,
-            command=min_frame_steps_selection, width=8,
-            textvariable=min_frame_steps_value, from_=100, to=600, font=("Arial", FontSize-1))
-        min_frame_steps_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
-        steps_per_frame_validation_cmd = min_frame_steps_spinbox.register(steps_per_frame_validation)
-        min_frame_steps_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
-        setup_tooltip(min_frame_steps_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
+            command=steps_per_frame_selection, width=8,
+            textvariable=steps_per_frame_value, from_=100, to=600, font=("Arial", FontSize-1))
+        steps_per_frame_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
+        steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
+        steps_per_frame_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
+        setup_tooltip(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
+        steps_per_frame_spinbox.bind("<FocusOut>", lambda event: steps_per_frame_selection())
 
         # Spinbox to select PTLevel on Arduino
         auto_pt_level_enabled = tk.BooleanVar(value=False)
@@ -3722,6 +3711,7 @@ def create_widgets():
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
         setup_tooltip(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
+        pt_level_spinbox.bind("<FocusOut>", lambda event: pt_level_selection())
 
         # Spinbox to select FrameFineTune on Arduino
         frame_fine_tune_label = tk.Label(frame_alignment_frame,
@@ -3735,6 +3725,7 @@ def create_widgets():
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(fine_tune_validation_cmd, '%P'))
         setup_tooltip(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
+        frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: frame_fine_tune_selection())
 
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame,
@@ -3748,6 +3739,7 @@ def create_widgets():
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(extra_steps_validation_cmd, '%P'))
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
+        frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: frame_extra_steps_selection())
 
         # Frame to add scan speed control
         speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
@@ -3766,6 +3758,7 @@ def create_widgets():
         scan_speed_validation_cmd = scan_speed_spinbox.register(scan_speed_validation)
         scan_speed_spinbox.configure(validate="key", validatecommand=(scan_speed_validation_cmd, '%P'))
         setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
+        scan_speed_spinbox.bind("<FocusOut>", lambda event: scan_speed_selection())
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
         stabilization_delay_label = tk.Label(speed_quality_frame,
@@ -3779,6 +3772,7 @@ def create_widgets():
         stabilization_delay_validation_cmd = stabilization_delay_spinbox.register(stabilization_delay_validation)
         stabilization_delay_spinbox.configure(validate="key", validatecommand=(stabilization_delay_validation_cmd, '%P'))
         setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
+        stabilization_delay_spinbox.bind("<FocusOut>", lambda event: stabilization_delay_selection())
 
     if ExperimentalMode:
         experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
@@ -3813,6 +3807,7 @@ def create_widgets():
         hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
         hdr_min_exp_spinbox.configure(validate="key", validatecommand=(hdr_min_exp_validation_cmd, '%P'))
         setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
+        hdr_min_exp_spinbox.bind("<FocusOut>", lambda event: hdr_check_min_exp())
         hdr_row +=1
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
@@ -3824,6 +3819,7 @@ def create_widgets():
         hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
         hdr_max_exp_spinbox.configure(validate="key", validatecommand=(hdr_max_exp_validation_cmd, '%P'))
         setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
+        hdr_max_exp_spinbox.bind("<FocusOut>", lambda event: hdr_check_max_exp())
         hdr_row += 1
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize-1), state=DISABLED)
@@ -3835,6 +3831,7 @@ def create_widgets():
         hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
         hdr_bracket_width_spinbox.configure(validate="key", validatecommand=(hdr_bracket_width_validation_cmd, '%P'))
         setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
+        hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_width())
         hdr_row += 1
 
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize-1), state=DISABLED)
@@ -3846,6 +3843,7 @@ def create_widgets():
         hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
         hdr_bracket_shift_spinbox.configure(validate="key", validatecommand=(hdr_bracket_shift_validation_cmd, '%P'))
         setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
+        hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_check_bracket_shift())
         hdr_row += 1
 
         hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
@@ -3881,6 +3879,7 @@ def create_widgets():
         sharpness_control_spinbox.configure(validate="key", validatecommand=(sharpness_validation_cmd, '%P'))
         setup_tooltip(sharpness_control_spinbox,
                       "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
+        sharpness_control_spinbox.bind("<FocusOut>", lambda event: sharpness_control_selection())
         # Display entry to throttle Rwnd/FF speed
         rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame,
                                              text='RW/FF speed rpm):',
@@ -3888,12 +3887,13 @@ def create_widgets():
         rwnd_speed_control_label.grid(row=1, column=0, padx=2, sticky=E)
         rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
         rwnd_speed_control_spinbox = tk.Spinbox(experimental_miscellaneous_frame, state='readonly', width=8,
-                                                command=(rwnd_speed_control_selection, '%d'), from_=40, to=800, increment=50,
+                                                command=rwnd_speed_control_selection, from_=40, to=800, increment=50,
                                                 textvariable=rwnd_speed_control_value, font=("Arial", FontSize-1))
         rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
         rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
         rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(rewind_speed_validation_cmd, '%P'))
         setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
+        rwnd_speed_control_spinbox.bind("<FocusOut>", lambda event: rwnd_speed_control_selection())
 
         # Damaged film helpers, to help handling damaged film (broken perforations)
         Damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
