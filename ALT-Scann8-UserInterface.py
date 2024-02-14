@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.21"
-__date__ = "2024-02-13"
-__version_highlight__ = "Enhanced field validation (spinboxes mainly) - Fix"
+__version__ = "1.9.22"
+__date__ = "2024-02-14"
+__version_highlight__ = "Add support of DNG captures + changes required for it to work"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -125,8 +125,12 @@ MinFrameStepsR8 = 240
 # Phototransistor reported level when hole is detected
 PTLevelS8 = 80
 PTLevelR8 = 120
-# Token to be sent on program closure, to allow threads to shut down cleanly
-END_TOKEN = object()
+# Tokens identify type of elements in queues
+END_TOKEN = object()  # Sent on program closure, to allow threads to shut down cleanly
+IMAGE_TOKEN = object()  # Queue element is an image
+REQUEST_TOKEN = object()  # Queue element is a PiCamera2 request
+MaxQueueSize = 16
+DisableThreads = False
 FrameArrivalTime = 0
 # Variables to track windows movement and set preview accordingly
 TopWinX = 0
@@ -142,7 +146,7 @@ BigSize = True
 ForceSmallSize = False
 ForceBigSize = False
 FolderProcess = 0
-LoggingMode = "INFO"
+LoggingMode = "WARNING"
 LogLevel = 0
 draw_capture_canvas = 0
 button_lock_counter = 0
@@ -159,7 +163,6 @@ save_bg = 'gray'
 save_fg = 'black'
 ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
-raw_simulated_capture_image = ''
 simulated_capture_image = ''
 simulated_images_in_list = 0
 FilmHoleY1 = 260 if BigSize else 210
@@ -279,7 +282,7 @@ SessionData = {
     "HdrCaptureActive": str(HdrCaptureActive),
     "FilmType": 'S8',
     "MinFrameStepsS8": 290,
-    "MinFrameStepsR8":  260,
+    "MinFrameStepsR8":  240,
     "MinFrameSteps":  290,
     "FrameFineTune":  50,
     "FrameExtraSteps": 0,
@@ -314,7 +317,7 @@ class DynamicSpinbox(tk.Spinbox):
 
     def on_key_press(self, event):
         # Block keyboard entry if the flag is set
-        if ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right'}:
+        if ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}:
             return "break"
 
     def on_key_release(self, event):
@@ -931,10 +934,16 @@ def fast_forward_loop():
         else:
             fast_forward_movie()
 
+# *******************************************************************
+# ********************** Capture functions **************************
+# *******************************************************************
+def reverse_image(image):
+    image_array = np.asarray(image)
+    image_array = np.negative(image_array)
+    return Image.fromarray(image_array)
+
 
 def capture_display_thread(queue, event, id):
-    global message
-
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
@@ -942,23 +951,27 @@ def capture_display_thread(queue, event, id):
         logging.debug("Retrieved message from capture display queue (len=%i)", queue.qsize())
         if message == END_TOKEN:
             break
+        type = message[0]
+        if type != IMAGE_TOKEN:
+            continue
+        image = message[1]
+        frame_idx = message[2]
+        hdr_idx = message[3]
+
         # If too many items in queue the skip display
-        if (queue.qsize() <= 5):
+        if (MaxQueueSize - queue.qsize() <= 5):
+            logging.warning("Display queue almost full: Skipping frame display")
+        else:
             # Invert image if button selected
             if negative_image.get():
-                image_array = np.asarray(message[0])
-                image_array = np.negative(image_array)
-                message = (Image.fromarray(image_array), message[1], message[2])
-            draw_preview_image(message[0], message[2])
+                image = reverse_image(image)
+            draw_preview_image(image, hdr_idx)
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
-        else:
-            logging.warning("Display queue almost full: Skipping frame display")
     logging.debug("Exiting capture_display_thread")
 
 
 def capture_save_thread(queue, event, id):
     global CurrentDir
-    global message
     global ScanStopRequested
 
     if os.path.isdir(CurrentDir):
@@ -975,15 +988,35 @@ def capture_save_thread(queue, event, id):
         if message == END_TOKEN:
             break
         # Invert image if button selected
-        if negative_image.get():
-            image_array = np.asarray(message[0])
-            image_array = np.negative(image_array)
-            message = (Image.fromarray(image_array), message[1], message[2])
-        if message[2] > 1:  # Hdr frame 1 has standard filename
-            logging.debug("Saving HDR frame n.%i", message[2])
-            message[0].save(HdrFrameFilenamePattern % (message[1], message[2], file_type_dropdown_selected.get()), quality=95)
+        is_dng = file_type_dropdown_selected.get() == 'dng'
+        # Extract info from message
+        type = message[0]
+        if type == REQUEST_TOKEN:
+            request = message[1]
+        elif type == IMAGE_TOKEN:
+            captured_image = message[1]
         else:
-            message[0].save(FrameFilenamePattern % (message[1], file_type_dropdown_selected.get()), quality=95)
+            logging.error(f"Invalid message type received: {type}")
+        frame_idx = message[2]
+        hdr_idx = message[3]
+        if not is_dng:  # Plain file save
+            if type == REQUEST_TOKEN:
+                captured_image = request.make_image('main')
+                request.release()
+            if negative_image.get():
+                captured_image = reverse_image(captured_image)
+            if hdr_idx > 1:  # Hdr frame 1 has standard filename
+                logging.debug("Saving HDR frame n.%i", hdr_idx)
+                captured_image.save(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()), quality=95)
+            else:
+                captured_image.save(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()), quality=95)
+        else:   # DNG only
+            if hdr_idx > 1:  # Hdr frame 1 has standard filename
+                    request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+            else:   # Non HDR
+                    request.save_dng(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+            request.release()
+
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1231,7 +1264,6 @@ def set_s8():
             send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
-
 def set_r8():
     global SimulatedRun
     global PTLevelR8
@@ -1262,7 +1294,6 @@ def set_r8():
             send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
-
 def register_frame():
     global FPM_LastMinuteFrameTimes
     global FPM_StartTime
@@ -1286,77 +1317,6 @@ def register_frame():
         FPM_CalculatedValue = len(FPM_LastMinuteFrameTimes)
     elif frame_time - FPM_StartTime > 10:  # some  calculations needed if less than 60 sec
         FPM_CalculatedValue = int((len(FPM_LastMinuteFrameTimes) * 60) / (frame_time - FPM_StartTime))
-
-
-def capture_hdr():
-    global CurrentFrame
-    global capture_display_queue, capture_save_queue
-    global camera, hdr_exp_list, hdr_rev_exp_list
-    global recalculate_hdr_exp_list, dry_run_iterations
-    global HdrBracketAuto
-    global MergeMertens
-
-    if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
-        adjust_hdr_bracket()
-
-    if recalculate_hdr_exp_list:
-        hdr_reinit()
-        perform_dry_run = True
-        recalculate_hdr_exp_list = False
-    else:
-        perform_dry_run = False
-
-    images_to_merge.clear()
-    # session_frames should be equal to 1 for the first captured frame of the scan session.
-    # For HDR this means we need to unconditionally wait for exposure adaptation
-    # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
-    if session_frames == 1:
-        perform_dry_run = True
-
-    if session_frames % 2 == 1:
-        work_list = hdr_exp_list
-        idx = 1
-        idx_inc = 1
-    else:
-        work_list = hdr_rev_exp_list
-        idx = hdr_num_exposures
-        idx_inc = -1
-    for exp in work_list:
-        exp = max(1, exp + hdr_bracket_shift_value.get())   # Apply bracket shift
-        logging.debug("capture_hdr: exp %.2f", exp)
-        if perform_dry_run:
-            camera.set_controls({"ExposureTime": int(exp*1000)})
-        else:
-            time.sleep(stabilization_delay_value.get()/1000)  # Allow time to stabilize image only if no dry run
-        if perform_dry_run:
-            for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
-                camera.capture_image("main")
-        captured_snapshot = camera.capture_image("main")
-        # We skip dry run only for the first capture of each frame,
-        # as it is the same exposure as the last capture of the previous one
-        perform_dry_run = True
-        # For PiCamera2, preview and save to file are handled in asynchronous threads
-        if HdrMergeInPlace:
-            # Convert Pillow image to NumPy array
-            img_np = np.array(captured_snapshot)
-            # Convert the NumPy array to a format suitable for MergeMertens (e.g., float32)
-            img_np_float32 = img_np.astype(np.float32)
-            images_to_merge.append(img_np_float32)  # Add frame
-        else:
-            queue_item = tuple((captured_snapshot, CurrentFrame, idx))
-            capture_display_queue.put(queue_item)
-            capture_save_queue.put(queue_item)
-        idx += idx_inc
-    if HdrMergeInPlace:
-        # Perform merge of the HDR image list
-        img = MergeMertens.process(images_to_merge)
-        # Convert the result back to PIL
-        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
-        img = Image.fromarray(img)
-        # Add processed item to the queue to be saved and previewed
-        queue_item = tuple((img, CurrentFrame, 0))
-        capture_display_queue.put(queue_item)
-        capture_save_queue.put(queue_item)
 
 
 def adjust_hdr_bracket_auto():
@@ -1418,6 +1378,165 @@ def adjust_hdr_bracket():
         logging.debug(f"Adjusting bracket: {hdr_min_exp_value.get()}, {hdr_max_exp_value.get()}")
 
 
+def capture_hdr(mode):
+    global CurrentFrame
+    global capture_display_queue, capture_save_queue
+    global camera, hdr_exp_list, hdr_rev_exp_list
+    global recalculate_hdr_exp_list, dry_run_iterations
+    global HdrBracketAuto
+    global MergeMertens
+
+    if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
+        adjust_hdr_bracket()
+
+    if recalculate_hdr_exp_list:
+        hdr_reinit()
+        perform_dry_run = True
+        recalculate_hdr_exp_list = False
+    else:
+        perform_dry_run = False
+
+    images_to_merge.clear()
+    # session_frames should be equal to 1 for the first captured frame of the scan session.
+    # For HDR this means we need to unconditionally wait for exposure adaptation
+    # For following frames, we can skip dry run for the first capture since we alternate the sense of the exposures on each frame
+    if session_frames == 1:
+        perform_dry_run = True
+
+    if session_frames % 2 == 1:
+        work_list = hdr_exp_list
+        idx = 1
+        idx_inc = 1
+    else:
+        work_list = hdr_rev_exp_list
+        idx = hdr_num_exposures
+        idx_inc = -1
+    is_dng = file_type_dropdown_selected.get() == 'dng'
+    for exp in work_list:
+        exp = max(1, exp + hdr_bracket_shift_value.get())   # Apply bracket shift
+        logging.debug("capture_hdr: exp %.2f", exp)
+        if perform_dry_run:
+            camera.set_controls({"ExposureTime": int(exp*1000)})
+        else:
+            time.sleep(stabilization_delay_value.get()/1000)  # Allow time to stabilize image only if no dry run
+        if perform_dry_run:
+            for i in range(1,dry_run_iterations):   # Perform a few dummy captures to allow exposure stabilization
+                camera.capture_image("main")
+        # We skip dry run only for the first capture of each frame,
+        # as it is the same exposure as the last capture of the previous one
+        perform_dry_run = True
+        # For PiCamera2, preview and save to file are handled in asynchronous threads
+        if HdrMergeInPlace and not is_dng:  # For now we do not even try to merge DNG images in place
+            captured_image = camera.capture_image("main")    # If merge in place, Capture snapshot (no DNG allowed)
+            # Convert Pillow image to NumPy array
+            img_np = np.array(captured_image)
+            # Convert the NumPy array to a format suitable for MergeMertens (e.g., float32)
+            img_np_float32 = img_np.astype(np.float32)
+            images_to_merge.append(img_np_float32)  # Add frame
+        else:
+            request = camera.capture_request(capture_config)
+            captured_image = request.make_image('main')
+            if not is_dng:  # If not using DNG we can still use multithread (if not disabled)
+                # Reuse captured_image from preview
+                # captured_image = request.make_image('main')
+                request.release()  # release request, already have image, don't need it for non-DNG
+                if DisableThreads:  # Save image in main loop
+                    draw_preview_image(captured_image, idx)  # Display preview
+                    if negative_image.get():
+                        captured_image = reverse_image(captured_image)
+                    if idx > 1:  # Hdr frame 1 has standard filename
+                        captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
+                                                                       file_type_dropdown_selected.get()), quality=95)
+                    else:
+                        captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()),
+                                            quality=95)
+                else:   # send image to threads
+                    # Having the preview handled by a thread is not only not efficient, but algo quite sluggish
+                    draw_preview_image(captured_image, idx)
+                    """
+                    # Leave this code commented for now
+                    queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                    capture_display_queue.put(queue_item)
+                    """
+                    if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
+                        queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                        capture_save_queue.put(queue_item)
+                        logging.debug("Saving frame %i", CurrentFrame)
+            else:  # DNG + HDR, threads not possible due to request conflicting with retrieve metadata
+                """
+                queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                capture_display_queue.put(queue_item)
+                """
+                draw_preview_image(captured_image, idx)  # Display preview
+                if idx > 1:  # Hdr frame 1 has standard filename
+                    request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
+                else:  # Non HDR
+                    request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                request.release()
+        idx += idx_inc
+    if HdrMergeInPlace and not is_dng:
+        # Perform merge of the HDR image list
+        img = MergeMertens.process(images_to_merge)
+        # Convert the result back to PIL
+        img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
+        img = Image.fromarray(img)
+        draw_preview_image(img, 0)  # Display preview
+        img.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
+
+
+def capture_single(mode):
+    global CurrentFrame
+    global capture_display_queue, capture_save_queue
+
+    is_dng = file_type_dropdown_selected.get() == 'dng'
+    if not DisableThreads:
+        if is_dng:
+            request = camera.capture_request(capture_config)
+            # For PiCamera2, preview and save to file are handled in asynchronous threads
+            captured_image = request.make_image('main')
+            draw_preview_image(captured_image, 0)
+            """
+            display_queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
+            capture_display_queue.put(display_queue_item)
+            logging.debug("Queueing frame %i for display", CurrentFrame)
+            """
+            if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
+                save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, 0))
+                capture_save_queue.put(save_queue_item)
+                logging.debug("Queueing frame %i to be saved", CurrentFrame)
+        else:
+            captured_image = camera.capture_image("main")
+            # For PiCamera2, preview and save to file are handled in asynchronous threads
+            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
+            #capture_display_queue.put(queue_item)
+            draw_preview_image(captured_image, 0)
+            if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
+                capture_save_queue.put(queue_item)
+                logging.debug("Saving frame %i", CurrentFrame)
+        if mode == 'manual':  # In manual mode, increase CurrentFrame
+            CurrentFrame += 1
+            # Update number of captured frames
+            Scanned_Images_number_str.set(str(CurrentFrame))
+    else:
+        request = camera.capture_request(capture_config)
+        captured_image = request.make_image('main')
+        if negative_image.get() and not is_dng:  # Cannot capture negative if target is DNG file
+            request.release()
+            captured_image = reverse_image(captured_image)
+            draw_preview_image(captured_image, 0)
+            captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
+        else:
+            draw_preview_image(captured_image, 0)
+            if is_dng:
+                request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+            else:
+                request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+            request.release()
+        if mode == 'manual':  # In manual mode, increase CurrentFrame
+            CurrentFrame += 1
+            # Update number of captured frames
+            Scanned_Images_number_str.set(str(CurrentFrame))
+
 
 # 4 possible modes:
 # 'normal': Standard capture during automated scan (display and save)
@@ -1429,13 +1548,10 @@ def capture(mode):
     global SessionData
     global PreviousCurrentExposure
     global SimulatedRun
-    global raw_simulated_capture_image
-    global simulated_capture_image
     global AwbPause
     global PreviousGainRed, PreviousGainBlue
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
-    global capture_display_queue, capture_save_queue
     global HdrCaptureActive
 
     if SimulatedRun or CameraDisabled:
@@ -1498,38 +1614,25 @@ def capture(mode):
             total_wait_time_awb+=(time.time() - curtime)
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
-    if not SimulatedRun:
-        if PiCam2PreviewEnabled:
-            if mode == 'still':
-                camera.switch_mode_and_capture_file(capture_config, StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
-                CurrentStill += 1
-            else:
-                # This one should not happen, will not allow PiCam2 scan in preview mode
-                camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
+    if PiCam2PreviewEnabled:
+        if mode == 'still':
+            camera.switch_mode_and_capture_file(capture_config, StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
+            CurrentStill += 1
         else:
-            time.sleep(stabilization_delay_value.get()/1000)   # Allow time to stabilize image, it can get too fast with PiCamera2
-            if mode == 'still':
-                captured_snapshot = camera.capture_image("main")
-                captured_snapshot.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
-                CurrentStill += 1
+            # This one should not happen, will not allow PiCam2 scan in preview mode
+            camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
+    else:
+        time.sleep(stabilization_delay_value.get()/1000)   # Allow time to stabilize image, it can get too fast with PiCamera2
+        if mode == 'still':
+            captured_image = camera.capture_image("main")
+            captured_image.save(StillFrameFilenamePattern % (CurrentFrame,CurrentStill))
+            CurrentStill += 1
+        else:
+            if HdrCaptureActive:
+                # Stabilization delay for HDR managed inside capture_hdr
+                capture_hdr(mode)
             else:
-                if HdrCaptureActive:
-                    # Stabilization delay for HDR managed inside capture_hdr
-                    capture_hdr()
-                else:
-                    ###time.sleep(stabilization_delay_value.get())  # Allow time to stabilize image, too fast with PiCamera2
-                    captured_snapshot = camera.capture_image("main")
-                    # For PiCamera2, preview and save to file are handled in asynchronous threads
-                    queue_item = tuple((captured_snapshot, CurrentFrame, 0))
-                    capture_display_queue.put(queue_item)
-                    logging.debug("Displaying frame %i", CurrentFrame)
-                    if mode == 'normal' or mode == 'manual':    # Do not save in preview mode, only display
-                        capture_save_queue.put(queue_item)
-                        logging.debug("Saving frame %i", CurrentFrame)
-                        if mode == 'manual':  # In manual mode, increase CurrentFrame
-                            CurrentFrame += 1
-                            # Update number of captured frames
-                            Scanned_Images_number_str.set(str(CurrentFrame))
+                capture_single(mode)
 
     SessionData["CurrentDate"] = str(datetime.now())
     SessionData["CurrentFrame"] = str(CurrentFrame)
@@ -1604,7 +1707,6 @@ def capture_loop_simulated():
     global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str, frames_to_go_entry, time_to_go_time
     global NewFrameAvailable
     global ScanOngoing
-    global raw_simulated_capture_image
     global simulated_capture_image
     global simulated_captured_frame_list, simulated_images_in_list
     global ScanStopRequested
@@ -1641,12 +1743,10 @@ def capture_loop_simulated():
         frame_to_display = CurrentFrame % simulated_images_in_list
         filename, ext = os.path.splitext(simulated_captured_frame_list[frame_to_display])
         if ext == '.jpg':
-            raw_simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
+            simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
             if negative_image.get():
-                image_array = np.asarray(raw_simulated_capture_image)
-                image_array = np.negative(image_array)
-                raw_simulated_capture_image = Image.fromarray(image_array)
-            draw_preview_image(raw_simulated_capture_image, 0)
+                simulated_capture_image = reverse_image(simulated_capture_image)
+            draw_preview_image(simulated_capture_image, 0)
 
         # Update remaining time
         aux = frames_to_go_str.get()
@@ -2615,9 +2715,9 @@ def tscann8_init():
         # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
         # displayed in the preview area by a dedicated thread, so that time consumed in this task
         # does not impact the scan process speed
-        capture_display_queue = queue.Queue(maxsize=10)
+        capture_display_queue = queue.Queue(maxsize=MaxQueueSize)
         capture_display_event = threading.Event()
-        capture_save_queue = queue.Queue(maxsize=10)
+        capture_save_queue = queue.Queue(maxsize=MaxQueueSize)
         capture_save_event = threading.Event()
         display_thread = threading.Thread(target=capture_display_thread, args=(capture_display_queue, capture_display_event,0))
         save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
@@ -3454,7 +3554,7 @@ def create_widgets():
     # File format (JPG or PNG)
     # Drop down to select file type
     # Dropdown menu options
-    file_type_list = ["jpg", "png"]
+    file_type_list = ["jpg", "png", "dng"]
     file_type_dropdown_selected = tk.StringVar()
     file_type_dropdown_selected.set(file_type_list[0])  # Set the initial value
 
@@ -3962,11 +4062,11 @@ def main(argv):
     global capture_display_event, capture_save_event
     global capture_display_queue, capture_save_queue
     global ALT_scann_init_done
-    global CameraDisabled
+    global CameraDisabled, DisableThreads
     global ForceSmallSize, ForceBigSize
 
 
-    opts, args = getopt.getopt(argv, "sexl:ph12n")
+    opts, args = getopt.getopt(argv, "sexl:ph12nt")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -3979,12 +4079,14 @@ def main(argv):
             CameraDisabled = True
         elif opt == '-l':
             LoggingMode = arg
-        if opt == '-1':
+        elif opt == '-1':
             ForceSmallSize = True
-        if opt == '-2':
+        elif opt == '-2':
             ForceBigSize = True
-        if opt == '-n':
+        elif opt == '-n':
             disable_tooltips()
+        elif opt == '-t':
+            DisableThreads = True
         elif opt == '-h':
             print("ALT-Scann 8 Command line parameters")
             print("  -s             Start Simulated session")
@@ -3993,6 +4095,7 @@ def main(argv):
             print("  -p             Activate integrated plotter")
             print("  -d             Disable camera (for development purposes)")
             print("  -n             Disable Tooltips")
+            print("  -t             Disable multi-threading")
             print("  -1             Initiate on 'small screen' mode (resolution lower than than Full HD)")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
