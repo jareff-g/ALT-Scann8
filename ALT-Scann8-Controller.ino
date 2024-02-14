@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.10"
-#define  __date__       "2024-02-09"
-#define  __version_highlight__  "Bugfixes film presence detection"
+#define __version__     "1.0.11"
+#define  __date__       "2024-02-14"
+#define  __version_highlight__  "Fix - Automatic frame steps broken"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -316,6 +316,7 @@ void loop() {
                     else {
                         Frame_Steps_Auto = false;
                         MinFrameSteps = param;
+                        OriginalMinFrameSteps = MinFrameSteps;
                         if (IsS8)
                             MinFrameStepsS8 = param;
                         else
@@ -895,7 +896,7 @@ void adjust_framesteps(int frame_steps) {
     if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
         for (int i = 0; i < 32; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32) - 10;
+        MinFrameSteps = int(total / 32) - 30;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
