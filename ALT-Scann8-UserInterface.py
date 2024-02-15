@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.23"
+__version__ = "1.9.24"
 __date__ = "2024-02-15"
-__version_highlight__ = "Add support of DNG captures + changes required for it to work"
+__version_highlight__ = "Bug fixes (HDR  auto bracket color)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3663,24 +3663,19 @@ def create_widgets():
         extended_frame.pack(side=TOP, anchor=W, padx=5)
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
-        expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True)
+        expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True, fill='both')
 
         # *********************************
         # Exposure / white balance
-        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', width=16,
-                                  font=("Arial", FontSize-1))
+        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', font=("Arial", FontSize-1))
         exp_wb_frame.grid(row=0, column=0, padx=5, ipady=5, sticky='NSEW')
         exp_wb_row = 0
 
-        exp_wb_auto_label = tk.Label(exp_wb_frame,
-                                         text='Auto',
-                                         width=4, font=("Arial", FontSize-1))
-        exp_wb_auto_label.grid(row=exp_wb_row, column=2, padx=5, pady=1)
+        exp_wb_auto_label = tk.Label(exp_wb_frame, text='Auto', font=("Arial", FontSize-1))
+        exp_wb_auto_label.grid(row=exp_wb_row, column=3, padx=5, pady=1)
 
-        catch_up_delay_label = tk.Label(exp_wb_frame,
-                                         text='Catch-up\ndelay',
-                                         width=8, font=("Arial", FontSize-1))
-        catch_up_delay_label.grid(row=exp_wb_row, column=3, padx=5, pady=1)
+        catch_up_delay_label = tk.Label(exp_wb_frame, text='Catch-up\ndelay', font=("Arial", FontSize-1))
+        catch_up_delay_label.grid(row=exp_wb_row, column=4, padx=5, pady=1)
         exp_wb_row += 1
 
         # Automatic exposure
@@ -3699,14 +3694,14 @@ def create_widgets():
         AE_enabled = tk.BooleanVar(value=False)
         exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
                                       font=("Arial", FontSize-1), command=exposure_spinbox_auto)
-        exposure_btn.grid(row=exp_wb_row, column=2, pady=1)
+        exposure_btn.grid(row=exp_wb_row, column=3, pady=1)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
         auto_exposure_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
         auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_exposure_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_exposure_change_pause_selection)
-        auto_exp_wait_checkbox.grid(row=exp_wb_row, column=3, pady=1)
+        auto_exp_wait_checkbox.grid(row=exp_wb_row, column=4, pady=1)
         setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         exp_wb_row += 1
@@ -3724,20 +3719,20 @@ def create_widgets():
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
         wb_red_spinbox.bind("<FocusOut>", lambda event: wb_red_selection())
 
-        #wb_join_label = tk.Label(exp_wb_frame, text='}', width=1, font=("Arial", FontSize+6))
-        #wb_join_label.grid(row=exp_wb_row, rowspan=2, column=2, padx=0, pady=1, sticky=W)
+        wb_join_label = tk.Label(exp_wb_frame, text='}', width=1, font=("Arial", FontSize*2))   # ⎬ } ﹜
+        wb_join_label.grid(row=exp_wb_row, rowspan=2, column=2, padx=0, pady=1, sticky=W)
 
         AWB_enabled = tk.BooleanVar(value=False)
         wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
                                     font=("Arial", FontSize-1), command=wb_spinbox_auto)
-        wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=2, pady=1)
+        wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=3, pady=1)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
                                                onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_white_balance_change_pause_selection)
-        awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=3, pady=1)
+        awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=4, pady=1)
         setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
         exp_wb_row += 1
 
@@ -3785,8 +3780,7 @@ def create_widgets():
 
         # *********************************
         # Frame to add frame align controls
-        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16,
-                                           font=("Arial", FontSize-1))
+        frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", font=("Arial", FontSize-1))
         frame_alignment_frame.grid(row=0, column=2, padx=4, sticky='NSEW')
         frame_align_row = 0
 
@@ -3866,8 +3860,7 @@ def create_widgets():
 
         # *********************************
         # Frame to add scan speed control
-        speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
-                                           font=("Arial", FontSize-1))
+        speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", font=("Arial", FontSize-1))
         speed_quality_frame.grid(row=0, column=3, padx=4, sticky='NSEW')
 
         # Spinbox to select Speed on Arduino (1-10)
@@ -3899,12 +3892,11 @@ def create_widgets():
         stabilization_delay_spinbox.bind("<FocusOut>", lambda event: stabilization_delay_selection())
 
     if ExperimentalMode:
-        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', width=8, height=5, font=("Arial", FontSize-1))
+        experimental_frame = LabelFrame(extended_frame, text='Experimental Area', font=("Arial", FontSize-1))
         experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
-        hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", width=18,
-                                           font=("Arial", FontSize-1))
+        hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", font=("Arial", FontSize-1))
         #hdr_frame.grid(row=0, column=1, padx=4, pady=4, sticky='NSEW')
         hdr_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
         hdr_row = 0
@@ -3925,7 +3917,7 @@ def create_widgets():
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=hdr_lower_exp)
-        hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
+        hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8, readonlybackground='pale green',
             textvariable=hdr_min_exp_value, from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
@@ -3937,7 +3929,7 @@ def create_widgets():
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=hdr_higher_exp)
-        hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8,
+        hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8, readonlybackground='pale green',
             textvariable=hdr_max_exp_value, from_=2, to=1000, increment=1, font=("Arial", FontSize-1), state=DISABLED)
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
@@ -3986,7 +3978,7 @@ def create_widgets():
         setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
         # Experimental miscellaneous sub-frame
-        experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous', width=8, height=5, font=("Arial", FontSize-1))
+        experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous', font=("Arial", FontSize-1))
         experimental_miscellaneous_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
 
         # Sharpness, control to allow playing with the values and see the results
@@ -4020,7 +4012,7 @@ def create_widgets():
         # No need to validate on FocusOut, since no keyboard entry is allowed in this one
 
         # Damaged film helpers, to help handling damaged film (broken perforations)
-        Damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film', width=18, height=3, font=("Arial", FontSize-1))
+        Damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film', font=("Arial", FontSize-1))
         Damaged_film_frame.grid(row=2, column=0, columnspan=2, padx=4, sticky='')
         # Checkbox to enable/disable manual scan
         Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
