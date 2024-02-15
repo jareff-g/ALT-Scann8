@@ -513,7 +513,6 @@ def set_new_folder():
     requested_dir = ""
     success = False
 
-    CurrentDir = BaseDir
     while requested_dir == "" or requested_dir is None:
         requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt=f"Enter new folder name (to be created under {CurrentDir}):")
         if requested_dir is None:
@@ -3698,7 +3697,7 @@ def create_widgets():
 
         exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = DynamicSpinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
-                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1), readonlybackground='light green')
+                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1), readonlybackground='pale green')
         exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
@@ -3725,7 +3724,7 @@ def create_widgets():
         wb_red_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='light green',
+        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='pale green',
             textvariable=wb_red_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
@@ -3755,7 +3754,7 @@ def create_widgets():
         wb_blue_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
 
         wb_blue_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8, readonlybackground='light green',
+        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8, readonlybackground='pale green',
             textvariable=wb_blue_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
@@ -3769,7 +3768,7 @@ def create_widgets():
         match_wait_margin_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
-        match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8, readonlybackground='light green',
+        match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8, readonlybackground='pale green',
             textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
         match_wait_margin_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         match_wait_margin_validation_cmd = match_wait_margin_spinbox.register(match_wait_margin_validation)
@@ -3808,7 +3807,7 @@ def create_widgets():
         steps_per_frame_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         steps_per_frame_value = tk.IntVar(value=250)    # Default to be overridden by configuration
-        steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=8, readonlybackground='light green',
+        steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=8, readonlybackground='pale green',
                                                  textvariable=steps_per_frame_value, from_=100, to=600, font=("Arial", FontSize-1))
         steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
@@ -3829,7 +3828,7 @@ def create_widgets():
         pt_level_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         pt_level_value = tk.IntVar(value=200)   # To be overridden by config
-        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=8, readonlybackground='light green',
+        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=8, readonlybackground='pale green',
             textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize-1))
         pt_level_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
@@ -3851,7 +3850,7 @@ def create_widgets():
         frame_fine_tune_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         frame_fine_tune_value = tk.IntVar(value=50)   # To be overridden by config
-        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8, readonlybackground='light green',
+        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8, readonlybackground='pale green',
                         textvariable=frame_fine_tune_value, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
         frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
@@ -3865,7 +3864,7 @@ def create_widgets():
         frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         frame_extra_steps_value = tk.IntVar(value=0)  # To be overridden by config
-        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8, readonlybackground='light green',
+        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8, readonlybackground='pale green',
                         textvariable=frame_extra_steps_value, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
