@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.22"
-__date__ = "2024-02-14"
+__version__ = "1.9.23"
+__date__ = "2024-02-15"
 __version_highlight__ = "Add support of DNG captures + changes required for it to work"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -89,6 +89,7 @@ FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"   # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
+frames_to_go_key_press_time = 0
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
 CurrentScanStartFrame = 0
@@ -316,15 +317,15 @@ class DynamicSpinbox(tk.Spinbox):
         self.bind("<KeyRelease>", self.on_key_release)
 
     def on_key_press(self, event):
+        disabled = self.config('state')[-1] == 'readonly'
+        print(f"self.config('state'): {self.config('state')}")
         # Block keyboard entry if the flag is set
-        if ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}:
+        if disabled or ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}:
             return "break"
 
     def on_key_release(self, event):
         # Release the block on key release
         pass
-
-
 
 
 # ********************************************************
@@ -511,10 +512,12 @@ def set_new_folder():
     global Scanned_Images_number_str
 
     requested_dir = ""
+    success = False
 
     CurrentDir = BaseDir
     while requested_dir == "" or requested_dir is None:
-        requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt="New folder name?")
+        requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt=f"Enter new folder name (to be created under {CurrentDir}):")
+        print(f"requested_dir: {requested_dir}, {os.getcwd()}")
         if requested_dir is None:
             return
         if requested_dir == "":
@@ -523,16 +526,27 @@ def set_new_folder():
     newly_created_dir = os.path.join(CurrentDir, requested_dir)
 
     if not os.path.isdir(newly_created_dir):
-        os.mkdir(newly_created_dir)
-        CurrentFrame = 0
-        CurrentDir = newly_created_dir
+        try:
+            os.mkdir(newly_created_dir)
+            CurrentFrame = 0
+            CurrentDir = newly_created_dir
+            success = True
+        except FileExistsError:
+            tk.messagebox.showerror("Error", f"Folder {requested_dir} already exists.")
+        except PermissionError:
+            tk.messagebox.showerror("Error", f"Folder {requested_dir}, permission denied to create directory.")
+        except OSError as e:
+            tk.messagebox.showerror("Error", f"While creating folder {requested_dir}, OS error: {e}.")
+        except Exception as e:
+            tk.messagebox.showerror("Error", f"While creating folder {requested_dir}, unexpected error: {e}.")
     else:
-        tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists!")
+        tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists.")
 
-    folder_frame_target_dir.config(text=CurrentDir)
-    Scanned_Images_number_str.set(str(CurrentFrame))
-    SessionData["CurrentDir"] = str(CurrentDir)
-    SessionData["CurrentFrame"] = str(CurrentFrame)
+    if success:
+        folder_frame_target_dir.config(text=CurrentDir)
+        Scanned_Images_number_str.set(str(CurrentFrame))
+        SessionData["CurrentDir"] = str(CurrentDir)
+        SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
 def set_existing_folder():
@@ -1715,6 +1729,8 @@ def capture_loop_simulated():
     global SessionData
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
     global disk_space_error_to_notify
+    global frames_to_go_key_press_time
+
 
     if ScanStopRequested:
         stop_scan_simulated()
@@ -1750,7 +1766,7 @@ def capture_loop_simulated():
 
         # Update remaining time
         aux = frames_to_go_str.get()
-        if aux.isdigit():
+        if aux.isdigit() and time.time() > frames_to_go_key_press_time:
             FramesToGo = int(aux)
             if FramesToGo > 0:
                 FramesToGo -= 1
@@ -1873,6 +1889,7 @@ def capture_loop():
     global session_frames, CurrentStill
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
     global disk_space_error_to_notify
+    global frames_to_go_key_press_time
 
     if ScanStopRequested:
         stop_scan()
@@ -1899,7 +1916,7 @@ def capture_loop():
         if NewFrameAvailable:
             # Update remaining time
             aux = frames_to_go_str.get()
-            if aux.isdigit():
+            if aux.isdigit() and time.time() > frames_to_go_key_press_time:
                 FramesToGo = int(aux)
                 if FramesToGo > 0:
                     FramesToGo -= 1
@@ -1999,6 +2016,17 @@ def temperature_check():
         RPi_temp_value_label.config(text=str(temp_str))
         last_temp = RPiTemp
         LastTempInFahrenheit = TempInFahrenheit
+
+
+def frames_to_go_key_press(event):
+    global frames_to_go_key_press_time
+    # Block keyboard entry if the flag is set
+    if event.keysym not in {'1', '2', '3', '4', '5', '6', '7', '8', '9', '0',
+                            'KP_1', 'KP_2', 'KP_3', 'KP_4', 'KP_5', 'KP_6', 'KP_7', 'KP_8', 'KP_9', 'KP_0',
+                            'Delete', 'BackSpace', 'Left', 'Right'}:
+        return "break"
+    else:
+        frames_to_go_key_press_time = time.time() + 5   # 5 sec guard time to allow typing entire number
 
 
 def preview_check():
@@ -3602,6 +3630,8 @@ def create_widgets():
 
     frames_to_go_str = tk.StringVar(value='')
     frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=14, font=("Arial", FontSize-2), justify="right")
+    # Bind the KeyRelease event to the entry widget
+    frames_to_go_entry.bind("<KeyPress>", frames_to_go_key_press)
     frames_to_go_entry.pack(side=TOP, pady=6)
     setup_tooltip(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of remaining time to finish.")
     time_to_go_str = tk.StringVar(value='')
