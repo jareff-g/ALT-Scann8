@@ -695,8 +695,7 @@ def rwnd_speed_up():
 
 
 def frame_extra_steps_selection():
-    global frame_extra_steps_spinbox
-    aux = frame_extra_steps_value.get()
+    aux = value_normalize(frame_extra_steps_value, -30, 30)
     SessionData["FrameExtraSteps"] = aux
     send_arduino_command(CMD_SET_EXTRA_STEPS, aux)
 
@@ -959,7 +958,6 @@ def capture_display_thread(queue, event, id):
         if type != IMAGE_TOKEN:
             continue
         image = message[1]
-        frame_idx = message[2]
         hdr_idx = message[3]
 
         # If too many items in queue the skip display
@@ -2988,12 +2986,6 @@ def fine_tune_validation(new_value):
             return False
     except (ValueError, TypeError):
         return False
-
-
-def frame_extra_steps_selection():
-    aux = value_normalize(frame_extra_steps_value, -30, 30)
-    SessionData["FrameExtraSteps"] = aux
-    send_arduino_command(CMD_SET_EXTRA_STEPS, aux)
 
 
 def extra_steps_validation(new_value):
