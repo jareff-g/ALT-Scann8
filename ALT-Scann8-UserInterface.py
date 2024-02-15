@@ -611,16 +611,10 @@ def wb_spinbox_auto():
 
     if AWB_enabled.get():
         awb_red_wait_checkbox.config(state=NORMAL)
-        awb_blue_wait_checkbox.config(state=NORMAL)
-        wb_red_btn.config(fg="white", text="AUTO AWB Red:")
-        wb_blue_btn.config(fg="white", text="AUTO AWB Blue:")
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AwbEnable": 1})
     else:
         awb_red_wait_checkbox.config(state=DISABLED)
-        awb_blue_wait_checkbox.config(state=DISABLED)
-        wb_red_btn.config(fg="black", text="AWB Red:")
-        wb_blue_btn.config(fg="black", text="AWB Blue:")
         if not SimulatedRun and not CameraDisabled:
             # Retrieve current gain values from Camera
             metadata = camera.capture_metadata()
@@ -629,8 +623,7 @@ def wb_spinbox_auto():
             wb_blue_value.set(camera_colour_gains[1])
             camera.set_controls({"AwbEnable": 0})
 
-    arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
-    arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox])
+    arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox, wb_blue_spinbox])
 
 
 
@@ -2403,45 +2396,48 @@ def load_session_data():
                     if isinstance(aux, str) and (aux == "Auto" or aux == "0") or isinstance(aux, int) and aux == 0:
                         aux = 0
                         AE_enabled.set(True)
-                        exposure_btn.config(fg="white", text="AUTO Exposure:")
                         auto_exp_wait_checkbox.config(state=NORMAL)
                     else:
                         if isinstance(aux, str):
                             aux = int(float(aux))
                         AE_enabled.set(False)
-                        exposure_btn.config(fg="black", text="Exposure:")
                         auto_exp_wait_checkbox.config(state=DISABLED)
                     if not SimulatedRun and not CameraDisabled:
                         camera.controls.ExposureTime = aux
                     exposure_value.set(aux/1000)
                 if 'ExposureAdaptPause' in SessionData:
-                    aux = eval(SessionData["ExposureAdaptPause"])
+                    if isinstance(SessionData["ExposureAdaptPause"], bool):
+                        aux = SessionData["ExposureAdaptPause"]
+                    else:
+                        aux = eval(SessionData["ExposureAdaptPause"])
                     auto_exposure_change_pause.set(aux)
                     auto_exp_wait_checkbox.config(state=NORMAL if exposure_value.get() == 0 else DISABLED)
                     ###if auto_exposure_change_pause.get():
                     ###    auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
-                    if isinstance(AWB_enabled, bool):
-                        AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
-                    else:
+                    if isinstance(SessionData["CurrentAwbAuto"], bool):
                         AWB_enabled.set(SessionData["CurrentAwbAuto"])
+                    else:
+                        AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
                     wb_blue_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     awb_red_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
-                    awb_blue_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
-                    arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
+                    ###awb_blue_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
+                    ###arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
                     arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox])
+                    '''
                     if AWB_enabled.get():
                         wb_red_btn.config(fg="white", text="AUTO AWB Red:")
                         wb_blue_btn.config(fg="white", text="AUTO AWB Blue:")
                     else:
                         wb_red_btn.config(fg="black", text="AWB Red:")
                         wb_blue_btn.config(fg="black", text="AWB Blue:")
+                    '''
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
                         awb_red_wait_checkbox.select()
-                        awb_blue_wait_checkbox.select()
+                        ###awb_blue_wait_checkbox.select()
                 if 'GainRed' in SessionData:
                     aux = float(SessionData["GainRed"])
                     wb_red_value.set(round(aux,1))
@@ -2777,7 +2773,7 @@ def exposure_spinbox_auto():
     if AE_enabled.get():  # Not in automatic mode, activate auto
         SessionData["CurrentExposure"] = 0
         exposure_value.set(0)
-        exposure_btn.config(fg="white", text="AUTO Exposure:")
+        ###exposure_btn.config(fg="white", text="AUTO Exposure:")
         auto_exp_wait_checkbox.config(state=NORMAL)
         # Do not set 'exposure_value', since ti will be updated dynamically with the current AE value from camera
         if not SimulatedRun and not CameraDisabled:
@@ -2791,7 +2787,7 @@ def exposure_spinbox_auto():
             aux = 3500  # Arbitrary Value for Simulated run
         SessionData["CurrentExposure"] = aux
         exposure_value.set(aux / 1000)
-        exposure_btn.config(fg="black", text="Exposure:")
+        ###exposure_btn.config(fg="black", text="Exposure:")
 
     auto_exp_wait_checkbox.config(state=NORMAL if AE_enabled.get() else DISABLED)
     arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
@@ -3697,94 +3693,101 @@ def create_widgets():
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
                                     width=16, font=("Arial", FontSize-1))
         exp_wb_frame.grid(row=0, column=0, padx=5, ipady=5, sticky='NSEW')
+        exp_wb_row = 0
+
+        exp_wb_auto_label = tk.Label(exp_wb_frame,
+                                         text='Auto',
+                                         width=4, font=("Arial", FontSize-1))
+        exp_wb_auto_label.grid(row=exp_wb_row, column=2, padx=5, pady=1)
 
         catch_up_delay_label = tk.Label(exp_wb_frame,
                                          text='Catch-up\ndelay',
-                                         width=10, font=("Arial", FontSize-1))
-        catch_up_delay_label.grid(row=0, column=2, padx=5, pady=1)
+                                         width=8, font=("Arial", FontSize-1))
+        catch_up_delay_label.grid(row=exp_wb_row, column=3, padx=5, pady=1)
+        exp_wb_row += 1
 
         # Automatic exposure
-        AE_enabled = tk.BooleanVar(value=False)
-        exposure_btn = tk.Checkbutton(exp_wb_frame, text='Exposure:', width=16, height=1,
-                                                 variable=AE_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=exposure_spinbox_auto,
-                                                 indicatoron=False, selectcolor="sea green")
-        exposure_btn.grid(row=1, column=0, padx=5, pady=1, sticky=E)
-        setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
+        exposure_label = tk.Label(exp_wb_frame, text='Exposure:', width=8, font=("Arial", FontSize-1))
+        exposure_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = DynamicSpinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
                                       from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1))
-        exposure_spinbox.grid(row=1, column=1, padx=5, pady=1, sticky=W)
+        exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
         setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
         exposure_spinbox.bind("<FocusOut>", lambda event: exposure_selection())
 
+        AE_enabled = tk.BooleanVar(value=False)
+        exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
+                                      font=("Arial", FontSize-1), command=exposure_spinbox_auto)
+        exposure_btn.grid(row=exp_wb_row, column=2, padx=5, pady=1)
+        setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
+
         auto_exposure_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
-        auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
-                                                variable=auto_exposure_change_pause, onvalue=True, offvalue=False,
-                                                command=auto_exposure_change_pause_selection, font=("Arial", FontSize-1))
-        auto_exp_wait_checkbox.grid(row=1, column=2, padx=5, pady=1)
+        auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_exposure_change_pause,
+                                                onvalue=True, offvalue=False, font=("Arial", FontSize-1),
+                                                command=auto_exposure_change_pause_selection)
+        auto_exp_wait_checkbox.grid(row=exp_wb_row, column=3, padx=5, pady=1)
         setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
+        exp_wb_row += 1
 
-        # Automatic White Balance
-        AWB_enabled = tk.BooleanVar(value=False)
-        wb_red_btn = tk.Checkbutton(exp_wb_frame, text='AWB Red:', width=16, height=1,
-                                                 variable=AWB_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=wb_spinbox_auto,
-                                                 indicatoron=False, selectcolor="sea green")
-        wb_red_btn.grid(row=2, column=0, padx=5, pady=1, sticky=E)
-        setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
+        # Automatic White Balance red
+        wb_red_label = tk.Label(exp_wb_frame, text='WB Red:', width=8, font=("Arial", FontSize-1))
+        wb_red_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
         wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8,
             textvariable=wb_red_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
-        wb_red_spinbox.grid(row=2, column=1, padx=5, pady=1, sticky=W)
+        wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
         wb_red_spinbox.configure(validate="key", validatecommand=(wb_red_validation_cmd, '%P'))
         setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
         wb_red_spinbox.bind("<FocusOut>", lambda event: wb_red_selection())
 
-        wb_blue_btn = tk.Checkbutton(exp_wb_frame, text='AWB Blue:', width=16, height=1,
-                                                 variable=AWB_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=wb_spinbox_auto,
-                                                 indicatoron=False, selectcolor="sea green")
-        wb_blue_btn.grid(row=3, column=0, padx=5, pady=1, sticky=E)
-        setup_tooltip(wb_blue_btn, "Toggle automatic white balance for blue channel (on/off).")
+        #wb_join_label = tk.Label(exp_wb_frame, text='}', width=1, font=("Arial", FontSize+6))
+        #wb_join_label.grid(row=exp_wb_row, rowspan=2, column=2, padx=0, pady=1, sticky=W)
+
+        AWB_enabled = tk.BooleanVar(value=False)
+        wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
+                                    font=("Arial", FontSize-1), command=wb_spinbox_auto)
+        wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=2, padx=5, pady=1)
+        setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
+
+        auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
+        awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
+                                               onvalue=True, offvalue=False, font=("Arial", FontSize-1),
+                                                command=auto_white_balance_change_pause_selection)
+        awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=3, padx=5, pady=1)
+        setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
+        exp_wb_row += 1
+
+        # Automatic White Balance blue
+        wb_blue_label = tk.Label(exp_wb_frame, text='WB Blue:', width=8, font=("Arial", FontSize-1))
+        wb_blue_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         wb_blue_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
         wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8,
             textvariable=wb_blue_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
-        wb_blue_spinbox.grid(row=3, column=1, padx=5, pady=1, sticky=W)
+        wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
         wb_blue_spinbox.configure(validate="key", validatecommand=(wb_blue_validation_cmd, '%P'))
         setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
         wb_blue_spinbox.bind("<FocusOut>", lambda event: wb_blue_selection())
-
-        auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
-        awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
-                                                variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
-                                                command=auto_white_balance_change_pause_selection, font=("Arial", FontSize-1))
-        awb_red_wait_checkbox.grid(row=2, column=2, padx=5, pady=1)
-        setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
-        awb_blue_wait_checkbox = tk.Checkbutton(exp_wb_frame, text='', height=1, state=DISABLED,
-                                                variable=auto_white_balance_change_pause, onvalue=True, offvalue=False,
-                                                command=auto_white_balance_change_pause_selection, font=("Arial", FontSize-1))
-        awb_blue_wait_checkbox.grid(row=3, column=2, padx=5, pady=1)
-        setup_tooltip(awb_blue_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
+        exp_wb_row+= 1
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
         match_wait_margin_label = tk.Label(exp_wb_frame,
                                          text='Match margin (%):',
                                          width=15, font=("Arial", FontSize-1))
-        match_wait_margin_label.grid(row=4, column=0, padx=5, pady=1, sticky=E)
+        match_wait_margin_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
         match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8,
             textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
-        match_wait_margin_spinbox.grid(row=4, column=1, padx=5, pady=1, sticky=W)
+        match_wait_margin_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         match_wait_margin_validation_cmd = match_wait_margin_spinbox.register(match_wait_margin_validation)
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_wait_margin_validation_cmd, '%P'))
         setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
