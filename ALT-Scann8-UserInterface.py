@@ -318,7 +318,6 @@ class DynamicSpinbox(tk.Spinbox):
 
     def on_key_press(self, event):
         disabled = self.config('state')[-1] == 'readonly'
-        print(f"self.config('state'): {self.config('state')}")
         # Block keyboard entry if the flag is set
         if disabled or ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}:
             return "break"
@@ -517,7 +516,6 @@ def set_new_folder():
     CurrentDir = BaseDir
     while requested_dir == "" or requested_dir is None:
         requested_dir = tk.simpledialog.askstring(title="Enter new folder name", prompt=f"Enter new folder name (to be created under {CurrentDir}):")
-        print(f"requested_dir: {requested_dir}, {os.getcwd()}")
         if requested_dir is None:
             return
         if requested_dir == "":
@@ -2452,10 +2450,8 @@ def load_session_data():
                 if 'FrameStepsAuto' in SessionData:
                     auto_framesteps_enabled.set(SessionData["FrameStepsAuto"])
                     if auto_framesteps_enabled.get():
-                        steps_per_frame_btn.config(fg="white", text="AUTO Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
-                        steps_per_frame_btn.config(fg="black", text="Steps/Frame:")
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, steps_per_frame_value.get())
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
@@ -2473,10 +2469,8 @@ def load_session_data():
                 if 'PTLevelAuto' in SessionData:
                     auto_pt_level_enabled.set(SessionData["PTLevelAuto"])
                     if auto_pt_level_enabled.get():
-                        pt_level_btn.config(fg="white", text="AUTO PT Level:")
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
-                        pt_level_btn.config(fg="black", text="PT Level:")
                         send_arduino_command(CMD_SET_PT_LEVEL, pt_level_value.get())
                 if 'PTLevel' in SessionData:
                     PTLevel = int(SessionData["PTLevel"])
@@ -2908,11 +2902,6 @@ def match_wait_margin_validation(new_value):
 
 
 def steps_per_frame_auto():
-    if auto_framesteps_enabled.get():
-        steps_per_frame_btn.config(fg="white", text="AUTO Steps/Frame:")
-    else:
-        steps_per_frame_btn.config(fg="black", text="Steps/Frame:")
-
     arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
 
     SessionData["FrameStepsAuto"] = auto_framesteps_enabled.get()
@@ -2946,10 +2935,6 @@ def steps_per_frame_validation(new_value):
 
 
 def pt_level_spinbox_auto():
-    if auto_pt_level_enabled.get():
-        pt_level_btn.config(fg="white", text="AUTO PT Level:")
-    else:
-        pt_level_btn.config(fg="black", text="PT Level:")
     arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
 
     SessionData["PTLevelAuto"] = auto_pt_level_enabled.get()
@@ -3322,7 +3307,7 @@ def create_widgets():
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
     global frame_extra_steps_spinbox, frame_extra_steps_value
     global scan_speed_spinbox, scan_speed_value
-    global exposure_spinbox, exposure_value
+    global exposure_value
     global wb_red_spinbox, wb_blue_spinbox, wb_red_value, wb_blue_value
     global match_wait_margin_spinbox, match_wait_margin_value
     global stabilization_delay_spinbox, stabilization_delay_value
@@ -3689,9 +3674,10 @@ def create_widgets():
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
         expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True)
 
+        # *********************************
         # Exposure / white balance
-        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ',
-                                    width=16, font=("Arial", FontSize-1))
+        exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', width=16,
+                                  font=("Arial", FontSize-1))
         exp_wb_frame.grid(row=0, column=0, padx=5, ipady=5, sticky='NSEW')
         exp_wb_row = 0
 
@@ -3707,12 +3693,12 @@ def create_widgets():
         exp_wb_row += 1
 
         # Automatic exposure
-        exposure_label = tk.Label(exp_wb_frame, text='Exposure:', width=8, font=("Arial", FontSize-1))
+        exposure_label = tk.Label(exp_wb_frame, text='Exposure:', font=("Arial", FontSize-1))
         exposure_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = DynamicSpinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
-                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1))
+                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1), readonlybackground='light green')
         exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
@@ -3722,24 +3708,24 @@ def create_widgets():
         AE_enabled = tk.BooleanVar(value=False)
         exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
                                       font=("Arial", FontSize-1), command=exposure_spinbox_auto)
-        exposure_btn.grid(row=exp_wb_row, column=2, padx=5, pady=1)
+        exposure_btn.grid(row=exp_wb_row, column=2, pady=1)
         setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
 
         auto_exposure_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
         auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_exposure_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_exposure_change_pause_selection)
-        auto_exp_wait_checkbox.grid(row=exp_wb_row, column=3, padx=5, pady=1)
+        auto_exp_wait_checkbox.grid(row=exp_wb_row, column=3, pady=1)
         setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         exp_wb_row += 1
 
         # Automatic White Balance red
-        wb_red_label = tk.Label(exp_wb_frame, text='WB Red:', width=8, font=("Arial", FontSize-1))
+        wb_red_label = tk.Label(exp_wb_frame, text='WB Red:', font=("Arial", FontSize-1))
         wb_red_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8,
+        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='light green',
             textvariable=wb_red_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
@@ -3753,23 +3739,23 @@ def create_widgets():
         AWB_enabled = tk.BooleanVar(value=False)
         wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
                                     font=("Arial", FontSize-1), command=wb_spinbox_auto)
-        wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=2, padx=5, pady=1)
+        wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=2, pady=1)
         setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
                                                onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_white_balance_change_pause_selection)
-        awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=3, padx=5, pady=1)
+        awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=3, pady=1)
         setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
         exp_wb_row += 1
 
         # Automatic White Balance blue
-        wb_blue_label = tk.Label(exp_wb_frame, text='WB Blue:', width=8, font=("Arial", FontSize-1))
-        wb_blue_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
+        wb_blue_label = tk.Label(exp_wb_frame, text='WB Blue:', font=("Arial", FontSize-1))
+        wb_blue_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
 
         wb_blue_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8,
+        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8, readonlybackground='light green',
             textvariable=wb_blue_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
@@ -3779,13 +3765,11 @@ def create_widgets():
         exp_wb_row+= 1
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
-        match_wait_margin_label = tk.Label(exp_wb_frame,
-                                         text='Match margin (%):',
-                                         width=15, font=("Arial", FontSize-1))
+        match_wait_margin_label = tk.Label(exp_wb_frame, text='Match margin (%):', font=("Arial", FontSize-1))
         match_wait_margin_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
-        match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8,
+        match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8, readonlybackground='light green',
             textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
         match_wait_margin_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         match_wait_margin_validation_cmd = match_wait_margin_spinbox.register(match_wait_margin_validation)
@@ -3808,76 +3792,88 @@ def create_widgets():
                                 bg='white', fg='white')
         film_hole_label_2.pack(side=TOP)
 
+        # *********************************
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", width=16,
                                            font=("Arial", FontSize-1))
         frame_alignment_frame.grid(row=0, column=2, padx=4, sticky='NSEW')
+        frame_align_row = 0
+
+        exp_wb_auto_label = tk.Label(frame_alignment_frame, text='Auto', width=4, font=("Arial", FontSize-1))
+        exp_wb_auto_label.grid(row=frame_align_row, column=2, padx=5, pady=1)
+        frame_align_row += 1
+
         # Spinbox to select MinFrameSteps on Arduino
-        auto_framesteps_enabled = tk.BooleanVar(value=False)
-        steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, text='Steps/frame:', width=18, height=1,
-                                                 variable=auto_framesteps_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=steps_per_frame_auto,
-                                                 indicatoron=False, selectcolor="sea green")
-        steps_per_frame_btn.grid(row=0, column=0, padx=2, pady=3, sticky=E)
-        setup_tooltip(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
+        steps_per_frame_label = tk.Label(frame_alignment_frame, text='Steps/frame:', font=("Arial", FontSize-1))
+        steps_per_frame_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         steps_per_frame_value = tk.IntVar(value=250)    # Default to be overridden by configuration
-        steps_per_frame_spinbox = DynamicSpinbox(
-            frame_alignment_frame,
-            command=steps_per_frame_selection, width=8,
-            textvariable=steps_per_frame_value, from_=100, to=600, font=("Arial", FontSize-1))
-        steps_per_frame_spinbox.grid(row=0, column=1, padx=2, pady=3, sticky=W)
+        steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=8, readonlybackground='light green',
+                                                 textvariable=steps_per_frame_value, from_=100, to=600, font=("Arial", FontSize-1))
+        steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
         steps_per_frame_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
         setup_tooltip(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
         steps_per_frame_spinbox.bind("<FocusOut>", lambda event: steps_per_frame_selection())
 
+        auto_framesteps_enabled = tk.BooleanVar(value=False)
+        steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
+                                             offvalue=False, font=("Arial", FontSize-1), command=steps_per_frame_auto)
+        steps_per_frame_btn.grid(row=frame_align_row, column=2, pady=3)
+        setup_tooltip(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
+
+        frame_align_row += 1
+
         # Spinbox to select PTLevel on Arduino
-        auto_pt_level_enabled = tk.BooleanVar(value=False)
-        pt_level_btn = tk.Checkbutton(frame_alignment_frame, text='PT Level:', width=18, height=1,
-                                                 variable=auto_pt_level_enabled, onvalue=True, offvalue=False,
-                                                 font=("Arial", FontSize-1), command=pt_level_spinbox_auto,
-                                                 indicatoron=False, selectcolor="sea green")
-        pt_level_btn.grid(row=1, column=0, padx=2, pady=3, sticky=E)
-        setup_tooltip(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
+        pt_level_label = tk.Label(frame_alignment_frame, text='PT Level:', font=("Arial", FontSize-1))
+        pt_level_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
 
         pt_level_value = tk.IntVar(value=200)   # To be overridden by config
-        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=8,
+        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=8, readonlybackground='light green',
             textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize-1))
-        pt_level_spinbox.grid(row=1, column=1, padx=2, pady=3, sticky=W)
+        pt_level_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
         setup_tooltip(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
         pt_level_spinbox.bind("<FocusOut>", lambda event: pt_level_selection())
 
+        auto_pt_level_enabled = tk.BooleanVar(value=False)
+        pt_level_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_pt_level_enabled,
+                                      onvalue=True, offvalue=False, font=("Arial", FontSize-1),
+                                      command=pt_level_spinbox_auto)
+        pt_level_btn.grid(row=frame_align_row, column=2, pady=3)
+        setup_tooltip(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
+
+        frame_align_row += 1
+
         # Spinbox to select Frame Fine Tune on Arduino
-        frame_fine_tune_label = tk.Label(frame_alignment_frame,
-                                         text='Fine tune:',
-                                         font=("Arial", FontSize-1))
-        frame_fine_tune_label.grid(row=2, column=0, padx=2, pady=3, sticky=E)
+        frame_fine_tune_label = tk.Label(frame_alignment_frame, text='Fine tune:', font=("Arial", FontSize-1))
+        frame_fine_tune_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
+
         frame_fine_tune_value = tk.IntVar(value=50)   # To be overridden by config
-        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8,
+        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8, readonlybackground='light green',
                         textvariable=frame_fine_tune_value, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
-        frame_fine_tune_spinbox.grid(row=2, column=1, padx=2, pady=3, sticky=W)
+        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(fine_tune_validation_cmd, '%P'))
         setup_tooltip(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: frame_fine_tune_selection())
+        frame_align_row += 1
 
         # Spinbox to select Extra Steps on Arduino
-        frame_extra_steps_label = tk.Label(frame_alignment_frame,
-                                         text='Extra Steps:',
-                                         font=("Arial", FontSize-1))
-        frame_extra_steps_label.grid(row=3, column=0, padx=2, pady=3, sticky=E)
+        frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize-1))
+        frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=5, pady=1, sticky=E)
+
         frame_extra_steps_value = tk.IntVar(value=0)  # To be overridden by config
-        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8,
+        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8, readonlybackground='light green',
                         textvariable=frame_extra_steps_value, from_=-30, to=30, font=("Arial", FontSize-1))
-        frame_extra_steps_spinbox.grid(row=3, column=1, padx=2, pady=3, sticky=W)
+        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(extra_steps_validation_cmd, '%P'))
         setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: frame_extra_steps_selection())
 
+        # *********************************
         # Frame to add scan speed control
         speed_quality_frame = LabelFrame(expert_frame, text="Stabilization", width=18,
                                            font=("Arial", FontSize-1))
