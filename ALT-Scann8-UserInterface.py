@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.24"
-__date__ = "2024-02-15"
+__version__ = "1.9.25"
+__date__ = "2024-02-17"
 __version_highlight__ = "Bug fixes (HDR  auto bracket color)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -127,12 +127,18 @@ MinFrameStepsR8 = 240
 PTLevelS8 = 80
 PTLevelR8 = 120
 # Tokens identify type of elements in queues
-END_TOKEN = object()  # Sent on program closure, to allow threads to shut down cleanly
-IMAGE_TOKEN = object()  # Queue element is an image
-REQUEST_TOKEN = object()  # Queue element is a PiCamera2 request
+# Token to be inserted in each queue on program closure, to allow threads to shut down cleanly
+active_threads = 0
+num_threads = 0
+END_TOKEN = "TERMINATE_PROCESS"  # Sent on program closure, to allow threads to shut down cleanly
+IMAGE_TOKEN = "IMAGE_TOKEN"  # Queue element is an image
+REQUEST_TOKEN = "REQUEST_TOKEN"  # Queue element is a PiCamera2 request
 MaxQueueSize = 16
 DisableThreads = False
 FrameArrivalTime = 0
+# Ids to allow cancelling afters on exit
+onesec_after = 0
+arduino_after = 0
 # Variables to track windows movement and set preview accordingly
 TopWinX = 0
 TopWinY = 0
@@ -147,7 +153,7 @@ BigSize = True
 ForceSmallSize = False
 ForceBigSize = False
 FolderProcess = 0
-LoggingMode = "WARNING"
+LoggingMode = "INFO"
 LogLevel = 0
 draw_capture_canvas = 0
 button_lock_counter = 0
@@ -272,7 +278,37 @@ HdrBracketAuto = False
 HdrMergeInPlace = False
 hdr_auto_bracket_frames = 8    # Every n frames, bracket is recalculated
 
-# Persisted data
+# *** Simulated sensor modes to ellaborate resolution list
+camera_resolutions = None
+simulated_sensor_modes = [{'bit_depth': 10,
+                           'crop_limits': (696, 528, 2664, 1980),
+                           'exposure_limits': (31, 667234896, None),
+                           'format': 'SRGGB10_CSI2P',
+                           'fps': 120.05,
+                           'size': (1332, 990),
+                           'unpacked': 'SRGGB10'},
+                          {'bit_depth': 12,
+                           'crop_limits': (0, 440, 4056, 2160),
+                           'exposure_limits': (60, 674181621, None),
+                           'format': 'SRGGB12_CSI2P',
+                           'fps': 50.03,
+                           'size': (2028, 1080),
+                           'unpacked': 'SRGGB12'},
+                          {'bit_depth': 12,
+                           'crop_limits': (0, 0, 4056, 3040),
+                           'exposure_limits': (60, 674181621, None),
+                           'format': 'SRGGB12_CSI2P',
+                           'fps': 40.01,
+                           'size': (2028, 1520),
+                           'unpacked': 'SRGGB12'},
+                          {'bit_depth': 12,
+                           'crop_limits': (0, 0, 4056, 3040),
+                           'exposure_limits': (114, 694422939, None),
+                           'format': 'SRGGB12_CSI2P',
+                           'fps': 10.0,
+                           'size': (4056, 3040),
+                           'unpacked': 'SRGGB12'}]
+
 # Persisted data
 SessionData = {
     "CurrentDate": str(datetime.now()),
@@ -319,12 +355,119 @@ class DynamicSpinbox(tk.Spinbox):
     def on_key_press(self, event):
         disabled = self.config('state')[-1] == 'readonly'
         # Block keyboard entry if the flag is set
-        if disabled or ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}:
+        if (disabled and event.keysym not in {'Tab', 'ISO_Left_Tab'} or
+                ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}):
             return "break"
 
     def on_key_release(self, event):
         # Release the block on key release
         pass
+
+
+# ****************************************************************************************************************
+# Class CameraResolutions
+# Upon creation, extracts from the camera (using PiCamera2 sensor_modes) a list of supported resolutions and
+# associated attributes (exposure range, format)
+# In case of simulated run, it uses a copy of the info returned for the Raspberry Pi HD camera.
+# ****************************************************************************************************************
+class CameraResolutions():
+    """
+    Singleton class - ensures only one instance is ever created.
+    """
+    _instance = None
+    resolution_dict = {}
+    active = ''
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        if not hasattr(self, 'initialized'):
+            if SimulatedRun:
+                camera_sensor_modes = simulated_sensor_modes
+            else:
+                camera_sensor_modes = camera.sensor_modes
+            self.resolution_dict.clear()
+            # Identify the smallest sensor resolution that will fix the two extra resolutions ("1024x768", "640x480")
+            aux_width = 10000
+            aux_height = 10000
+            # Add dictionary entries where the key is the value shown in the drop down list (XxY)
+            for mode in camera_sensor_modes:
+                key = f"{mode['size'][0]}x{mode['size'][1]}"
+                self.resolution_dict[key] = {}
+                self.resolution_dict[key]['sensor_resolution'] = mode['size']
+                self.resolution_dict[key]['image_resolution'] = mode['size']
+                if mode['size'][0] > 1024 and mode['size'][0] < aux_width:
+                    aux_width = mode['size'][0]
+                if mode['size'][1] > 768 and mode['size'][1] < aux_height:
+                    aux_height = mode['size'][1]
+                self.resolution_dict[key]['format'] = mode['format'].format
+                aux = mode['exposure_limits'][0]
+                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
+                    aux = 114   # Alternative min exp in case value from camera is not OK
+                self.resolution_dict[key]['min_exp'] = aux
+                aux = mode['exposure_limits'][1]
+                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
+                    aux = 667234896   # Alternative max exp in case value from camera is not OK
+                self.resolution_dict[key]['max_exp'] = aux
+            # Add two extra resolutions - "1024x768", "640x480"
+            aux_entry = self.resolution_dict[f"{aux_width}x{aux_height}"]
+            self.resolution_dict['1024x768'] = {}
+            self.resolution_dict['1024x768']['sensor_resolution'] = (aux_width, aux_height)
+            self.resolution_dict['1024x768']['image_resolution'] = (1024, 768)
+            self.resolution_dict['1024x768']['min_exp'] = aux_entry['min_exp']
+            self.resolution_dict['1024x768']['max_exp'] = aux_entry['max_exp']
+            self.resolution_dict['1024x768']['format'] = aux_entry['format']
+            self.resolution_dict['640x480'] = {}
+            self.resolution_dict['640x480']['sensor_resolution'] = (aux_width, aux_height)
+            self.resolution_dict['640x480']['image_resolution'] = (640, 480)
+            self.resolution_dict['640x480']['min_exp'] = aux_entry['min_exp']
+            self.resolution_dict['640x480']['max_exp'] = aux_entry['max_exp']
+            self.resolution_dict['640x480']['format'] = aux_entry['format']
+
+            first_entry_key = next(iter(self.resolution_dict))  # Get the key of the first entry
+            self.active = self.resolution_dict[first_entry_key]
+            self.initialized = True
+    def get_list(self):
+        return list(self.resolution_dict.keys())
+
+    def get_format(self, resolution=None):
+        if resolution is None:
+            return self.active['format']
+        else:
+            return self.resolution_dict[resolution]['format']
+
+    def get_sensor_resolution(self, resolution=None):
+        if resolution is None:
+            return self.active['sensor_resolution']
+        else:
+            return self.resolution_dict[resolution]['sensor_resolution']
+
+    def get_image_resolution(self, resolution=None):
+        if resolution is None:
+            return self.active['image_resolution']
+        else:
+            return self.resolution_dict[resolution]['image_resolution']
+
+    def get_min_exp(self, resolution=None):
+        if resolution is None:
+            return self.active['min_exp']
+        else:
+            return self.resolution_dict[resolution]['min_exp']
+
+    def get_max_exp(self, resolution=None):
+        if resolution is None:
+            return self.active['max_exp']
+        else:
+            return self.resolution_dict[resolution]['max_exp']
+
+    def set_active(self, resolution):
+        self.active = self.resolution_dict[resolution]
+
+    def get_active(self):
+        return self.active
 
 
 # ********************************************************
@@ -337,11 +480,28 @@ def exit_app():  # Exit Application
     global camera
     global PreviewMode
     global ExitingApp
+    global onesec_after, arduino_after
 
     win.config(cursor="watch")
     win.update()
     # Flag app is exiting for all outstanding afters to expire
     ExitingApp = True
+    if onesec_after != 0:
+        win.after_cancel(onesec_after)
+    if arduino_after != 0:
+        win.after_cancel(arduino_after)
+    # Terminate threads
+    capture_display_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    logging.debug("Inserting end tokens to queues")
+
+    while active_threads > 0:
+        win.update()
+        logging.debug(f"Waiting for threads to exit, {active_threads} pending")
+        time.sleep(0.2)
+
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
         send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
@@ -350,8 +510,6 @@ def exit_app():  # Exit Application
             if PiCam2PreviewEnabled:
                 camera.stop_preview()
             camera.close()
-    # Wait a few seconds to give time for Afters to die
-    time.sleep(1.5)
     # Set window position for next run
     SessionData["WindowPos"] = win.geometry()
     SessionData["AutoStopActive"] = auto_stop_enabled.get()
@@ -947,10 +1105,13 @@ def reverse_image(image):
 
 
 def capture_display_thread(queue, event, id):
+    global active_threads
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
         curtime = time.time()
+        if ExitingApp:
+            break
         logging.debug("Retrieved message from capture display queue (len=%i)", queue.qsize())
         if message == END_TOKEN:
             break
@@ -969,12 +1130,14 @@ def capture_display_thread(queue, event, id):
                 image = reverse_image(image)
             draw_preview_image(image, hdr_idx)
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+    active_threads -= 1
     logging.debug("Exiting capture_display_thread")
 
 
 def capture_save_thread(queue, event, id):
     global CurrentDir
     global ScanStopRequested
+    global active_threads
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -987,6 +1150,8 @@ def capture_save_thread(queue, event, id):
         message = queue.get()
         curtime = time.time()
         logging.debug("Thread %i: Retrieved message from capture save queue", id)
+        if ExitingApp:
+            break
         if message == END_TOKEN:
             break
         # Invert image if button selected
@@ -1020,6 +1185,7 @@ def capture_save_thread(queue, event, id):
             request.release()
 
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+    active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 def draw_preview_image(preview_image, idx):
@@ -2028,12 +2194,13 @@ def preview_check():
         set_real_time_display()
 
 def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
+    global onesec_after
 
     temperature_check()
     preview_check()
 
     if not ExitingApp:
-        win.after(1000, onesec_periodic_checks)
+        onesec_after = win.after(1000, onesec_periodic_checks)
 
 
 def set_file_type(event):
@@ -2041,8 +2208,9 @@ def set_file_type(event):
 
 
 def set_resolution(event):
-    global max_inactivity_delay
+    global max_inactivity_delay, camera_resolutions
     SessionData["CaptureResolution"] = resolution_dropdown_selected.get()
+    camera_resolutions.set_active(resolution_dropdown_selected.get())
     if resolution_dropdown_selected.get() == "4056x3040":
         max_inactivity_delay = reference_inactivity_delay * 2
     else:
@@ -2050,8 +2218,7 @@ def set_resolution(event):
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
     logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
 
-    if not SimulatedRun and not CameraDisabled:
-        PiCam2_change_resolution()
+    PiCam2_change_resolution()
 
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
@@ -2125,7 +2292,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global last_frame_time, max_inactivity_delay
     global Controller_Id
     global ScanStopRequested
-    global i2c
+    global i2c, arduino_after
 
     if not SimulatedRun:
         try:
@@ -2201,7 +2368,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         ArduinoTrigger = 0
 
     if not ExitingApp:
-        win.after(10, arduino_listen_loop)
+        arduino_after = win.after(10, arduino_listen_loop)
 
 
 def load_persisted_data_from_disk():
@@ -2336,8 +2503,7 @@ def load_session_data():
                     max_inactivity_delay = reference_inactivity_delay
                 send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
                 logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-                if not SimulatedRun and not CameraDisabled:
-                    PiCam2_change_resolution()
+                PiCam2_change_resolution()
             if 'NegativeCaptureActive' in SessionData:
                 negative_image.set(SessionData["NegativeCaptureActive"])
                 set_negative_image()
@@ -2398,7 +2564,7 @@ def load_session_data():
                         AE_enabled.set(False)
                         auto_exp_wait_checkbox.config(state=DISABLED)
                     if not SimulatedRun and not CameraDisabled:
-                        camera.controls.ExposureTime = aux
+                        camera.controls.ExposureTime = int(aux)
                     exposure_value.set(aux/1000)
                 if 'ExposureAdaptPause' in SessionData:
                     if isinstance(SessionData["ExposureAdaptPause"], bool):
@@ -2520,38 +2686,29 @@ def reinit_controller():
 
 
 def PiCam2_change_resolution():
-    global camera, capture_config, preview_config
+    global camera, capture_config, preview_config, camera_resolutions
 
     target_res = resolution_dropdown_selected.get()
-    target_res_list = target_res.split('x')
-    target_res_tuple = tuple(map(int, target_res_list))
+    camera_resolutions.set_active(target_res)
+    if SimulatedRun or CameraDisabled:
+        return      # Skip camera specific part
 
-    capture_config["main"]["size"] = target_res_tuple
-    capture_config["raw"]["size"] = target_res_tuple
-    if target_res == "1332x990":
-        capture_config["raw"]["format"] = "SRGGB10_CSI2P"
-    else:
-        capture_config["raw"]["format"] = "SRGGB12_CSI2P"
+    capture_config["main"]["size"] = camera_resolutions.get_image_resolution()
+    #capture_config["main"]["format"] = camera_resolutions.get_format()
+    capture_config["raw"]["size"] = camera_resolutions.get_sensor_resolution()
+    capture_config["raw"]["format"] = camera_resolutions.get_format()
     camera.stop()
     camera.configure(capture_config)
     camera.start()
 
 
 def PiCam2_configure():
-    global camera, capture_config, preview_config
+    global camera, capture_config, preview_config, camera_resolutions
 
     camera.stop()
-    target_res = resolution_dropdown_selected.get()
-    target_res_list = target_res.split('x')
-    target_res_tuple = tuple(map(int, target_res_list))
-    if target_res == "1332x990":
-        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
-                                                           raw={"size": target_res_tuple, "format": "SRGGB10_CSI2P"},
-                                                           transform=Transform(hflip=True))
-    else:
-        capture_config = camera.create_still_configuration(main={"size": target_res_tuple},
-                                       raw={"size": target_res_tuple},
-                                       transform=Transform(hflip=True))
+    capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_sensor_resolution()},
+                        raw={"size": camera_resolutions.get_sensor_resolution(), "format": camera_resolutions.get_format()},
+                        transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
@@ -2655,15 +2812,14 @@ def create_main_window():
 def tscann8_init():
     global camera
     global i2c
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame
     global ZoomSize
-    global capture_config
-    global preview_config
+    global capture_config, preview_config
     global LogLevel, ExperimentalMode, PlotterMode
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
-    global MergeMertens
+    global MergeMertens, camera_resolutions
+    global active_threads
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2707,6 +2863,15 @@ def tscann8_init():
         i2c.write_byte_data(16, 0x0F, 0x46)  # I2C_SCLL register
         i2c.write_byte_data(16, 0x10, 0x47)  # I2C_SCLH register
 
+    if not SimulatedRun and not CameraDisabled: # Init PiCamera2 here, need resolution list for drop down
+        camera = Picamera2()
+        camera_resolutions = CameraResolutions()
+        logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
+        PiCam2_configure()
+        ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
+    if SimulatedRun:
+        camera_resolutions = CameraResolutions()   # Initializes resolution list from a hardcoded sensor_modes
+
     create_main_window()
 
     # Init HDR variables
@@ -2723,10 +2888,6 @@ def tscann8_init():
     win.update_idletasks()
 
     if not SimulatedRun and not CameraDisabled:
-        camera = Picamera2()
-        logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
-        PiCam2_configure()
-        ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
         # JRE 20/09/2022: Attempt to speed up overall process in PiCamera2 by having captured images
         # displayed in the preview area by a dedicated thread, so that time consumed in this task
         # does not impact the scan process speed
@@ -2738,6 +2899,7 @@ def tscann8_init():
         save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
         save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
         save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
+        active_threads += 4
         display_thread.start()
         save_thread_1.start()
         save_thread_2.start()
@@ -2759,6 +2921,28 @@ def value_normalize(var, min_value, max_value):
     value = min(value, max_value)
     var.set(value)
     return value
+
+
+def value_validation(new_value, widget, min, max, is_double=False):
+    try:
+        if new_value == '':
+            new_value = 0
+        if is_double:
+            aux = float(new_value)
+        else:
+            aux = int(new_value)
+        if min <= aux <= max:
+            widget.config(fg='black')
+            return True
+        elif aux < min or aux > max:
+            widget.config(fg='red')
+            return True
+        else:
+            return False
+    except (ValueError, TypeError):
+        return False
+
+
 
 def exposure_spinbox_auto():
     if AE_enabled.get():  # Not in automatic mode, activate auto
@@ -2791,31 +2975,18 @@ def auto_exposure_change_pause_selection():
 def exposure_selection():
     if not ExpertMode or AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
-    aux = value_normalize(exposure_value, 0, 10000)
+    aux = value_normalize(exposure_value, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000)
     aux = aux * 1000
     if aux <= 0:
-        aux = 1     # Minimum exposure is 1µs, zero means automatic
+        aux = camera_resolutions.get_min_exp()     # Minimum exposure is 1µs, zero means automatic
     SessionData["CurrentExposure"] = aux
 
     if not SimulatedRun and not CameraDisabled:
-        camera.controls.ExposureTime = aux  # maybe will not work, check pag 26 of picamera2 specs
+        camera.controls.ExposureTime = int(aux)  # maybe will not work, check pag 26 of picamera2 specs
 
 
 def exposure_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = float(new_value)
-        if 0 <= aux <= 10000:
-            exposure_spinbox.config(fg='black')
-            return True
-        elif aux < -9.9 or aux > 9.9:
-            exposure_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, exposure_spinbox, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000, True)
 
 
 def wb_red_selection():
@@ -2830,20 +3001,7 @@ def wb_red_selection():
 
 
 def wb_red_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = float(new_value)
-        if -9.9 <= aux <= 9.9:
-            wb_red_spinbox.config(fg='black')
-            return True
-        elif aux < -9.9 or aux > 9.9:
-            wb_red_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, wb_red_spinbox, -9.9, 9.9, True)
 
 
 def wb_blue_selection():
@@ -2858,20 +3016,7 @@ def wb_blue_selection():
 
 
 def wb_blue_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = float(new_value)
-        if -9.9 <= aux <= 9.9:
-            wb_blue_spinbox.config(fg='black')
-            return True
-        elif aux < -9.9 or aux > 9.9:
-            wb_blue_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, wb_blue_spinbox, -9.9, 9.9, True)
 
 
 def match_wait_margin_selection():
@@ -2882,20 +3027,7 @@ def match_wait_margin_selection():
 
 
 def match_wait_margin_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 0 <= aux <= 100:
-            match_wait_margin_spinbox.config(fg='black')
-            return True
-        elif aux < 0 or aux > 100:
-            match_wait_margin_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except:
-        return False
+    return value_validation(new_value, match_wait_margin_spinbox, 0, 100)
 
 
 def steps_per_frame_auto():
@@ -2915,20 +3047,7 @@ def steps_per_frame_selection():
 
 
 def steps_per_frame_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 100 <= aux  <= 600:
-            steps_per_frame_spinbox.config(fg='black')
-            return True
-        elif aux < 100 or aux > 600:
-            steps_per_frame_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, steps_per_frame_spinbox, 100, 600)
 
 
 def pt_level_spinbox_auto():
@@ -2948,20 +3067,7 @@ def pt_level_selection():
 
 
 def pt_level_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 20 <= aux <= 900:
-            pt_level_spinbox.config(fg='black')
-            return True
-        elif aux < 20 or aux > 900:
-            pt_level_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, pt_level_spinbox, 20, 900)
 
 
 def frame_fine_tune_selection():
@@ -2972,37 +3078,11 @@ def frame_fine_tune_selection():
 
 
 def fine_tune_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 5 <= aux <= 95:
-            frame_fine_tune_spinbox.config(fg='black')
-            return True
-        elif aux < 5 or aux > 95:
-            frame_fine_tune_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, frame_fine_tune_spinbox, 5, 95)
 
 
 def extra_steps_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if -30 <= aux <= 30:
-            frame_extra_steps_spinbox.config(fg='black')
-            return True
-        elif aux < -30 or aux > 30:
-            frame_extra_steps_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, frame_extra_steps_spinbox, -30, 30)
 
 
 def scan_speed_selection():
@@ -3012,20 +3092,7 @@ def scan_speed_selection():
 
 
 def scan_speed_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 1 <= aux <= 10:
-            scan_speed_spinbox.config(fg='black')
-            return True
-        elif aux < 1 or aux > 10:
-            scan_speed_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, scan_speed_spinbox, 1, 10)
 
 
 def stabilization_delay_selection():
@@ -3037,20 +3104,7 @@ def stabilization_delay_selection():
 
 
 def stabilization_delay_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 0 <= aux <= 1000:
-            stabilization_delay_spinbox.config(fg='black')
-            return True
-        elif aux < 1 or aux > 10:
-            stabilization_delay_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, stabilization_delay_spinbox, 0, 1000)
 
 
 def hdr_min_exp_selection():
@@ -3076,20 +3130,7 @@ def hdr_min_exp_selection():
 
 
 def hdr_min_exp_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if hdr_lower_exp <= aux <= 999:
-            hdr_min_exp_spinbox.config(fg='black')
-            return True
-        elif aux < hdr_lower_exp or aux > 999:
-            hdr_min_exp_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, hdr_min_exp_spinbox, hdr_lower_exp, 999)
 
 
 def hdr_max_exp_selection():
@@ -3116,20 +3157,7 @@ def hdr_max_exp_selection():
 
 
 def hdr_max_exp_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 2 <= aux <= 1000:
-            hdr_max_exp_spinbox.config(fg='black')
-            return True
-        elif aux < 2 or aux > 1000:
-            hdr_max_exp_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, hdr_max_exp_spinbox, 2, 1000)
 
 
 def hdr_bracket_width_selection():
@@ -3154,20 +3182,7 @@ def hdr_bracket_width_selection():
 
 
 def hdr_bracket_width_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if hdr_min_bracket_width <= aux <= hdr_max_bracket_width:
-            hdr_bracket_width_spinbox.config(fg='black')
-            return True
-        elif aux < hdr_min_bracket_width or aux > hdr_max_bracket_width:
-            hdr_bracket_width_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, hdr_bracket_width_spinbox, hdr_min_bracket_width, hdr_max_bracket_width)
 
 
 def hdr_bracket_shift_selection():
@@ -3175,20 +3190,7 @@ def hdr_bracket_shift_selection():
 
 
 def hdr_bracket_shift_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if -100 <= aux <= 100:
-            hdr_bracket_shift_spinbox.config(fg='black')
-            return True
-        elif aux < -100 or aux > 100:
-            hdr_bracket_shift_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, hdr_bracket_shift_spinbox, -100, 100)
 
 
 def sharpness_control_selection():
@@ -3206,20 +3208,7 @@ def sharpness_control_selection():
 
 
 def sharpness_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 0 <= aux <= 16:
-            sharpness_control_spinbox.config(fg='black')
-            return True
-        elif aux < -100 or aux > 100:
-            sharpness_control_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, sharpness_control_spinbox, 0, 16)
 
 
 def rwnd_speed_control_selection():
@@ -3237,20 +3226,8 @@ def rwnd_speed_control_selection():
     '''
 
 def rewind_speed_validation(new_value):
-    try:
-        if new_value == '':
-            new_value = 0
-        aux = int(new_value)
-        if 40 <= aux <= 800:
-            rwnd_speed_control_spinbox.config(fg='black')
-            return True
-        elif aux < -100 or aux > 100:
-            rwnd_speed_control_spinbox.config(fg='red')
-            return True
-        else:
-            return False
-    except (ValueError, TypeError):
-        return False
+    return value_validation(new_value, rwnd_speed_control_spinbox, 40, 800)
+
 
 # ***************
 # Widget creation
@@ -3533,7 +3510,8 @@ def create_widgets():
     # Drop down to select capture resolution
     # Dropdown menu options
     if ExperimentalMode:
-        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480"]
+        #resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480"]
+        resolution_list = camera_resolutions.get_list()
     else:
         resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1024x768", "640x480"]
     resolution_dropdown_selected = tk.StringVar()
