@@ -19,8 +19,8 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.24"
-__date__ = "2024-02-15"
+__version__ = "1.9.25"
+__date__ = "2024-02-17"
 __version_highlight__ = "Bug fixes (HDR  auto bracket color)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -127,9 +127,12 @@ MinFrameStepsR8 = 240
 PTLevelS8 = 80
 PTLevelR8 = 120
 # Tokens identify type of elements in queues
-END_TOKEN = object()  # Sent on program closure, to allow threads to shut down cleanly
-IMAGE_TOKEN = object()  # Queue element is an image
-REQUEST_TOKEN = object()  # Queue element is a PiCamera2 request
+# Token to be inserted in each queue on program closure, to allow threads to shut down cleanly
+active_threads = 0
+num_threads = 0
+END_TOKEN = "TERMINATE_PROCESS"  # Sent on program closure, to allow threads to shut down cleanly
+IMAGE_TOKEN = "IMAGE_TOKEN"  # Queue element is an image
+REQUEST_TOKEN = "REQUEST_TOKEN"  # Queue element is a PiCamera2 request
 MaxQueueSize = 16
 DisableThreads = False
 FrameArrivalTime = 0
@@ -364,7 +367,7 @@ class DynamicSpinbox(tk.Spinbox):
 # ****************************************************************************************************************
 # Class CameraResolutions
 # Upon creation, extracts from the camera (using PiCamera2 sensor_modes) a list of supported resolutions and
-# associated atrtibutes (exposure range)
+# associated attributes (exposure range, format)
 # In case of simulated run, it uses a copy of the info returned for the Raspberry Pi HD camera.
 # ****************************************************************************************************************
 class CameraResolutions():
@@ -387,40 +390,81 @@ class CameraResolutions():
             else:
                 camera_sensor_modes = camera.sensor_modes
             self.resolution_dict.clear()
+            # Identify the smallest sensor resolution that will fix the two extra resolutions ("1024x768", "640x480")
+            aux_width = 10000
+            aux_height = 10000
             # Add dictionary entries where the key is the value shown in the drop down list (XxY)
             for mode in camera_sensor_modes:
                 key = f"{mode['size'][0]}x{mode['size'][1]}"
                 self.resolution_dict[key] = {}
-                self.resolution_dict[key]['resolution'] = mode['size']
-                self.resolution_dict[key]['format'] = mode['format']
-                self.resolution_dict[key]['min_exp'] = mode['exposure_limits'][0]
-                self.resolution_dict[key]['max_exp'] = mode['exposure_limits'][1]
+                self.resolution_dict[key]['sensor_resolution'] = mode['size']
+                self.resolution_dict[key]['image_resolution'] = mode['size']
+                if mode['size'][0] > 1024 and mode['size'][0] < aux_width:
+                    aux_width = mode['size'][0]
+                if mode['size'][1] > 768 and mode['size'][1] < aux_height:
+                    aux_height = mode['size'][1]
+                self.resolution_dict[key]['format'] = mode['format'].format
+                aux = mode['exposure_limits'][0]
+                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
+                    aux = 114   # Alternative min exp in case value from camera is not OK
+                self.resolution_dict[key]['min_exp'] = aux
+                aux = mode['exposure_limits'][1]
+                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
+                    aux = 667234896   # Alternative max exp in case value from camera is not OK
+                self.resolution_dict[key]['max_exp'] = aux
+            # Add two extra resolutions - "1024x768", "640x480"
+            aux_entry = self.resolution_dict[f"{aux_width}x{aux_height}"]
+            self.resolution_dict['1024x768'] = {}
+            self.resolution_dict['1024x768']['sensor_resolution'] = (aux_width, aux_height)
+            self.resolution_dict['1024x768']['image_resolution'] = (1024, 768)
+            self.resolution_dict['1024x768']['min_exp'] = aux_entry['min_exp']
+            self.resolution_dict['1024x768']['max_exp'] = aux_entry['max_exp']
+            self.resolution_dict['1024x768']['format'] = aux_entry['format']
+            self.resolution_dict['640x480'] = {}
+            self.resolution_dict['640x480']['sensor_resolution'] = (aux_width, aux_height)
+            self.resolution_dict['640x480']['image_resolution'] = (640, 480)
+            self.resolution_dict['640x480']['min_exp'] = aux_entry['min_exp']
+            self.resolution_dict['640x480']['max_exp'] = aux_entry['max_exp']
+            self.resolution_dict['640x480']['format'] = aux_entry['format']
+
+            first_entry_key = next(iter(self.resolution_dict))  # Get the key of the first entry
+            self.active = self.resolution_dict[first_entry_key]
             self.initialized = True
     def get_list(self):
         return list(self.resolution_dict.keys())
 
     def get_format(self, resolution=None):
         if resolution is None:
-            resolution = self.active
-        return self.resolution_dict[resolution]['format']
+            return self.active['format']
+        else:
+            return self.resolution_dict[resolution]['format']
 
-    def get_size(self, resolution=None):
+    def get_sensor_resolution(self, resolution=None):
         if resolution is None:
-            resolution = self.active
-        return self.resolution_dict[resolution]['size']
+            return self.active['sensor_resolution']
+        else:
+            return self.resolution_dict[resolution]['sensor_resolution']
+
+    def get_image_resolution(self, resolution=None):
+        if resolution is None:
+            return self.active['image_resolution']
+        else:
+            return self.resolution_dict[resolution]['image_resolution']
 
     def get_min_exp(self, resolution=None):
         if resolution is None:
-            resolution = self.active
-        return self.resolution_dict[resolution]['min_exp']
+            return self.active['min_exp']
+        else:
+            return self.resolution_dict[resolution]['min_exp']
 
     def get_max_exp(self, resolution=None):
         if resolution is None:
-            resolution = self.active
-        return self.resolution_dict[resolution]['max_exp']
+            return self.active['max_exp']
+        else:
+            return self.resolution_dict[resolution]['max_exp']
 
     def set_active(self, resolution):
-        self.active = resolution
+        self.active = self.resolution_dict[resolution]
 
     def get_active(self):
         return self.active
@@ -446,6 +490,18 @@ def exit_app():  # Exit Application
         win.after_cancel(onesec_after)
     if arduino_after != 0:
         win.after_cancel(arduino_after)
+    # Terminate threads
+    capture_display_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    capture_save_queue.put(END_TOKEN)
+    logging.debug("Inserting end tokens to queues")
+
+    while active_threads > 0:
+        win.update()
+        logging.debug(f"Waiting for threads to exit, {active_threads} pending")
+        time.sleep(0.2)
+
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
         send_arduino_command(CMD_TERMINATE)   # Tell Arduino we stop (to turn off uv led
@@ -1049,10 +1105,13 @@ def reverse_image(image):
 
 
 def capture_display_thread(queue, event, id):
+    global active_threads
     logging.debug("Started capture_display_thread")
     while not event.is_set() or not queue.empty():
         message = queue.get()
         curtime = time.time()
+        if ExitingApp:
+            break
         logging.debug("Retrieved message from capture display queue (len=%i)", queue.qsize())
         if message == END_TOKEN:
             break
@@ -1071,12 +1130,14 @@ def capture_display_thread(queue, event, id):
                 image = reverse_image(image)
             draw_preview_image(image, hdr_idx)
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+    active_threads -= 1
     logging.debug("Exiting capture_display_thread")
 
 
 def capture_save_thread(queue, event, id):
     global CurrentDir
     global ScanStopRequested
+    global active_threads
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1089,6 +1150,8 @@ def capture_save_thread(queue, event, id):
         message = queue.get()
         curtime = time.time()
         logging.debug("Thread %i: Retrieved message from capture save queue", id)
+        if ExitingApp:
+            break
         if message == END_TOKEN:
             break
         # Invert image if button selected
@@ -1122,6 +1185,7 @@ def capture_save_thread(queue, event, id):
             request.release()
 
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+    active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 def draw_preview_image(preview_image, idx):
@@ -2500,7 +2564,7 @@ def load_session_data():
                         AE_enabled.set(False)
                         auto_exp_wait_checkbox.config(state=DISABLED)
                     if not SimulatedRun and not CameraDisabled:
-                        camera.controls.ExposureTime = aux
+                        camera.controls.ExposureTime = int(aux)
                     exposure_value.set(aux/1000)
                 if 'ExposureAdaptPause' in SessionData:
                     if isinstance(SessionData["ExposureAdaptPause"], bool):
@@ -2629,8 +2693,9 @@ def PiCam2_change_resolution():
     if SimulatedRun or CameraDisabled:
         return      # Skip camera specific part
 
-    capture_config["main"]["size"] = camera_resolutions.get_size()
-    capture_config["raw"]["size"] = camera_resolutions.get_size()
+    capture_config["main"]["size"] = camera_resolutions.get_image_resolution()
+    #capture_config["main"]["format"] = camera_resolutions.get_format()
+    capture_config["raw"]["size"] = camera_resolutions.get_sensor_resolution()
     capture_config["raw"]["format"] = camera_resolutions.get_format()
     camera.stop()
     camera.configure(capture_config)
@@ -2641,10 +2706,8 @@ def PiCam2_configure():
     global camera, capture_config, preview_config, camera_resolutions
 
     camera.stop()
-    target_res = resolution_dropdown_selected.get()
-    camera_resolutions.set_active(target_res)
-    capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_size()},
-                        raw={"size": camera_resolutions.get_size(), "format": camera_resolutions.get_format()},
+    capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_sensor_resolution()},
+                        raw={"size": camera_resolutions.get_sensor_resolution(), "format": camera_resolutions.get_format()},
                         transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
@@ -2749,15 +2812,14 @@ def create_main_window():
 def tscann8_init():
     global camera
     global i2c
-    global CurrentDir
-    global CurrentFrame
+    global CurrentDir, CurrentFrame
     global ZoomSize
-    global capture_config
-    global preview_config
+    global capture_config, preview_config
     global LogLevel, ExperimentalMode, PlotterMode
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
+    global active_threads
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2837,6 +2899,7 @@ def tscann8_init():
         save_thread_1 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,1))
         save_thread_2 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,2))
         save_thread_3 = threading.Thread(target=capture_save_thread, args=(capture_save_queue, capture_save_event,3))
+        active_threads += 4
         display_thread.start()
         save_thread_1.start()
         save_thread_2.start()
@@ -2912,18 +2975,18 @@ def auto_exposure_change_pause_selection():
 def exposure_selection():
     if not ExpertMode or AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
-    aux = value_normalize(exposure_value, 0, 10000)
+    aux = value_normalize(exposure_value, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000)
     aux = aux * 1000
     if aux <= 0:
-        aux = 1     # Minimum exposure is 1µs, zero means automatic
+        aux = camera_resolutions.get_min_exp()     # Minimum exposure is 1µs, zero means automatic
     SessionData["CurrentExposure"] = aux
 
     if not SimulatedRun and not CameraDisabled:
-        camera.controls.ExposureTime = aux  # maybe will not work, check pag 26 of picamera2 specs
+        camera.controls.ExposureTime = int(aux)  # maybe will not work, check pag 26 of picamera2 specs
 
 
 def exposure_validation(new_value):
-    return value_validation(new_value, exposure_spinbox, 0, 10000, True)
+    return value_validation(new_value, exposure_spinbox, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000, True)
 
 
 def wb_red_selection():
