@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.26"
+__version__ = "1.9.27"
 __date__ = "2024-02-18"
-__version_highlight__ = "Bug fixes (resolution refreshed from PiCamera2)"
+__version_highlight__ = "Bug fixes - Limit exposure range from 0 to 1 second"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -407,14 +407,11 @@ class CameraResolutions():
                     aux_height = mode['size'][1]
                     aux_key = key
                 self.resolution_dict[key]['format'] = mode['format'].format
-                aux = mode['exposure_limits'][0]
-                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
-                    aux = 114   # Alternative min exp in case value from camera is not OK
-                self.resolution_dict[key]['min_exp'] = aux
-                aux = mode['exposure_limits'][1]
-                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
-                    aux = 667234896   # Alternative max exp in case value from camera is not OK
-                self.resolution_dict[key]['max_exp'] = aux
+                # self.resolution_dict[key]['min_exp'] = mode['exposure_limits'][0]
+                # self.resolution_dict[key]['max_exp'] = mode['exposure_limits'][1]
+                # Force lower exposure range 0-1sec
+                self.resolution_dict[key]['min_exp'] = 0
+                self.resolution_dict[key]['max_exp'] = 1000000
             # Add two extra resolutions - "1024x768", "640x480"
             if key is not None:
                 aux_entry = self.resolution_dict[key]
