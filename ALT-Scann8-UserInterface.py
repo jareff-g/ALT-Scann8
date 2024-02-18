@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.25"
-__date__ = "2024-02-17"
-__version_highlight__ = "Bug fixes (HDR  auto bracket color)"
+__version__ = "1.9.27"
+__date__ = "2024-02-18"
+__version_highlight__ = "Bug fixes - Limit exposure range from 0 to 1 second"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -393,39 +393,40 @@ class CameraResolutions():
             # Identify the smallest sensor resolution that will fix the two extra resolutions ("1024x768", "640x480")
             aux_width = 10000
             aux_height = 10000
+            aux_key = None
             # Add dictionary entries where the key is the value shown in the drop down list (XxY)
             for mode in camera_sensor_modes:
                 key = f"{mode['size'][0]}x{mode['size'][1]}"
+                if mode['crop_limits'][0] != 0 or mode['crop_limits'][1] != 0:
+                    key = key + ' *'
                 self.resolution_dict[key] = {}
                 self.resolution_dict[key]['sensor_resolution'] = mode['size']
                 self.resolution_dict[key]['image_resolution'] = mode['size']
-                if mode['size'][0] > 1024 and mode['size'][0] < aux_width:
-                    aux_width = mode['size'][0]
-                if mode['size'][1] > 768 and mode['size'][1] < aux_height:
+                if 1024 < mode['size'][0] < aux_width and 768 < mode['size'][1] < aux_height:
+                    aux_width = mode['size'][1]
                     aux_height = mode['size'][1]
+                    aux_key = key
                 self.resolution_dict[key]['format'] = mode['format'].format
-                aux = mode['exposure_limits'][0]
-                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
-                    aux = 114   # Alternative min exp in case value from camera is not OK
-                self.resolution_dict[key]['min_exp'] = aux
-                aux = mode['exposure_limits'][1]
-                if aux is None or not isinstance(aux, int) and not isinstance(aux, float):
-                    aux = 667234896   # Alternative max exp in case value from camera is not OK
-                self.resolution_dict[key]['max_exp'] = aux
+                # self.resolution_dict[key]['min_exp'] = mode['exposure_limits'][0]
+                # self.resolution_dict[key]['max_exp'] = mode['exposure_limits'][1]
+                # Force lower exposure range 0-1sec
+                self.resolution_dict[key]['min_exp'] = 0
+                self.resolution_dict[key]['max_exp'] = 1000000
             # Add two extra resolutions - "1024x768", "640x480"
-            aux_entry = self.resolution_dict[f"{aux_width}x{aux_height}"]
-            self.resolution_dict['1024x768'] = {}
-            self.resolution_dict['1024x768']['sensor_resolution'] = (aux_width, aux_height)
-            self.resolution_dict['1024x768']['image_resolution'] = (1024, 768)
-            self.resolution_dict['1024x768']['min_exp'] = aux_entry['min_exp']
-            self.resolution_dict['1024x768']['max_exp'] = aux_entry['max_exp']
-            self.resolution_dict['1024x768']['format'] = aux_entry['format']
-            self.resolution_dict['640x480'] = {}
-            self.resolution_dict['640x480']['sensor_resolution'] = (aux_width, aux_height)
-            self.resolution_dict['640x480']['image_resolution'] = (640, 480)
-            self.resolution_dict['640x480']['min_exp'] = aux_entry['min_exp']
-            self.resolution_dict['640x480']['max_exp'] = aux_entry['max_exp']
-            self.resolution_dict['640x480']['format'] = aux_entry['format']
+            if key is not None:
+                aux_entry = self.resolution_dict[key]
+                self.resolution_dict['1024x768 *'] = {}
+                self.resolution_dict['1024x768 *']['sensor_resolution'] = aux_entry['sensor_resolution']
+                self.resolution_dict['1024x768 *']['image_resolution'] = (1024, 768)
+                self.resolution_dict['1024x768 *']['min_exp'] = aux_entry['min_exp']
+                self.resolution_dict['1024x768 *']['max_exp'] = aux_entry['max_exp']
+                self.resolution_dict['1024x768 *']['format'] = aux_entry['format']
+                self.resolution_dict['640x480 *'] = {}
+                self.resolution_dict['640x480 *']['sensor_resolution'] = aux_entry['sensor_resolution']
+                self.resolution_dict['640x480 *']['image_resolution'] = (640, 480)
+                self.resolution_dict['640x480 *']['min_exp'] = aux_entry['min_exp']
+                self.resolution_dict['640x480 *']['max_exp'] = aux_entry['max_exp']
+                self.resolution_dict['640x480 *']['format'] = aux_entry['format']
 
             first_entry_key = next(iter(self.resolution_dict))  # Get the key of the first entry
             self.active = self.resolution_dict[first_entry_key]
@@ -491,16 +492,19 @@ def exit_app():  # Exit Application
     if arduino_after != 0:
         win.after_cancel(arduino_after)
     # Terminate threads
-    capture_display_queue.put(END_TOKEN)
-    capture_save_queue.put(END_TOKEN)
-    capture_save_queue.put(END_TOKEN)
-    capture_save_queue.put(END_TOKEN)
-    logging.debug("Inserting end tokens to queues")
+    if not SimulatedRun and not CameraDisabled:
+        capture_display_event.set()
+        capture_save_event.set()
+        capture_display_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        capture_save_queue.put(END_TOKEN)
+        logging.debug("Inserting end tokens to queues")
 
-    while active_threads > 0:
-        win.update()
-        logging.debug(f"Waiting for threads to exit, {active_threads} pending")
-        time.sleep(0.2)
+        while active_threads > 0:
+            win.update()
+            logging.debug(f"Waiting for threads to exit, {active_threads} pending")
+            time.sleep(0.2)
 
     # Uncomment next two lines when running on RPi
     if not SimulatedRun:
@@ -1156,6 +1160,7 @@ def capture_save_thread(queue, event, id):
             break
         # Invert image if button selected
         is_dng = file_type_dropdown_selected.get() == 'dng'
+        is_jpg = file_type_dropdown_selected.get() == 'jpg'
         # Extract info from message
         type = message[0]
         if type == REQUEST_TOKEN:
@@ -1166,7 +1171,7 @@ def capture_save_thread(queue, event, id):
             logging.error(f"Invalid message type received: {type}")
         frame_idx = message[2]
         hdr_idx = message[3]
-        if not is_dng:  # Plain file save
+        if is_jpg or negative_image.get() and not is_dng:  # Plain file save
             if type == REQUEST_TOKEN:
                 captured_image = request.make_image('main')
                 request.release()
@@ -1607,18 +1612,24 @@ def capture_hdr(mode):
             if not is_dng:  # If not using DNG we can still use multithread (if not disabled)
                 # Reuse captured_image from preview
                 # captured_image = request.make_image('main')
-                request.release()  # release request, already have image, don't need it for non-DNG
                 if DisableThreads:  # Save image in main loop
                     draw_preview_image(captured_image, idx)  # Display preview
                     if negative_image.get():
                         captured_image = reverse_image(captured_image)
-                    if idx > 1:  # Hdr frame 1 has standard filename
-                        captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
-                                                                       file_type_dropdown_selected.get()), quality=95)
-                    else:
-                        captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()),
-                                            quality=95)
+                        if idx > 1:  # Hdr frame 1 has standard filename
+                            captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
+                                                                           file_type_dropdown_selected.get()), quality=95)
+                        else:
+                            captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()),
+                                                quality=95)
+                    else:   # id non-negative, save request as it is more efficient, specially for PNG
+                        if idx > 1:  # Hdr frame 1 has standard filename
+                            request.save('main', HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
+                        else:
+                            request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                    request.release()  # release request, already have image, don't need it for non-DNG
                 else:   # send image to threads
+                    request.release()  # release request, already have image, don't need it for non-DNG
                     # Having the preview handled by a thread is not only not efficient, but algo quite sluggish
                     draw_preview_image(captured_image, idx)
                     """
@@ -1658,7 +1669,7 @@ def capture_single(mode):
 
     is_dng = file_type_dropdown_selected.get() == 'dng'
     if not DisableThreads:
-        if is_dng:
+        if not negative_image.get() or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
             request = camera.capture_request(capture_config)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             captured_image = request.make_image('main')
@@ -1688,7 +1699,8 @@ def capture_single(mode):
     else:
         request = camera.capture_request(capture_config)
         captured_image = request.make_image('main')
-        if negative_image.get() and not is_dng:  # Cannot capture negative if target is DNG file
+        curtime = time.time()
+        if negative_image.get() and not is_dng: # Cannot capture negative if target is DNG file, so we ignore it
             request.release()
             captured_image = reverse_image(captured_image)
             draw_preview_image(captured_image, 0)
@@ -1700,6 +1712,7 @@ def capture_single(mode):
             else:
                 request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
             request.release()
+        logging.debug("Capture loop, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
@@ -2496,7 +2509,14 @@ def load_session_data():
             if 'FileType' in SessionData:
                 file_type_dropdown_selected.set(SessionData["FileType"])
             if 'CaptureResolution' in SessionData:
-                resolution_dropdown_selected.set(SessionData["CaptureResolution"])
+                valid_resolution_list = camera_resolutions.get_list()
+                selected_resolution = SessionData["CaptureResolution"]
+                if selected_resolution not in valid_resolution_list:
+                    if selected_resolution+' *'  in valid_resolution_list:
+                        selected_resolution = selected_resolution + ' *'
+                    else:
+                        selected_resolution = valid_resolution_list[0]
+                resolution_dropdown_selected.set(selected_resolution)
                 if resolution_dropdown_selected.get() =="4056x3040":
                     max_inactivity_delay = reference_inactivity_delay * 2
                 else:
@@ -2986,7 +3006,9 @@ def exposure_selection():
 
 
 def exposure_validation(new_value):
-    return value_validation(new_value, exposure_spinbox, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000, True)
+    # Use zero instead if minimum exposure from PiCamera2 to prevent flagging in red when selection auto exposure
+    #return value_validation(new_value, exposure_spinbox, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000, True)
+    return value_validation(new_value, exposure_spinbox, 0, camera_resolutions.get_max_exp() / 1000, True)
 
 
 def wb_red_selection():
@@ -3509,11 +3531,7 @@ def create_widgets():
     # Capture resolution Dropdown
     # Drop down to select capture resolution
     # Dropdown menu options
-    if ExperimentalMode:
-        #resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1332x990", "1024x768", "640x480"]
-        resolution_list = camera_resolutions.get_list()
-    else:
-        resolution_list = ["4056x3040", "2028x1520", "2028x1080", "1024x768", "640x480"]
+    resolution_list = camera_resolutions.get_list()
     resolution_dropdown_selected = tk.StringVar()
     resolution_dropdown_selected.set(resolution_list[1])  # Set the initial value
     resolution_label = Label(file_type_frame, text='Resolution:', font=("Arial", FontSize))
@@ -3525,7 +3543,7 @@ def create_widgets():
     resolution_dropdown.pack(side=LEFT)
     # resolution_dropdown.config(state=DISABLED)
     if ExperimentalMode:
-        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames. 1332x990 uses the 120 FPS mode of RPi HQ camera, allowing faster speeds (but requires readjusting the lens)")
+        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with * are cropped, requiring lens adjustment")
     else:
         setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames")
 
@@ -4115,6 +4133,7 @@ def main(argv):
     # Main Loop
     win.mainloop()  # running3 the loop that works as a trigger
 
+    '''
     if not SimulatedRun and not CameraDisabled:
         capture_display_event.set()
         capture_save_event.set()
@@ -4122,6 +4141,7 @@ def main(argv):
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
+    '''
 
     if not SimulatedRun and not CameraDisabled:
         camera.close()
