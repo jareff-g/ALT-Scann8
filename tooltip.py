@@ -25,6 +25,7 @@ import tkinter as tk
 DisableTooltips = False
 FontSize = 12
 screen_width = 0
+active_tooltips = []
 
 def format_tooltip_text(text, max_line_width):
     words = text.split()
@@ -49,11 +50,17 @@ def format_tooltip_text(text, max_line_width):
 
 def show_tooltip(widget, text):
     global DisableTooltips, screen_width
+
     if widget["state"] == 'disabled' or DisableTooltips:
         return
 
-    x = widget.winfo_rootx() + widget.winfo_width()
-    y = widget.winfo_rooty() + widget.winfo_height()
+    if widget in active_tooltips:
+        return  # Do not show again
+    else:
+        active_tooltips.append(widget)
+    x, y = widget.winfo_pointerxy()
+    x += 10
+    y += 10
 
     tooltip_window = tk.Toplevel(widget)
     tooltip_window.wm_overrideredirect(True)
@@ -64,25 +71,26 @@ def show_tooltip(widget, text):
 
     if x + label.winfo_reqwidth() > screen_width:
         x = screen_width - label.winfo_reqwidth()
-    if widget.winfo_width() > 50:
-        x -= 25
-    if widget.winfo_height() > 100:
-        y -= 25
     tooltip_window.wm_geometry(f"+{x}+{y}")
 
     label.pack()
 
     widget.tooltip_window = tooltip_window
 
-def hide_tooltip(widget):
+def hide_tooltip(widget, event=None):
     if hasattr(widget, 'tooltip_window') and widget.tooltip_window:
         widget.tooltip_window.destroy()
         widget.tooltip_window = None
+        if widget in active_tooltips:
+            active_tooltips.remove(widget)
 
+
+def schedule_hide_tooltip(widget, event=None):
+    widget.after(20, lambda: hide_tooltip(widget))
 
 def setup_tooltip(widget, tooltip_text):
     widget.bind("<Enter>", lambda event: show_tooltip(widget, tooltip_text))
-    widget.bind("<Leave>", lambda event: hide_tooltip(widget))
+    widget.bind("<Leave>", lambda event: schedule_hide_tooltip(widget))
 
 
 def init_tooltips(font_size):
