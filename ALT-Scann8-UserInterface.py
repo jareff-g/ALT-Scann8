@@ -19,7 +19,7 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.28"
+__version__ = "1.9.29"
 __date__ = "2024-02-19"
 __version_highlight__ = "Persist window position"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -241,6 +241,7 @@ ManualScanEnabled = False
 CameraDisabled = False  # To allow testing scanner without a camera installed
 
 # Statistical information about where time is spent (expert mode only)
+total_wait_time_save_image = 0
 total_wait_time_preview_display = 0
 total_wait_time_awb = 0
 total_wait_time_autoexp = 0
@@ -413,8 +414,8 @@ class CameraResolutions():
                 self.resolution_dict[key]['min_exp'] = 0
                 self.resolution_dict[key]['max_exp'] = 1000000
             # Add two extra resolutions - "1024x768", "640x480"
-            if key is not None:
-                aux_entry = self.resolution_dict[key]
+            if aux_key is not None:
+                aux_entry = self.resolution_dict[aux_key]
                 self.resolution_dict['1024x768 *'] = {}
                 self.resolution_dict['1024x768 *']['sensor_resolution'] = aux_entry['sensor_resolution']
                 self.resolution_dict['1024x768 *']['image_resolution'] = (1024, 768)
@@ -499,7 +500,6 @@ def exit_app():  # Exit Application
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
         capture_save_queue.put(END_TOKEN)
-        logging.debug("Inserting end tokens to queues")
 
         while active_threads > 0:
             win.update()
@@ -778,8 +778,8 @@ def wb_spinbox_auto():
             # Retrieve current gain values from Camera
             metadata = camera.capture_metadata()
             camera_colour_gains = metadata["ColourGains"]
-            wb_red_value.set(camera_colour_gains[0])
-            wb_blue_value.set(camera_colour_gains[1])
+            wb_red_value.set(round(camera_colour_gains[0],1))
+            wb_blue_value.set(round(camera_colour_gains[1],1))
             camera.set_controls({"AwbEnable": 0})
 
     arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox, wb_blue_spinbox])
@@ -1142,6 +1142,7 @@ def capture_save_thread(queue, event, id):
     global CurrentDir
     global ScanStopRequested
     global active_threads
+    global total_wait_time_save_image
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1190,6 +1191,7 @@ def capture_save_thread(queue, event, id):
             request.release()
 
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+        total_wait_time_save_image += time.time() - curtime
     active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1713,6 +1715,7 @@ def capture_single(mode):
                 request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
             request.release()
         logging.debug("Capture loop, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+        total_wait_time_save_image += time.time() - curtime
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
@@ -1753,7 +1756,6 @@ def capture(mode):
             if abs(aux_current_exposure - PreviousCurrentExposure) > (match_wait_margin_value.get() * Tolerance_AE)/100:
                 if (wait_loop_count % 10 == 0):
                     logging.debug(f"AE match: ({aux_current_exposure/1000},Auto {PreviousCurrentExposure/1000})")
-                    exposure_value.set(aux_current_exposure/1000)
                 wait_loop_count += 1
                 PreviousCurrentExposure = aux_current_exposure
                 time.sleep(0.2)
@@ -1762,6 +1764,7 @@ def capture(mode):
             else:
                 break
         if wait_loop_count > 0:
+            exposure_value.set(aux_current_exposure / 1000)
             total_wait_time_autoexp+=(time.time() - curtime)
             logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
@@ -1781,9 +1784,6 @@ def capture(mode):
                     aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
                     logging.debug("AWB Match: %s", aux_gains_str)
                 wait_loop_count += 1
-                if ExpertMode:
-                    wb_red_value.set(round(aux_gain_red, 1))
-                    wb_blue_value.set(round(aux_gain_blue, 1))
                 PreviousGainRed = aux_gain_red
                 PreviousGainBlue = aux_gain_blue
                 time.sleep(0.2)
@@ -1792,6 +1792,9 @@ def capture(mode):
             else:
                 break
         if wait_loop_count > 0:
+            if ExpertMode:
+                wb_red_value.set(round(aux_gain_red, 1))
+                wb_blue_value.set(round(aux_gain_blue, 1))
             total_wait_time_awb+=(time.time() - curtime)
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
 
@@ -1826,7 +1829,7 @@ def start_scan_simulated():
     global CurrentScanStartFrame, CurrentScanStartTime
     global simulated_captured_frame_list, simulated_images_in_list
     global ScanStopRequested
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
+    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames
     global last_frame_time
 
@@ -1853,6 +1856,7 @@ def start_scan_simulated():
         button_status_change_except(Start_btn, ScanOngoing)
 
         # Reset time counters
+        total_wait_time_save_image = 0
         total_wait_time_preview_display = 0
         total_wait_time_awb = 0
         total_wait_time_autoexp = 0
@@ -1891,7 +1895,7 @@ def capture_loop_simulated():
     global simulated_capture_image
     global simulated_captured_frame_list, simulated_images_in_list
     global ScanStopRequested
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
+    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames
     global SessionData
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
@@ -1908,6 +1912,9 @@ def capture_loop_simulated():
                          str(round((curtime-session_start_time),1)),
                          session_frames,
                          round(((curtime-session_start_time)*1000/session_frames),1))
+            logging.debug("Total time to save images: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_save_image),1)),
+                         round((total_wait_time_save_image*1000/session_frames),1))
             logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_preview_display),1)),
                          round((total_wait_time_preview_display*1000/session_frames),1))
@@ -1981,7 +1988,7 @@ def start_scan():
     global SimulatedRun
     global ScanStopRequested
     global NewFrameAvailable
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
+    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames
     global last_frame_time
 
@@ -2010,6 +2017,7 @@ def start_scan():
         button_status_change_except(Start_btn, ScanOngoing)
 
         # Reset time counters
+        total_wait_time_save_image = 0
         total_wait_time_preview_display = 0
         total_wait_time_awb = 0
         total_wait_time_autoexp = 0
@@ -2052,7 +2060,7 @@ def capture_loop():
     global ScanOngoing
     global SimulatedRun
     global ScanStopRequested
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time
+    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames, CurrentStill
     global Scanned_Images_time_str, Scanned_Images_Fpm_str
     global disk_space_error_to_notify
@@ -2067,6 +2075,9 @@ def capture_loop():
                          str(round((curtime-session_start_time),1)),
                          session_frames,
                          round(((curtime-session_start_time)*1000/session_frames),1))
+            logging.debug("Total time to save images: %s seg, (%i ms per frame)",
+                         str(round((total_wait_time_save_image),1)),
+                         round((total_wait_time_save_image*1000/session_frames),1))
             logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
                          str(round((total_wait_time_preview_display),1)),
                          round((total_wait_time_preview_display*1000/session_frames),1))
@@ -3015,7 +3026,7 @@ def wb_red_selection():
     if not ExpertMode or AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    aux = value_normalize(wb_red_value, -9.9, 9.9)
+    aux = value_normalize(wb_red_value, 0, 32)
     SessionData["GainRed"] = aux
 
     if not SimulatedRun and not CameraDisabled:
@@ -3023,14 +3034,14 @@ def wb_red_selection():
 
 
 def wb_red_validation(new_value):
-    return value_validation(new_value, wb_red_spinbox, -9.9, 9.9, True)
+    return value_validation(new_value, wb_red_spinbox, 0, 32, True)
 
 
 def wb_blue_selection():
     if not ExpertMode or AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
-    aux = value_normalize(wb_blue_value, -9.9, 9.9)
+    aux = value_normalize(wb_blue_value, 0, 32)
     SessionData["GainBlue"] = aux
 
     if not SimulatedRun and not CameraDisabled:
@@ -3038,7 +3049,7 @@ def wb_blue_selection():
 
 
 def wb_blue_validation(new_value):
-    return value_validation(new_value, wb_blue_spinbox, -9.9, 9.9, True)
+    return value_validation(new_value, wb_blue_spinbox, 0, 32, True)
 
 
 def match_wait_margin_selection():
@@ -3708,7 +3719,7 @@ def create_widgets():
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
         wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='pale green',
-            textvariable=wb_red_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
+            textvariable=wb_red_value, from_=0, to=32, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
         wb_red_spinbox.configure(validate="key", validatecommand=(wb_red_validation_cmd, '%P'))
@@ -3738,7 +3749,7 @@ def create_widgets():
 
         wb_blue_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
         wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8, readonlybackground='pale green',
-            textvariable=wb_blue_value, from_=-9.9, to=9.9, increment=0.1, font=("Arial", FontSize-1))
+            textvariable=wb_blue_value, from_=0, to=32, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
         wb_blue_spinbox.configure(validate="key", validatecommand=(wb_blue_validation_cmd, '%P'))
@@ -4095,6 +4106,8 @@ def main(argv):
             disable_tooltips()
         elif opt == '-t':
             DisableThreads = True
+        elif opt == '-p':
+            PlotterMode = True
         elif opt == '-h':
             print("ALT-Scann 8 Command line parameters")
             print("  -s             Start Simulated session")
@@ -4107,8 +4120,7 @@ def main(argv):
             print("  -1             Initiate on 'small screen' mode (resolution lower than than Full HD)")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
-        elif opt == '-p':
-            PlotterMode = True
+
 
     # ExpertMode = True   # Expert mode becomes default
     LogLevel = getattr(logging, LoggingMode.upper(), None)
@@ -4123,6 +4135,23 @@ def main(argv):
 
     load_config_data()
     load_session_data()
+
+    if SimulatedRun:
+        logging.debug("Starting in simulated mode.")
+    if ExpertMode:
+        logging.debug("Expert mode enabled.")
+    if ExperimentalMode:
+        logging.debug("Experimental mode enabled.")
+    if CameraDisabled:
+        logging.debug("Camera disabled.")
+    if ForceSmallSize:
+        logging.debug("Forces restricted window mode.")
+    if ForceBigSize:
+        logging.debug("Forces full window mode.")
+    if DisableThreads:
+        logging.debug("Threads disabled.")
+    if PlotterMode:
+        logging.debug("Ploter mode enabled.")
 
     if not SimulatedRun:
         arduino_listen_loop()
