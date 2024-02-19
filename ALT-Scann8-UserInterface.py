@@ -16,12 +16,12 @@ More info in README.md file
 """
 
 __author__ = 'Juan Remirez de Esparza'
-__copyright__ = "Copyright 2022-23, Juan Remirez de Esparza"
+__copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.27"
-__date__ = "2024-02-18"
-__version_highlight__ = "Bug fixes - Limit exposure range from 0 to 1 second"
+__version__ = "1.9.28"
+__date__ = "2024-02-19"
+__version_highlight__ = "Persist window position"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -4117,9 +4117,10 @@ def main(argv):
 
     ALT_scann_init_done = False
 
+    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
+
     tscann8_init()
 
-    load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
     load_config_data()
     load_session_data()
 
