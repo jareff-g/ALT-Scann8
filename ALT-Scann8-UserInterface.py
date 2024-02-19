@@ -19,9 +19,9 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.29"
+__version__ = "1.9.30"
 __date__ = "2024-02-19"
-__version_highlight__ = "Persist window position"
+__version_highlight__ = "Move 3 classes to dedicated files"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -67,14 +67,15 @@ except ImportError:
 
 import threading
 import queue
-from tooltip import disable_tooltips, setup_tooltip, init_tooltips
 import cv2
 
 from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
+from tooltip import Tooltips
 
 #  ######### Global variable definition (I know, too many...) ##########
 win = None
+as_tooltips = None
 ExitingApp = False
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
@@ -2669,7 +2670,7 @@ def create_main_window():
     global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
     global ForceSmallSize, ForceBigSize, FontSize, BigSize
     global TopWinX, TopWinY
-    global WinInitDone
+    global WinInitDone, as_tooltips
 
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     if SimulatedRun:
@@ -2707,10 +2708,10 @@ def create_main_window():
     if 'WindowPos' in SessionData:
         win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
 
-    create_widgets()
-
     # Init ToolTips
-    init_tooltips(FontSize)
+    as_tooltips = Tooltips(FontSize)
+
+    create_widgets()
 
     # Get Top window coordinates
     TopWinX = win.winfo_x()
@@ -3242,7 +3243,7 @@ def create_widgets():
     AdvanceMovie_btn = Button(top_left_area_frame, text="Movie Forward", width=12, height=3, command=advance_movie,
                               activebackground='#f0f0f0', wraplength=80, relief=RAISED, font=("Arial", FontSize))
     AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=(5,0), pady=(0,4), sticky='NSEW')
-    setup_tooltip(AdvanceMovie_btn, "Advance film (can be used with real-time view enabled).")
+    as_tooltips.add(AdvanceMovie_btn, "Advance film (can be used with real-time view enabled).")
     bottom_area_row += 1
     # Once first button created, get default colors, to revert when we change them
     save_bg = AdvanceMovie_btn['bg']
@@ -3263,12 +3264,12 @@ def create_widgets():
     Rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize+3), height=2, command=rewind_movie,
                         activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     Rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=(5,0), pady=4, sticky='NSEW')
-    setup_tooltip(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
+    as_tooltips.add(Rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
     FastForward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize+3), height=2, command=fast_forward_movie,
                              activebackground='#f0f0f0', wraplength=80, relief=RAISED)
     FastForward_btn.grid(row=bottom_area_row, column=bottom_area_column+1, padx=(5,0), pady=4, sticky='NSEW')
-    setup_tooltip(FastForward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
+    as_tooltips.add(FastForward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
     bottom_area_row += 1
 
     # Switch Positive/negative modes
@@ -3279,7 +3280,7 @@ def create_widgets():
                                                  font=("Arial", FontSize), command=set_negative_image,
                                                  indicatoron=False, selectcolor="sea green")
     negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
-    setup_tooltip(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
+    as_tooltips.add(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
     bottom_area_row += 1
 
     # Real time view to allow focus
@@ -3289,7 +3290,7 @@ def create_widgets():
                                                 font=("Arial", FontSize), command=set_real_time_display,
                                                 indicatoron=False, selectcolor="sea green")
     real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
-    setup_tooltip(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
+    as_tooltips.add(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
@@ -3299,7 +3300,7 @@ def create_widgets():
                                              font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
                                              selectcolor="sea green", state=DISABLED)
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
-    setup_tooltip(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
+    as_tooltips.add(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
     bottom_area_row += 1
 
     # Focus zoom control (in out, up, down, left, right)
@@ -3314,27 +3315,27 @@ def create_widgets():
     focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=set_focus_plus,
                             activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
-    setup_tooltip(focus_plus_btn, "Increase zoom level.")
+    as_tooltips.add(focus_plus_btn, "Increase zoom level.")
     focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=set_focus_minus,
                              activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
-    setup_tooltip(focus_minus_btn, "Decrease zoom level.")
+    as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
     focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=set_focus_left,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
-    setup_tooltip(focus_lf_btn, "Move zoom view to the left.")
+    as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
     focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=set_focus_up,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
-    setup_tooltip(focus_up_btn, "Move zoom view up.")
+    as_tooltips.add(focus_up_btn, "Move zoom view up.")
     focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=set_focus_down,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
-    setup_tooltip(focus_dn_btn, "Move zoom view down.")
+    as_tooltips.add(focus_dn_btn, "Move zoom view down.")
     focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=set_focus_right,
                           activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize-2))
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
-    setup_tooltip(focus_rt_btn, "Move zoom view to the right.")
+    as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
     bottom_area_row += 1
 
     # Frame for automatic stop & methods
@@ -3348,7 +3349,7 @@ def create_widgets():
                                                  font=("Arial", FontSize), command=set_auto_stop_enabled)
     #auto_stop_enabled_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, sticky='W')
     auto_stop_enabled_checkbox.pack(side = TOP, anchor=W)
-    setup_tooltip(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
+    as_tooltips.add(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
 
     # Radio buttons to select auto-stop method
     autostop_type = tk.StringVar()
@@ -3356,11 +3357,11 @@ def create_widgets():
     autostop_no_film_rb = tk.Radiobutton(autostop_frame, text="No film", variable=autostop_type,
                                   value='No_film', font=("Arial", FontSize), command=set_auto_stop_enabled)
     autostop_no_film_rb.pack(side=TOP, anchor=W, padx=10)
-    setup_tooltip(autostop_no_film_rb, "Stop when film is not detected by PT")
+    as_tooltips.add(autostop_no_film_rb, "Stop when film is not detected by PT")
     autostop_counter_zero_rb = tk.Radiobutton(autostop_frame, text="Count zero", variable=autostop_type,
                                   value='counter_to_zero', font=("Arial", FontSize), command=set_auto_stop_enabled)
     autostop_counter_zero_rb.pack(side=TOP, anchor=W, padx=10)
-    setup_tooltip(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
+    as_tooltips.add(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
     autostop_no_film_rb.config(state = DISABLED)
     autostop_counter_zero_rb.config(state = DISABLED)
 
@@ -3375,7 +3376,7 @@ def create_widgets():
                                                  selectcolor="sea green")
 
         full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
-        setup_tooltip(full_ui_checkbox, "Toggle between full/restricted user interface")
+        as_tooltips.add(full_ui_checkbox, "Toggle between full/restricted user interface")
         bottom_area_row += 1
 
     # Create vertical button column at right *************************************
@@ -3384,7 +3385,7 @@ def create_widgets():
     Exit_btn = Button(top_right_area_frame, text="Exit", height=5, command=exit_app, activebackground='red',
                       activeforeground='white', font=("Arial", FontSize))
     Exit_btn.grid(row=top_right_area_row, column=0, padx=4, pady=(0,3), sticky='EW')
-    setup_tooltip(Exit_btn, "Exit ALT-Scann8.")
+    as_tooltips.add(Exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
     if SimulatedRun:
@@ -3394,7 +3395,7 @@ def create_widgets():
         Start_btn = Button(top_right_area_frame, text="START Scan", height=5, command=start_scan,
                            activebackground='#f0f0f0', font=("Arial", FontSize))
     Start_btn.grid(row=top_right_area_row, column=1, pady=(0,3), sticky='EW')
-    setup_tooltip(Start_btn, "Start scanning process.")
+    as_tooltips.add(Start_btn, "Start scanning process.")
     top_right_area_row += 1
 
     # Create frame to select target folder
@@ -3410,11 +3411,11 @@ def create_widgets():
     new_folder_btn = Button(folder_frame_buttons, text='New', width=10, height=1, command=set_new_folder,
                             activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize-2))
     new_folder_btn.pack(side=LEFT)
-    setup_tooltip(new_folder_btn, "Create new folder to store frames generated during the scan.")
+    as_tooltips.add(new_folder_btn, "Create new folder to store frames generated during the scan.")
     existing_folder_btn = Button(folder_frame_buttons, text='Existing', width=10, height=1, command=set_existing_folder,
                                  activebackground='#f0f0f0', wraplength=80, font=("Arial", FontSize-2))
     existing_folder_btn.pack(side=LEFT)
-    setup_tooltip(existing_folder_btn, "Select existing folder to store frames generated during the scan.")
+    as_tooltips.add(existing_folder_btn, "Select existing folder to store frames generated during the scan.")
     top_right_area_row += 1
 
     # Create frame to select target file specs
@@ -3436,9 +3437,9 @@ def create_widgets():
     resolution_dropdown.pack(side=LEFT)
     # resolution_dropdown.config(state=DISABLED)
     if ExperimentalMode:
-        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with * are cropped, requiring lens adjustment")
+        as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with * are cropped, requiring lens adjustment")
     else:
-        setup_tooltip(resolution_dropdown, "Select the resolution to use when capturing the frames")
+        as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames")
 
     # File format (JPG or PNG)
     # Drop down to select file type
@@ -3456,7 +3457,7 @@ def create_widgets():
     file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
     file_type_dropdown.pack(side=LEFT)
     #file_type_dropdown.config(state=DISABLED)
-    setup_tooltip(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
+    as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
 
     top_right_area_row += 1
 
@@ -3468,7 +3469,7 @@ def create_widgets():
     Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str, font=("Arial", FontSize+6), width=5,
                                         height=1)
     Scanned_Images_number_label.pack(side=TOP)
-    setup_tooltip(Scanned_Images_number_label, "Number of film frames scanned so far.")
+    as_tooltips.add(Scanned_Images_number_label, "Number of film frames scanned so far.")
 
     scanned_images_fpm_frame = Frame(scanned_images_frame, width=14, height=2)
     scanned_images_fpm_frame.pack(side=TOP)
@@ -3476,13 +3477,13 @@ def create_widgets():
     Scanned_Images_time_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_time_str, font=("Arial", FontSize-2), width=20,
                                height=1)
     Scanned_Images_time_label.pack(side=BOTTOM)
-    setup_tooltip(Scanned_Images_time_label, "Film time in min:sec")
+    as_tooltips.add(Scanned_Images_time_label, "Film time in min:sec")
 
     Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Min:")
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str, font=("Arial", FontSize-2), width=20,
                                      height=1)
     scanned_images_fpm_label.pack(side=LEFT)
-    setup_tooltip(scanned_images_fpm_label, "Scan speed in frames per minute.")
+    as_tooltips.add(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
     # Create frame to display number of frames to go, and estimated time to finish
     frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', height=4, font=("Arial", FontSize-2))
@@ -3494,7 +3495,7 @@ def create_widgets():
     # Bind the KeyRelease event to the entry widget
     frames_to_go_entry.bind("<KeyPress>", frames_to_go_key_press)
     frames_to_go_entry.pack(side=TOP, pady=6)
-    setup_tooltip(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of remaining time to finish.")
+    as_tooltips.add(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of remaining time to finish.")
     time_to_go_str = tk.StringVar(value='')
     time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize-2), width=18 if BigSize else 24, height=1)
     time_to_go_time.pack(side=TOP, pady=6)
@@ -3511,14 +3512,14 @@ def create_widgets():
                                   compound='left', padx=0, pady=0,
                                   relief="raised", borderwidth=3)
     film_type_S8_rb.pack(side=LEFT, padx=2)
-    setup_tooltip(film_type_S8_rb, "Handle as Super 8 film")
+    as_tooltips.add(film_type_S8_rb, "Handle as Super 8 film")
     film_type_R8_rb = tk.Radiobutton(film_type_frame, text="R8", variable=film_type, command=set_r8,
                                   value='R8', font=("Arial", FontSize),
                                   indicatoron=0, width=8, height=2,
                                   compound='left', padx=0, pady=0,
                                   relief="raised", borderwidth=3)
     film_type_R8_rb.pack(side=RIGHT, padx=2)
-    setup_tooltip(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
+    as_tooltips.add(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
 
     # Create frame to display RPi temperature
     rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize-2))
@@ -3526,14 +3527,14 @@ def create_widgets():
     temp_str = str(RPiTemp)+'º'
     RPi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize+4), width=10, height=1)
     RPi_temp_value_label.pack(side=TOP, padx=4)
-    setup_tooltip(RPi_temp_value_label, "Raspberry Pi Temperature.")
+    as_tooltips.add(RPi_temp_value_label, "Raspberry Pi Temperature.")
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit', height=1,
                                                  variable=temp_in_fahrenheit, onvalue=True, offvalue=False,
                                                  command=temp_in_fahrenheit_selection, font=("Arial", FontSize))
     temp_in_fahrenheit_checkbox.pack(side=TOP)
-    setup_tooltip(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
+    as_tooltips.add(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
     top_right_area_row += 1
 
     # Integrated plotter
@@ -3577,21 +3578,21 @@ def create_widgets():
         exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
-        setup_tooltip(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
+        as_tooltips.add(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
         exposure_spinbox.bind("<FocusOut>", lambda event: exposure_selection())
 
         AE_enabled = tk.BooleanVar(value=False)
         exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
                                       font=("Arial", FontSize-1), command=exposure_spinbox_auto)
         exposure_btn.grid(row=exp_wb_row, column=3, pady=1)
-        setup_tooltip(exposure_btn, "Toggle automatic exposure status (on/off).")
+        as_tooltips.add(exposure_btn, "Toggle automatic exposure status (on/off).")
 
         auto_exposure_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
         auto_exp_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_exposure_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_exposure_change_pause_selection)
         auto_exp_wait_checkbox.grid(row=exp_wb_row, column=4, pady=1)
-        setup_tooltip(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
+        as_tooltips.add(auto_exp_wait_checkbox, "When automatic exposure enabled, select to wait for it to stabilize before capturing frame.")
         arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
         exp_wb_row += 1
 
@@ -3605,7 +3606,7 @@ def create_widgets():
         wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
         wb_red_spinbox.configure(validate="key", validatecommand=(wb_red_validation_cmd, '%P'))
-        setup_tooltip(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
+        as_tooltips.add(wb_red_spinbox, "When manual white balance enabled, select wished level (for red channel).")
         wb_red_spinbox.bind("<FocusOut>", lambda event: wb_red_selection())
 
         wb_join_label = tk.Label(exp_wb_frame, text='}', width=1, font=("Arial", FontSize*2))   # ⎬ } ﹜
@@ -3615,14 +3616,14 @@ def create_widgets():
         wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
                                     font=("Arial", FontSize-1), command=wb_spinbox_auto)
         wb_red_btn.grid(row=exp_wb_row, rowspan=2, column=3, pady=1)
-        setup_tooltip(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
+        as_tooltips.add(wb_red_btn, "Toggle automatic white balance for red channel (on/off).")
 
         auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
         awb_red_wait_checkbox = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
                                                onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_white_balance_change_pause_selection)
         awb_red_wait_checkbox.grid(row=exp_wb_row, rowspan=2, column=4, pady=1)
-        setup_tooltip(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
+        as_tooltips.add(awb_red_wait_checkbox, "When automatic white balance enabled, select to wait for it to stabilize before capturing frame.")
         exp_wb_row += 1
 
         # Automatic White Balance blue
@@ -3635,7 +3636,7 @@ def create_widgets():
         wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
         wb_blue_spinbox.configure(validate="key", validatecommand=(wb_blue_validation_cmd, '%P'))
-        setup_tooltip(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
+        as_tooltips.add(wb_blue_spinbox, "When manual white balance enabled, select wished level (for blue channel).")
         wb_blue_spinbox.bind("<FocusOut>", lambda event: wb_blue_selection())
         exp_wb_row+= 1
 
@@ -3649,7 +3650,7 @@ def create_widgets():
         match_wait_margin_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         match_wait_margin_validation_cmd = match_wait_margin_spinbox.register(match_wait_margin_validation)
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_wait_margin_validation_cmd, '%P'))
-        setup_tooltip(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
+        as_tooltips.add(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
         match_wait_margin_spinbox.bind("<FocusOut>", lambda event: match_wait_margin_selection())
 
         # Display markers for film hole reference
@@ -3687,14 +3688,14 @@ def create_widgets():
         steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
         steps_per_frame_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
-        setup_tooltip(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
+        as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
         steps_per_frame_spinbox.bind("<FocusOut>", lambda event: steps_per_frame_selection())
 
         auto_framesteps_enabled = tk.BooleanVar(value=False)
         steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
                                              offvalue=False, font=("Arial", FontSize-1), command=steps_per_frame_auto)
         steps_per_frame_btn.grid(row=frame_align_row, column=2, pady=3)
-        setup_tooltip(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
+        as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
         frame_align_row += 1
 
@@ -3708,7 +3709,7 @@ def create_widgets():
         pt_level_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
-        setup_tooltip(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
+        as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
         pt_level_spinbox.bind("<FocusOut>", lambda event: pt_level_selection())
 
         auto_pt_level_enabled = tk.BooleanVar(value=False)
@@ -3716,7 +3717,7 @@ def create_widgets():
                                       onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                       command=pt_level_spinbox_auto)
         pt_level_btn.grid(row=frame_align_row, column=2, pady=3)
-        setup_tooltip(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
+        as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         frame_align_row += 1
 
@@ -3730,7 +3731,7 @@ def create_widgets():
         frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(fine_tune_validation_cmd, '%P'))
-        setup_tooltip(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
+        as_tooltips.add(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: frame_fine_tune_selection())
         frame_align_row += 1
 
@@ -3744,7 +3745,7 @@ def create_widgets():
         frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(extra_steps_validation_cmd, '%P'))
-        setup_tooltip(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
+        as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances the frame n steps after detection. Can be useful only in rare cases, 'Fine tune' should be enough.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: frame_extra_steps_selection())
 
         # *********************************
@@ -3763,7 +3764,7 @@ def create_widgets():
         scan_speed_spinbox.grid(row=0, column=1, padx=4, pady=4, sticky=W)
         scan_speed_validation_cmd = scan_speed_spinbox.register(scan_speed_validation)
         scan_speed_spinbox.configure(validate="key", validatecommand=(scan_speed_validation_cmd, '%P'))
-        setup_tooltip(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
+        as_tooltips.add(scan_speed_spinbox, "Select scan speed from 1 (slowest) to 10 (fastest).A speed of 5 is usually a good compromise between speed and good frame position detection.")
         scan_speed_spinbox.bind("<FocusOut>", lambda event: scan_speed_selection())
 
         # Display entry to adjust capture stabilization delay (100 ms by default)
@@ -3777,7 +3778,7 @@ def create_widgets():
         stabilization_delay_spinbox.grid(row=1, column=1, padx=4, sticky='W')
         stabilization_delay_validation_cmd = stabilization_delay_spinbox.register(stabilization_delay_validation)
         stabilization_delay_spinbox.configure(validate="key", validatecommand=(stabilization_delay_validation_cmd, '%P'))
-        setup_tooltip(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
+        as_tooltips.add(stabilization_delay_spinbox, "Delay between frame detection and snapshot trigger. 100ms is a good compromise, lower values might cause blurry captures.")
         stabilization_delay_spinbox.bind("<FocusOut>", lambda event: stabilization_delay_selection())
 
     if ExperimentalMode:
@@ -3794,13 +3795,13 @@ def create_widgets():
                                                      variable=hdr_capture_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_capture, font=("Arial", FontSize-1))
         hdr_capture_active_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
-        setup_tooltip(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
+        as_tooltips.add(hdr_capture_active_checkbox, "Activate multi-exposure scan. Three snapshots of each frame will be taken with different exposures, to be merged later by AfterScan.")
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1,
                                                      variable=hdr_viewx4_active, onvalue=True, offvalue=False,
                                                      command=switch_hdr_viewx4, font=("Arial", FontSize-1), state=DISABLED)
         hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
-        setup_tooltip(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
+        as_tooltips.add(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a single frame (the one in the middle), all three frames will be displayed sequentially.")
         hdr_row += 1
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize-1), state=DISABLED)
@@ -3811,7 +3812,7 @@ def create_widgets():
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
         hdr_min_exp_spinbox.configure(validate="key", validatecommand=(hdr_min_exp_validation_cmd, '%P'))
-        setup_tooltip(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
+        as_tooltips.add(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
         hdr_min_exp_spinbox.bind("<FocusOut>", lambda event: hdr_min_exp_selection())
         hdr_row +=1
 
@@ -3823,7 +3824,7 @@ def create_widgets():
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
         hdr_max_exp_spinbox.configure(validate="key", validatecommand=(hdr_max_exp_validation_cmd, '%P'))
-        setup_tooltip(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
+        as_tooltips.add(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
         hdr_max_exp_spinbox.bind("<FocusOut>", lambda event: hdr_max_exp_selection())
         hdr_row += 1
 
@@ -3835,7 +3836,7 @@ def create_widgets():
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
         hdr_bracket_width_spinbox.configure(validate="key", validatecommand=(hdr_bracket_width_validation_cmd, '%P'))
-        setup_tooltip(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
+        as_tooltips.add(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket (useful for automatic mode).")
         hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_bracket_width_selection())
         hdr_row += 1
 
@@ -3847,7 +3848,7 @@ def create_widgets():
         hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=2, pady=1, sticky=W)
         hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
         hdr_bracket_shift_spinbox.configure(validate="key", validatecommand=(hdr_bracket_shift_validation_cmd, '%P'))
-        setup_tooltip(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
+        as_tooltips.add(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down from default position.")
         hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_bracket_shift_selection())
         hdr_row += 1
 
@@ -3856,7 +3857,7 @@ def create_widgets():
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
         hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
-        setup_tooltip(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
+        as_tooltips.add(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
         hdr_row += 1
 
         hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
@@ -3864,7 +3865,7 @@ def create_widgets():
                                               variable=hdr_merge_in_place, onvalue=True, offvalue=False,
                                               command=adjust_merge_in_place, font=("Arial", FontSize-1))
         hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, padx=2, pady=1, sticky=W)
-        setup_tooltip(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
+        as_tooltips.add(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while encoding. Allow to make some use of the time spent waiting for the camera to adapt the exposure.")
 
         # Experimental miscellaneous sub-frame
         experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous', font=("Arial", FontSize-1))
@@ -3882,7 +3883,7 @@ def create_widgets():
         sharpness_control_spinbox.grid(row=0, column=1, padx=2, sticky=W)
         sharpness_validation_cmd = sharpness_control_spinbox.register(sharpness_validation)
         sharpness_control_spinbox.configure(validate="key", validatecommand=(sharpness_validation_cmd, '%P'))
-        setup_tooltip(sharpness_control_spinbox,
+        as_tooltips.add(sharpness_control_spinbox,
                       "Sets the RPi HQ camera 'Sharpness' property to the selected value.")
         sharpness_control_spinbox.bind("<FocusOut>", lambda event: sharpness_control_selection())
         # Display entry to throttle Rwnd/FF speed
@@ -3897,7 +3898,7 @@ def create_widgets():
         rwnd_speed_control_spinbox.grid(row=1, column=1, padx=2, sticky=W)
         rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
         rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(rewind_speed_validation_cmd, '%P'))
-        setup_tooltip(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
+        as_tooltips.add(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
         # No need to validate on FocusOut, since no keyboard entry is allowed in this one
 
         # Damaged film helpers, to help handling damaged film (broken perforations)
@@ -3910,7 +3911,7 @@ def create_widgets():
                                                offvalue=False,
                                                command=Manual_scan_activated_selection, font=("Arial", FontSize-1))
         Manual_scan_checkbox.pack(side=TOP)
-        setup_tooltip(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
+        as_tooltips.add(Manual_scan_checkbox, "Enable manual scan (for films with very damaged sprocket holes). Lots of manual work, use it if everything else fails.")
         # Common area for buttons
         Manual_scan_btn_frame = Frame(Damaged_film_frame, width=18, height=2)
         Manual_scan_btn_frame.pack(side=TOP)
@@ -3919,27 +3920,27 @@ def create_widgets():
         manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
                                 state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_advance_fraction_5_btn.pack(side=LEFT, ipadx=5, fill=Y)
-        setup_tooltip(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
+        as_tooltips.add(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
         manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
                                 state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_advance_fraction_20_btn.pack(side=LEFT, ipadx=5, fill=Y)
-        setup_tooltip(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
+        as_tooltips.add(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
         manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
                                  state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_take_snap_btn.pack(side=RIGHT, ipadx=5, fill=Y)
-        setup_tooltip(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
+        as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
 
         # Retreat movie button (slow backward through filmgate)
         RetreatMovie_btn = Button(experimental_miscellaneous_frame, text="Movie Backward", width=20, height=1, command=retreat_movie,
                                   activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
         RetreatMovie_btn.grid(row=3, column=0, columnspan=2, padx=4, sticky='')
-        setup_tooltip(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
+        as_tooltips.add(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source reels in left position in order to avoid film jamming at film gate.")
 
         # Unlock reels button (to load film, rewind, etc.)
         Free_btn = Button(experimental_miscellaneous_frame, text="Unlock Reels", width=20, height=1, command=set_free_mode,
                           activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
         Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
-        setup_tooltip(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
+        as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
 
 
 

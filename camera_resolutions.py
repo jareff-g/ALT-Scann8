@@ -1,9 +1,23 @@
-# ****************************************************************************************************************
-# Class CameraResolutions
-# Upon creation, extracts from the camera (using PiCamera2 sensor_modes) a list of supported resolutions and
-# associated attributes (exposure range, format)
-# In case of simulated run, it uses a copy of the info returned for the Raspberry Pi HD camera.
-# ****************************************************************************************************************
+"""
+****************************************************************************************************************
+Class CameraResolutions
+Upon creation, extracts from the camera (using PiCamera2 sensor_modes) a list of supported resolutions and
+associated attributes (exposure range, format)
+In case of simulated run, it uses a copy of the info returned for the Raspberry Pi HD camera.
+****************************************************************************************************************
+"""
+__author__ = 'Juan Remirez de Esparza'
+__copyright__ = "Copyright 2022/24, Juan Remirez de Esparza"
+__credits__ = ["Juan Remirez de Esparza"]
+__license__ = "MIT"
+__module__ = "CameraResolutions"
+__version__ = "1.0.1"
+__date__ = "2024-02-19"
+__version_highlight__ = "CameraResolutions - Class extracted to dedicated file"
+__maintainer__ = "Juan Remirez de Esparza"
+__email__ = "jremirez@hotmail.com"
+__status__ = "Development"
+
 class CameraResolutions():
     """
     Singleton class - ensures only one instance is ever created.
@@ -61,6 +75,7 @@ class CameraResolutions():
             first_entry_key = next(iter(self.resolution_dict))  # Get the key of the first entry
             self.active = self.resolution_dict[first_entry_key]
             self.initialized = True
+
     def get_list(self):
         return list(self.resolution_dict.keys())
 

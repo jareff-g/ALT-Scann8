@@ -1,10 +1,25 @@
-# ****************************************************************************************************************
-# Custom Spinbox to block keyboard entries while scanning
-# Since we allow invalid values to be entered in spinboxes (to enter '100' in a field validated to be between 100
-# and 600 you need to start typing a '1'), we need to be carefull ti doesn't happen while scanning, since a wrong
-# value could break the process. Therefore while scanning values can only be tuned using arrow keys or spinbox
-# arrows, since then the limits are enforced by the spinbox and it is not possible to produce invalid values
-# ****************************************************************************************************************
+"""
+****************************************************************************************************************
+Class DynamicSpinbox
+Custom Spinbox to block keyboard entries while scanning
+Since we allow invalid values to be entered in spinboxes (to enter '100' in a field validated to be between 100
+and 600 you need to start typing a '1'), we need to be carefull ti doesn't happen while scanning, since a wrong
+value could break the process. Therefore while scanning values can only be tuned using arrow keys or spinbox
+arrows, since then the limits are enforced by the spinbox and it is not possible to produce invalid values
+****************************************************************************************************************
+"""
+__author__ = 'Juan Remirez de Esparza'
+__copyright__ = "Copyright 2022/24, Juan Remirez de Esparza"
+__credits__ = ["Juan Remirez de Esparza"]
+__license__ = "MIT"
+__module__ = "DynamicSpinbox"
+__version__ = "1.0.1"
+__date__ = "2024-02-19"
+__version_highlight__ = "DynamicSpinbox - Class extracted to dedicated file"
+__maintainer__ = "Juan Remirez de Esparza"
+__email__ = "jremirez@hotmail.com"
+__status__ = "Development"
+
 
 from tkinter import Spinbox
 
