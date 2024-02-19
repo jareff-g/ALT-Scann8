@@ -70,6 +70,8 @@ import queue
 from tooltip import disable_tooltips, setup_tooltip, init_tooltips
 import cv2
 
+from camera_resolutions import CameraResolutions
+from dynamic_spinbox import DynamicSpinbox
 
 #  ######### Global variable definition (I know, too many...) ##########
 win = None
@@ -337,140 +339,6 @@ SessionData = {
     "HdrMergeInPlace": False,
     "FramesToGo": FramesToGo
 }
-# ****************************************************************************************************************
-# Custom Spinbox to block keyboard entries while scanning
-# Since we allow invalid values to be entered in spinboxes (to enter '100' in a field validated to be between 100
-# and 600 you need to start typing a '1'), we need to be carefull ti doesn't happen while scanning, since a wrong
-# value could break the process. Therefore while scanning values can only be tuned using arrow keys or spinbox
-# arrows, since then the limits are enforced by the spinbox and it is not possible to produce invalid values
-# ****************************************************************************************************************
-class DynamicSpinbox(tk.Spinbox):
-    def __init__(self, master=None, **kwargs):
-        super().__init__(master, **kwargs)
-        self.block_keyboard_entry = False  # Flag to indicate whether keyboard entry is blocked
-
-        # Bind keyboard events
-        self.bind("<KeyPress>", self.on_key_press)
-        self.bind("<KeyRelease>", self.on_key_release)
-
-    def on_key_press(self, event):
-        disabled = self.config('state')[-1] == 'readonly'
-        # Block keyboard entry if the flag is set
-        if (disabled and event.keysym not in {'Tab', 'ISO_Left_Tab'} or
-                ScanOngoing and event.keysym not in {'Up', 'Down', 'Left', 'Right', 'Tab', 'ISO_Left_Tab'}):
-            return "break"
-
-    def on_key_release(self, event):
-        # Release the block on key release
-        pass
-
-
-# ****************************************************************************************************************
-# Class CameraResolutions
-# Upon creation, extracts from the camera (using PiCamera2 sensor_modes) a list of supported resolutions and
-# associated attributes (exposure range, format)
-# In case of simulated run, it uses a copy of the info returned for the Raspberry Pi HD camera.
-# ****************************************************************************************************************
-class CameraResolutions():
-    """
-    Singleton class - ensures only one instance is ever created.
-    """
-    _instance = None
-    resolution_dict = {}
-    active = ''
-
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-    def __init__(self):
-        if not hasattr(self, 'initialized'):
-            if SimulatedRun:
-                camera_sensor_modes = simulated_sensor_modes
-            else:
-                camera_sensor_modes = camera.sensor_modes
-            self.resolution_dict.clear()
-            # Identify the smallest sensor resolution that will fix the two extra resolutions ("1024x768", "640x480")
-            aux_width = 10000
-            aux_height = 10000
-            aux_key = None
-            # Add dictionary entries where the key is the value shown in the drop down list (XxY)
-            for mode in camera_sensor_modes:
-                key = f"{mode['size'][0]}x{mode['size'][1]}"
-                if mode['crop_limits'][0] != 0 or mode['crop_limits'][1] != 0:
-                    key = key + ' *'
-                self.resolution_dict[key] = {}
-                self.resolution_dict[key]['sensor_resolution'] = mode['size']
-                self.resolution_dict[key]['image_resolution'] = mode['size']
-                if 1024 < mode['size'][0] < aux_width and 768 < mode['size'][1] < aux_height:
-                    aux_width = mode['size'][1]
-                    aux_height = mode['size'][1]
-                    aux_key = key
-                self.resolution_dict[key]['format'] = mode['format'].format
-                # self.resolution_dict[key]['min_exp'] = mode['exposure_limits'][0]
-                # self.resolution_dict[key]['max_exp'] = mode['exposure_limits'][1]
-                # Force lower exposure range 0-1sec
-                self.resolution_dict[key]['min_exp'] = 0
-                self.resolution_dict[key]['max_exp'] = 1000000
-            # Add two extra resolutions - "1024x768", "640x480"
-            if aux_key is not None:
-                aux_entry = self.resolution_dict[aux_key]
-                self.resolution_dict['1024x768 *'] = {}
-                self.resolution_dict['1024x768 *']['sensor_resolution'] = aux_entry['sensor_resolution']
-                self.resolution_dict['1024x768 *']['image_resolution'] = (1024, 768)
-                self.resolution_dict['1024x768 *']['min_exp'] = aux_entry['min_exp']
-                self.resolution_dict['1024x768 *']['max_exp'] = aux_entry['max_exp']
-                self.resolution_dict['1024x768 *']['format'] = aux_entry['format']
-                self.resolution_dict['640x480 *'] = {}
-                self.resolution_dict['640x480 *']['sensor_resolution'] = aux_entry['sensor_resolution']
-                self.resolution_dict['640x480 *']['image_resolution'] = (640, 480)
-                self.resolution_dict['640x480 *']['min_exp'] = aux_entry['min_exp']
-                self.resolution_dict['640x480 *']['max_exp'] = aux_entry['max_exp']
-                self.resolution_dict['640x480 *']['format'] = aux_entry['format']
-
-            first_entry_key = next(iter(self.resolution_dict))  # Get the key of the first entry
-            self.active = self.resolution_dict[first_entry_key]
-            self.initialized = True
-    def get_list(self):
-        return list(self.resolution_dict.keys())
-
-    def get_format(self, resolution=None):
-        if resolution is None:
-            return self.active['format']
-        else:
-            return self.resolution_dict[resolution]['format']
-
-    def get_sensor_resolution(self, resolution=None):
-        if resolution is None:
-            return self.active['sensor_resolution']
-        else:
-            return self.resolution_dict[resolution]['sensor_resolution']
-
-    def get_image_resolution(self, resolution=None):
-        if resolution is None:
-            return self.active['image_resolution']
-        else:
-            return self.resolution_dict[resolution]['image_resolution']
-
-    def get_min_exp(self, resolution=None):
-        if resolution is None:
-            return self.active['min_exp']
-        else:
-            return self.resolution_dict[resolution]['min_exp']
-
-    def get_max_exp(self, resolution=None):
-        if resolution is None:
-            return self.active['max_exp']
-        else:
-            return self.resolution_dict[resolution]['max_exp']
-
-    def set_active(self, resolution):
-        self.active = self.resolution_dict[resolution]
-
-    def get_active(self):
-        return self.active
-
 
 # ********************************************************
 # ALT-Scann8 code
@@ -1850,6 +1718,7 @@ def start_scan_simulated():
         CurrentScanStartFrame = CurrentFrame
 
         ScanOngoing = True
+        arrange_custom_spinboxes_status(win)
         last_frame_time = time.time() + 3
 
         # Enable/Disable related buttons
@@ -1882,6 +1751,7 @@ def stop_scan_simulated():
     Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
 
     ScanOngoing = False
+    arrange_custom_spinboxes_status(win)
 
     # Enable/Disable related buttons
     button_status_change_except(Start_btn, ScanOngoing)
@@ -2007,6 +1877,7 @@ def start_scan():
         CurrentScanStartFrame = CurrentFrame
 
         ScanOngoing = True
+        arrange_custom_spinboxes_status(win)
         last_frame_time = time.time() + 3
 
         # Set new frame indicator to false, in case this is the cause of the strange
@@ -2040,6 +1911,7 @@ def stop_scan():
         Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
 
     ScanOngoing = False
+    arrange_custom_spinboxes_status(win)
 
     # Send command to Arduino to stop scan (as applicable, Arduino keeps its own status)
     if not SimulatedRun:
@@ -2470,6 +2342,16 @@ def arrange_widget_state(auto_state, widget_list):
                 widget.deselect()
 
 
+def arrange_custom_spinboxes_status(widget):
+    widgets = widget.winfo_children()
+    for widget in widgets:
+        if isinstance(widget, DynamicSpinbox):
+            widget.set_custom_state('block_kbd_entry' if ScanOngoing else 'normal')
+        elif isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
+            arrange_custom_spinboxes_status(widget)
+
+
+
 def load_session_data():
     global SessionData
     global CurrentDir
@@ -2896,12 +2778,12 @@ def tscann8_init():
 
     if not SimulatedRun and not CameraDisabled: # Init PiCamera2 here, need resolution list for drop down
         camera = Picamera2()
-        camera_resolutions = CameraResolutions()
+        camera_resolutions = CameraResolutions(camera.sensor_modes)
         logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
         PiCam2_configure()
         ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
     if SimulatedRun:
-        camera_resolutions = CameraResolutions()   # Initializes resolution list from a hardcoded sensor_modes
+        camera_resolutions = CameraResolutions(simulated_sensor_modes)   # Initializes resolution list from a hardcoded sensor_modes
 
     create_main_window()
 
