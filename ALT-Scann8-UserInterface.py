@@ -19,9 +19,10 @@ __author__ = 'Juan Remirez de Esparza'
 __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
-__version__ = "1.9.30"
+__module__ = "ALT-Scann8"
+__version__ = "1.9.31"
 __date__ = "2024-02-19"
-__version_highlight__ = "Move 3 classes to dedicated files"
+__version_highlight__ = "Added rolling average"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -72,6 +73,7 @@ import cv2
 from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
 from tooltip import Tooltips
+from rolling_average import RollingAverage
 
 #  ######### Global variable definition (I know, too many...) ##########
 win = None
@@ -248,6 +250,10 @@ total_wait_time_save_image = 0
 total_wait_time_preview_display = 0
 total_wait_time_awb = 0
 total_wait_time_autoexp = 0
+time_save_image = None
+time_preview_display = None
+time_awb = None
+time_autoexp = None
 session_start_time = 0
 session_frames=0
 max_wait_time = 5000
@@ -1060,7 +1066,9 @@ def capture_save_thread(queue, event, id):
             request.release()
 
         logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
-        total_wait_time_save_image += time.time() - curtime
+        aux = time.time() - curtime
+        total_wait_time_save_image += aux
+        time_save_image.add_value(aux)
     active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
 
@@ -1099,7 +1107,9 @@ def draw_preview_image(preview_image, idx):
         # The Pack geometry manager packs widgets in rows or columns.
         # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
 
-        total_wait_time_preview_display += (time.time() - curtime)
+        aux = time.time() - curtime
+        total_wait_time_preview_display += aux
+        time_preview_display.add_value(aux)
         logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
 
 
@@ -1584,7 +1594,9 @@ def capture_single(mode):
                 request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
             request.release()
         logging.debug("Capture loop, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
-        total_wait_time_save_image += time.time() - curtime
+        aux = time.time() - curtime
+        total_wait_time_save_image += aux
+        time_save_image.add_value(aux)
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
@@ -1634,8 +1646,13 @@ def capture(mode):
                 break
         if wait_loop_count > 0:
             exposure_value.set(aux_current_exposure / 1000)
-            total_wait_time_autoexp+=(time.time() - curtime)
+            aux = time.time() - curtime
+            total_wait_time_autoexp += aux
+            time_autoexp.add_value(aux)
             logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
+        else:
+            time_autoexp.add_value(0)
+
 
     # Wait for auto white balance to adapt only if allowed
     if AWB_enabled.get() and AwbPause:
@@ -1664,8 +1681,13 @@ def capture(mode):
             if ExpertMode:
                 wb_red_value.set(round(aux_gain_red, 1))
                 wb_blue_value.set(round(aux_gain_blue, 1))
-            total_wait_time_awb+=(time.time() - curtime)
+            aux = time.time() - curtime
+            total_wait_time_awb += aux
+            time_awb.add_value(aux)
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
+        else:
+            time_awb.add_value(0)
+
 
     if PiCam2PreviewEnabled:
         if mode == 'still':
@@ -1773,7 +1795,6 @@ def capture_loop_simulated():
     global disk_space_error_to_notify
     global frames_to_go_key_press_time
 
-
     if ScanStopRequested:
         stop_scan_simulated()
         ScanStopRequested = False
@@ -1843,6 +1864,12 @@ def capture_loop_simulated():
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(500, capture_loop_simulated)
+
+        # display rolling averages
+        time_save_image_value.set(int(time_save_image.get_average()*1000) if time_save_image.get_average() is not None else 0)
+        time_preview_display_value.set(int(time_preview_display.get_average()*1000) if time_preview_display.get_average() is not None else 0)
+        time_awb_value.set(int(time_awb.get_average()*1000) if time_awb.get_average() is not None else 0)
+        time_autoexp_value.set(int(time_autoexp.get_average()*1000) if time_autoexp.get_average() is not None else 0)
 
         if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
             logging.error("No disk space available, stopping scan process.")
@@ -2037,6 +2064,13 @@ def capture_loop():
             if not ScanStopRequested:
                 NewFrameAvailable = True    # Simulate new frame to continue scan
                 logging.warning(f"Error during scan process, frame {CurrentFrame}, simulating new frame. Maybe misaligned.")
+
+        # display rolling averages
+        time_save_image_value.set(int(time_save_image.get_average()*1000) if time_save_image.get_average() is not None else 0)
+        time_preview_display_value.set(int(time_preview_display.get_average()*1000) if time_preview_display.get_average() is not None else 0)
+        time_awb_value.set(int(time_awb.get_average()*1000) if time_awb.get_average() is not None else 0)
+        time_autoexp_value.set(int(time_autoexp.get_average()*1000) if time_autoexp.get_average() is not None else 0)
+
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(5, capture_loop)
 
@@ -2734,6 +2768,8 @@ def tscann8_init():
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
     global active_threads
+    global time_save_image, time_preview_display, time_awb, time_autoexp
+
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -2785,6 +2821,12 @@ def tscann8_init():
         ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
     if SimulatedRun:
         camera_resolutions = CameraResolutions(simulated_sensor_modes)   # Initializes resolution list from a hardcoded sensor_modes
+
+    # Initialize rolling average objects
+    time_save_image = RollingAverage(50)
+    time_preview_display = RollingAverage(50)
+    time_awb = RollingAverage(50)
+    time_autoexp = RollingAverage(50)
 
     create_main_window()
 
@@ -3219,6 +3261,7 @@ def create_widgets():
     global full_ui_checkbox, toggle_ui_small
     global AE_enabled, AWB_enabled
     global expert_frame, experimental_frame
+    global time_save_image_value, time_preview_display_value, time_awb_value, time_autoexp_value
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3941,6 +3984,34 @@ def create_widgets():
                           activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
         Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
+
+        # Experimental statictics sub-frame
+        experimental_stats_frame = LabelFrame(experimental_frame, text='Averages (ms)', font=("Arial", FontSize-1))
+        experimental_stats_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
+        # Average Time to save image
+        time_save_image_label = tk.Label(experimental_stats_frame, text='Save:', font=("Arial", FontSize-1))
+        time_save_image_label.grid(row=0, column=0, padx=2, sticky=E)
+        time_save_image_value = tk.IntVar(0)
+        time_save_image_value_label = tk.Label(experimental_stats_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
+        time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
+        # Average Time to display preview
+        time_preview_display_label = tk.Label(experimental_stats_frame, text='Prvw:', font=("Arial", FontSize-1))
+        time_preview_display_label.grid(row=1, column=0, padx=2, sticky=E)
+        time_preview_display_value = tk.IntVar(0)
+        time_preview_display_value_label = tk.Label(experimental_stats_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
+        time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
+        # Average Time spent waiting for AWB to adjust
+        time_awb_label = tk.Label(experimental_stats_frame, text='AWB:', font=("Arial", FontSize-1))
+        time_awb_label.grid(row=2, column=0, padx=2, sticky=E)
+        time_awb_value = tk.IntVar(0)
+        time_awb_value_label = tk.Label(experimental_stats_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
+        time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
+        # Average Time spent waiting for AE to adjust
+        time_autoexp_label = tk.Label(experimental_stats_frame, text='AE:', font=("Arial", FontSize-1))
+        time_autoexp_label.grid(row=3, column=0, padx=2, sticky=E)
+        time_autoexp_value = tk.IntVar(0)
+        time_autoexp_value_label = tk.Label(experimental_stats_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
+        time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
 
 
 
