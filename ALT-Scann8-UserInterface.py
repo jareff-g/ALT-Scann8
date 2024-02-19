@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.31"
+__version__ = "1.9.32"
 __date__ = "2024-02-19"
-__version_highlight__ = "Added rolling average"
+__version_highlight__ = "Command line switches to toggle modes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2066,10 +2066,11 @@ def capture_loop():
                 logging.warning(f"Error during scan process, frame {CurrentFrame}, simulating new frame. Maybe misaligned.")
 
         # display rolling averages
-        time_save_image_value.set(int(time_save_image.get_average()*1000) if time_save_image.get_average() is not None else 0)
-        time_preview_display_value.set(int(time_preview_display.get_average()*1000) if time_preview_display.get_average() is not None else 0)
-        time_awb_value.set(int(time_awb.get_average()*1000) if time_awb.get_average() is not None else 0)
-        time_autoexp_value.set(int(time_autoexp.get_average()*1000) if time_autoexp.get_average() is not None else 0)
+        if ExperimentalMode:
+            time_save_image_value.set(int(time_save_image.get_average()*1000) if time_save_image.get_average() is not None else 0)
+            time_preview_display_value.set(int(time_preview_display.get_average()*1000) if time_preview_display.get_average() is not None else 0)
+            time_awb_value.set(int(time_awb.get_average()*1000) if time_awb.get_average() is not None else 0)
+            time_autoexp_value.set(int(time_autoexp.get_average()*1000) if time_autoexp.get_average() is not None else 0)
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(5, capture_loop)
@@ -2686,6 +2687,8 @@ def hdr_init():
 def hdr_reinit():
     global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_best_exp, hdr_num_exposures, hdr_view_4_image
 
+    if not ExperimentalMode:
+        return
     if hdr_num_exposures == 3:
         hdr_exp_list.clear()
         hdr_exp_list += [hdr_min_exp_value.get(), hdr_best_exp, hdr_max_exp_value.get()]
@@ -4045,9 +4048,9 @@ def main(argv):
         if opt == '-s':
             SimulatedRun = True
         elif opt == '-e':
-            ExpertMode = True
+            ExpertMode = not ExpertMode
         elif opt == '-x':
-            ExperimentalMode = True
+            ExperimentalMode = not ExperimentalMode
         elif opt == '-d':
             CameraDisabled = True
         elif opt == '-l':
@@ -4061,7 +4064,7 @@ def main(argv):
         elif opt == '-t':
             DisableThreads = True
         elif opt == '-p':
-            PlotterMode = True
+            PlotterMode = not PlotterMode
         elif opt == '-h':
             print("ALT-Scann 8 Command line parameters")
             print("  -s             Start Simulated session")
@@ -4093,9 +4096,9 @@ def main(argv):
     if SimulatedRun:
         logging.debug("Starting in simulated mode.")
     if ExpertMode:
-        logging.debug("Expert mode enabled.")
+        logging.debug("Toggle expert mode.")
     if ExperimentalMode:
-        logging.debug("Experimental mode enabled.")
+        logging.debug("Toggle experimental mode.")
     if CameraDisabled:
         logging.debug("Camera disabled.")
     if ForceSmallSize:
@@ -4105,7 +4108,7 @@ def main(argv):
     if DisableThreads:
         logging.debug("Threads disabled.")
     if PlotterMode:
-        logging.debug("Ploter mode enabled.")
+        logging.debug("Toggle ploter mode.")
 
     if not SimulatedRun:
         arduino_listen_loop()
