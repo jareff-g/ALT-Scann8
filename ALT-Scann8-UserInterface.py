@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.32"
-__date__ = "2024-02-19"
-__version_highlight__ = "Command line switches to toggle modes"
+__version__ = "1.9.33"
+__date__ = "2024-02-20"
+__version_highlight__ = "Fix error when creating IntVars for stats"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3994,25 +3994,25 @@ def create_widgets():
         # Average Time to save image
         time_save_image_label = tk.Label(experimental_stats_frame, text='Save:', font=("Arial", FontSize-1))
         time_save_image_label.grid(row=0, column=0, padx=2, sticky=E)
-        time_save_image_value = tk.IntVar(0)
+        time_save_image_value = tk.IntVar(value=0)
         time_save_image_value_label = tk.Label(experimental_stats_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
         time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
         # Average Time to display preview
         time_preview_display_label = tk.Label(experimental_stats_frame, text='Prvw:', font=("Arial", FontSize-1))
         time_preview_display_label.grid(row=1, column=0, padx=2, sticky=E)
-        time_preview_display_value = tk.IntVar(0)
+        time_preview_display_value = tk.IntVar(value=0)
         time_preview_display_value_label = tk.Label(experimental_stats_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
         time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
         # Average Time spent waiting for AWB to adjust
         time_awb_label = tk.Label(experimental_stats_frame, text='AWB:', font=("Arial", FontSize-1))
         time_awb_label.grid(row=2, column=0, padx=2, sticky=E)
-        time_awb_value = tk.IntVar(0)
+        time_awb_value = tk.IntVar(value=0)
         time_awb_value_label = tk.Label(experimental_stats_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
         time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
         # Average Time spent waiting for AE to adjust
         time_autoexp_label = tk.Label(experimental_stats_frame, text='AE:', font=("Arial", FontSize-1))
         time_autoexp_label.grid(row=3, column=0, padx=2, sticky=E)
-        time_autoexp_value = tk.IntVar(0)
+        time_autoexp_value = tk.IntVar(value=0)
         time_autoexp_value_label = tk.Label(experimental_stats_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
         time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
 
