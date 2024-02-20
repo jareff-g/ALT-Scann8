@@ -1,0 +1,3 @@
+[submodule "ALT-Scann8-Shared"]
+	path = ALT-Scann8-Shared
+	url = git@github.com:jareff-g/ALT-Scann8-Shared.git
