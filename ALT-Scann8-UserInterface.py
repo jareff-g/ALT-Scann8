@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.34"
+__version__ = "1.9.35"
 __date__ = "2024-02-20"
-__version_highlight__ = "Save frames using PiCamera2 method whenever possible"
+__version_highlight__ = "Improve automatic exposure by adding additional PiCam2 controls"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -59,6 +59,7 @@ try:
     import smbus
     from picamera2 import Picamera2, Preview
     from libcamera import Transform
+    from libcamera import controls
     # Global variable to isolate camera specific code (Picamera vs PiCamera2)
     IsPiCamera2 = True
     # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
@@ -646,14 +647,14 @@ def wb_spinbox_auto():
     if AWB_enabled.get():
         awb_red_wait_checkbox.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
-            camera.set_controls({"AwbEnable": 1})
+            camera.set_controls({"AwbEnable": True})
     else:
         awb_red_wait_checkbox.config(state=DISABLED)
         if not SimulatedRun and not CameraDisabled:
             # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
             # Since we update values in the UI regularly, use those.
             camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
-            camera.set_controls({"AwbEnable": 0})
+            camera.set_controls({"AwbEnable": False})
             camera.set_controls({"ColourGains": camera_colour_gains})
     arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox, wb_blue_spinbox])
 
@@ -1209,8 +1210,6 @@ def switch_hdr_capture():
         max_inactivity_delay = int(max_inactivity_delay / 2)
         if AE_enabled.get():  # Automatic mode
             CurrentExposure = 0
-            if not SimulatedRun and not CameraDisabled:
-                camera.controls.ExposureTime = 0    # maybe will not work, check pag 26 of picamera2 specs
         else:
             if not SimulatedRun and not CameraDisabled:
                 # Since we are in auto exposure mode, retrieve current value to start from there
@@ -1218,6 +1217,8 @@ def switch_hdr_capture():
                 CurrentExposure = metadata["ExposureTime"]
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
+        if not SimulatedRun and not CameraDisabled:
+            camera.set_controls({"AeEnable": True if CurrentExposure == 0 else False})
         SessionData["CurrentExposure"] = CurrentExposure
         exposure_value.set(CurrentExposure)
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
@@ -1418,13 +1419,14 @@ def adjust_hdr_bracket():
     if SimulatedRun or CameraDisabled:
         aux_current_exposure = 20
     else:
-        camera.set_controls({"ExposureTime": 0})    # Set automatic exposure, 7 shots allowed to catch up
+        camera.set_controls({"AeEnable": True})
         for i in range(1, dry_run_iterations * 2):
             camera.capture_image("main")
 
         # Since we are in auto exposure mode, retrieve current value to start from there
         metadata = camera.capture_metadata()
         aux_current_exposure = int(metadata["ExposureTime"]/1000)
+        camera.set_controls({"AeEnable": False})
 
     if aux_current_exposure != PreviousCurrentExposure or force_adjust_hdr_bracket:  # Adjust only if auto exposure changes
         logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
@@ -2529,6 +2531,7 @@ def load_session_data():
                         auto_exp_wait_checkbox.config(state=DISABLED)
                     if not SimulatedRun and not CameraDisabled:
                         camera.controls.ExposureTime = int(aux)
+                        camera.set_controls({"AeEnable": AE_enabled.get()})
                     exposure_value.set(aux/1000)
                 if 'ExposureAdaptPause' in SessionData:
                     if isinstance(SessionData["ExposureAdaptPause"], bool):
@@ -2537,8 +2540,6 @@ def load_session_data():
                         aux = eval(SessionData["ExposureAdaptPause"])
                     auto_exposure_change_pause.set(aux)
                     auto_exp_wait_checkbox.config(state=NORMAL if exposure_value.get() == 0 else DISABLED)
-                    ###if auto_exposure_change_pause.get():
-                    ###    auto_exp_wait_checkbox.select()
                 if 'CurrentAwbAuto' in SessionData:
                     if isinstance(SessionData["CurrentAwbAuto"], bool):
                         AWB_enabled.set(SessionData["CurrentAwbAuto"])
@@ -2547,17 +2548,9 @@ def load_session_data():
                     wb_blue_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     awb_red_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
-                    ###awb_blue_wait_checkbox.config(state=NORMAL if AWB_enabled.get() else DISABLED)
-                    ###arrange_widget_state(AWB_enabled.get(), [wb_blue_btn, wb_blue_spinbox])
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AwbEnable": AWB_enabled.get()})
                     arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox])
-                    '''
-                    if AWB_enabled.get():
-                        wb_red_btn.config(fg="white", text="AUTO AWB Red:")
-                        wb_blue_btn.config(fg="white", text="AUTO AWB Blue:")
-                    else:
-                        wb_red_btn.config(fg="black", text="AWB Red:")
-                        wb_blue_btn.config(fg="black", text="AWB Blue:")
-                    '''
                 if 'AwbPause' in SessionData:
                     AwbPause = eval(SessionData["AwbPause"])
                     if AwbPause:
@@ -2677,13 +2670,22 @@ def PiCam2_configure():
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
-    camera.set_controls({"ExposureTime": 0})    # Auto exposure by default, overridden by configuration if any
+    # WB controls
+    camera.set_controls({"AwbEnable": False})
+    #camera.set_controls({"AwbMode": AwbModeEnum.Auto})
+    camera.set_controls({"ColourGains": (2.2, 2.2)})  # 0.0 to 32.0, Red 2.2, Blue 2.2 seem to be OK
+    # Exposure controls
+    camera.set_controls({"AeEnable": True})
+    camera.set_controls({"AeConstraintMode": controls.AeConstraintModeEnum.Normal})  # Normal, Highlight, Shadows, Custom
+    camera.set_controls({"AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted}) # CentreWeighted, Spot, Matrix, Custom
+    camera.set_controls({"AeExposureMode": controls.AeExposureModeEnum.Normal})   # Normal, Long, Short, Custom
+    # Other generic controls
     camera.set_controls({"AnalogueGain": 1.0})
-    camera.set_controls({"AwbEnable": 0})
-    camera.set_controls({"ColourGains": (2.2, 2.2)})  # Red 2.2, Blue 2.2 seem to be OK
-    # In PiCamera2, '1' is the standard sharpness
-    # It can be a floating point number from 0.0 to 16.0
-    camera.set_controls({"Sharpness": 1})   # Set default, overridden by configuration if any
+    camera.set_controls({"Contrast": 1})   # 0.0 to 32.0
+    camera.set_controls({"Brightness": 0})  # -1.0 to 1.0
+    camera.set_controls({"Saturation": 1})   # Color saturation, 0.0 to 32.0
+    #camera.set_controls({"NoiseReductionMode": draft.NoiseReductionModeEnum.HighQuality})   # Off, Fast, HighQuality
+    camera.set_controls({"Sharpness": 1})   # It can be a floating point number from 0.0 to 16.0
     # draft.NoiseReductionModeEnum.HighQuality not defined, yet
     # However, looking at the PiCamera2 Source Code, it seems the default value for still configuration
     # is already HighQuality, so not much to worry about
@@ -2920,22 +2922,18 @@ def value_validation(new_value, widget, min, max, is_double=False):
 
 def exposure_spinbox_auto():
     if AE_enabled.get():  # Not in automatic mode, activate auto
-        SessionData["CurrentExposure"] = 0
-        exposure_value.set(0)
-        ###exposure_btn.config(fg="white", text="AUTO Exposure:")
+        aux = 0
         auto_exp_wait_checkbox.config(state=NORMAL)
-        # Do not set 'exposure_value', since ti will be updated dynamically with the current AE value from camera
-        if not SimulatedRun and not CameraDisabled:
-            camera.controls.ExposureTime = 0  # Set auto exposure (maybe will not work, check pag 26 of picamera2 specs)
     else:
-        if not SimulatedRun and not CameraDisabled:
-            # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
-            # Since we update values in the UI regularly, use those.
-            aux = int(exposure_value.get() * 1000)
-            camera.set_controls({"ExposureTime": aux})
-        else:
-            aux = 3500  # Arbitrary Value for Simulated run
-        SessionData["CurrentExposure"] = aux
+        aux = int(exposure_value.get() * 1000)
+
+    if not SimulatedRun and not CameraDisabled:
+        # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
+        # Since we update values in the UI regularly, use those.
+        camera.set_controls({"AeEnable": True if aux == 0 else False})
+        camera.set_controls({"ExposureTime": aux})
+
+    SessionData["CurrentExposure"] = aux
 
     auto_exp_wait_checkbox.config(state=NORMAL if AE_enabled.get() else DISABLED)
     arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
@@ -3439,6 +3437,37 @@ def create_widgets():
         as_tooltips.add(full_ui_checkbox, "Toggle between full/restricted user interface")
         bottom_area_row += 1
 
+        # Statictics sub-frame
+        statistics_frame = LabelFrame(top_left_area_frame, text='Avrg time (ms)', font=("Arial", FontSize-1))
+        statistics_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=2, pady=1, ipadx=5, ipady=5, sticky='NSEW')
+        # Average Time to save image
+        time_save_image_label = tk.Label(statistics_frame, text='Save:', font=("Arial", FontSize-1))
+        time_save_image_label.grid(row=0, column=0, padx=6, sticky=E)
+        time_save_image_value = tk.IntVar(value=0)
+        time_save_image_value_label = tk.Label(statistics_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
+        time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
+        # Average Time to display preview
+        time_preview_display_label = tk.Label(statistics_frame, text='Prvw:', font=("Arial", FontSize-1))
+        time_preview_display_label.grid(row=1, column=0, padx=6, sticky=E)
+        time_preview_display_value = tk.IntVar(value=0)
+        time_preview_display_value_label = tk.Label(statistics_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
+        time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
+        # Average Time spent waiting for AWB to adjust
+        time_awb_label = tk.Label(statistics_frame, text='AWB:', font=("Arial", FontSize-1))
+        time_awb_label.grid(row=2, column=0, padx=6, sticky=E)
+        time_awb_value = tk.IntVar(value=0)
+        time_awb_value_label = tk.Label(statistics_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
+        time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
+        # Average Time spent waiting for AE to adjust
+        time_autoexp_label = tk.Label(statistics_frame, text='AE:', font=("Arial", FontSize-1))
+        time_autoexp_label.grid(row=3, column=0, padx=6, sticky=E)
+        time_autoexp_value = tk.IntVar(value=0)
+        time_autoexp_value_label = tk.Label(statistics_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
+        time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
+        bottom_area_row += 1
+
+
+
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
@@ -3624,7 +3653,7 @@ def create_widgets():
         exp_wb_auto_label = tk.Label(exp_wb_frame, text='Auto', font=("Arial", FontSize-1))
         exp_wb_auto_label.grid(row=exp_wb_row, column=3, padx=5, pady=1)
 
-        catch_up_delay_label = tk.Label(exp_wb_frame, text='Catch-up\ndelay', font=("Arial", FontSize-1))
+        catch_up_delay_label = tk.Label(exp_wb_frame, text='Match\nwait', font=("Arial", FontSize-1))
         catch_up_delay_label.grid(row=exp_wb_row, column=4, padx=5, pady=1)
         exp_wb_row += 1
 
@@ -4001,35 +4030,6 @@ def create_widgets():
                           activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
         Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
-
-        # Experimental statictics sub-frame
-        experimental_stats_frame = LabelFrame(experimental_frame, text='Average times (ms)', font=("Arial", FontSize-1))
-        experimental_stats_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
-        # Average Time to save image
-        time_save_image_label = tk.Label(experimental_stats_frame, text='Save:', font=("Arial", FontSize-1))
-        time_save_image_label.grid(row=0, column=0, padx=6, sticky=E)
-        time_save_image_value = tk.IntVar(value=0)
-        time_save_image_value_label = tk.Label(experimental_stats_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
-        time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
-        # Average Time to display preview
-        time_preview_display_label = tk.Label(experimental_stats_frame, text='Prvw:', font=("Arial", FontSize-1))
-        time_preview_display_label.grid(row=1, column=0, padx=6, sticky=E)
-        time_preview_display_value = tk.IntVar(value=0)
-        time_preview_display_value_label = tk.Label(experimental_stats_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
-        time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
-        # Average Time spent waiting for AWB to adjust
-        time_awb_label = tk.Label(experimental_stats_frame, text='AWB:', font=("Arial", FontSize-1))
-        time_awb_label.grid(row=2, column=0, padx=6, sticky=E)
-        time_awb_value = tk.IntVar(value=0)
-        time_awb_value_label = tk.Label(experimental_stats_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
-        time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
-        # Average Time spent waiting for AE to adjust
-        time_autoexp_label = tk.Label(experimental_stats_frame, text='AE:', font=("Arial", FontSize-1))
-        time_autoexp_label.grid(row=3, column=0, padx=6, sticky=E)
-        time_autoexp_value = tk.IntVar(value=0)
-        time_autoexp_value_label = tk.Label(experimental_stats_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
-        time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
-
 
 
 
