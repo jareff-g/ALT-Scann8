@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.33"
+__version__ = "1.9.34"
 __date__ = "2024-02-20"
-__version_highlight__ = "Fix error when creating IntVars for stats"
+__version_highlight__ = "Save frames using PiCamera2 method whenever possible"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -650,13 +650,11 @@ def wb_spinbox_auto():
     else:
         awb_red_wait_checkbox.config(state=DISABLED)
         if not SimulatedRun and not CameraDisabled:
-            # Retrieve current gain values from Camera
-            metadata = camera.capture_metadata()
-            camera_colour_gains = metadata["ColourGains"]
-            wb_red_value.set(round(camera_colour_gains[0],1))
-            wb_blue_value.set(round(camera_colour_gains[1],1))
+            # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
+            # Since we update values in the UI regularly, use those.
+            camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
             camera.set_controls({"AwbEnable": 0})
-
+            camera.set_controls({"ColourGains": camera_colour_gains})
     arrange_widget_state(AWB_enabled.get(), [wb_red_btn, wb_red_spinbox, wb_blue_spinbox])
 
 
@@ -1047,25 +1045,34 @@ def capture_save_thread(queue, event, id):
             logging.error(f"Invalid message type received: {type}")
         frame_idx = message[2]
         hdr_idx = message[3]
-        if is_jpg or negative_image.get() and not is_dng:  # Plain file save
-            if type == REQUEST_TOKEN:
-                captured_image = request.make_image('main')
-                request.release()
-            if negative_image.get():
-                captured_image = reverse_image(captured_image)
+        if is_dng:
             if hdr_idx > 1:  # Hdr frame 1 has standard filename
-                logging.debug("Saving HDR frame n.%i", hdr_idx)
-                captured_image.save(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()), quality=95)
-            else:
-                captured_image.save(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()), quality=95)
-        else:   # DNG only
-            if hdr_idx > 1:  # Hdr frame 1 has standard filename
-                    request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
-            else:   # Non HDR
-                    request.save_dng(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+                request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+            else:  # Non HDR
+                request.save_dng(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
             request.release()
+            logging.debug("Thread %i saved request DNG image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+        else:
+            #if is_jpg or negative_image.get() and not is_dng:  # Plain file save
+            if negative_image.get():
+                if type == REQUEST_TOKEN:
+                    captured_image = request.make_image('main')
+                    request.release()
+                captured_image = reverse_image(captured_image)
+                if hdr_idx > 1:  # Hdr frame 1 has standard filename
+                    logging.debug("Saving HDR frame n.%i", hdr_idx)
+                    captured_image.save(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()), quality=95)
+                else:
+                    captured_image.save(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()), quality=95)
+                logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+            else:
+                if hdr_idx > 1:  # Hdr frame 1 has standard filename
+                    request.save('main', HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+                else:  # Non HDR
+                    request.save('main', FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+                request.release()
+                logging.debug("Thread %i saved request image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
 
-        logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -1495,20 +1502,24 @@ def capture_hdr(mode):
                 # captured_image = request.make_image('main')
                 if DisableThreads:  # Save image in main loop
                     draw_preview_image(captured_image, idx)  # Display preview
+                    curtime = time.time()
                     if negative_image.get():
                         captured_image = reverse_image(captured_image)
+                        request.release()  # release request, already have image, don't need it for non-DNG
                         if idx > 1:  # Hdr frame 1 has standard filename
                             captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
                                                                            file_type_dropdown_selected.get()), quality=95)
                         else:
                             captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()),
                                                 quality=95)
+                        logging.debug("Capture hdr, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
                     else:   # id non-negative, save request as it is more efficient, specially for PNG
                         if idx > 1:  # Hdr frame 1 has standard filename
                             request.save('main', HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                         else:
                             request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
-                    request.release()  # release request, already have image, don't need it for non-DNG
+                        request.release()  # release request, already have image, don't need it for non-DNG
+                        logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
                 else:   # send image to threads
                     request.release()  # release request, already have image, don't need it for non-DNG
                     # Having the preview handled by a thread is not only not efficient, but algo quite sluggish
@@ -1528,11 +1539,13 @@ def capture_hdr(mode):
                 capture_display_queue.put(queue_item)
                 """
                 draw_preview_image(captured_image, idx)  # Display preview
+                curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
                     request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                 else:  # Non HDR
                     request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
                 request.release()
+                logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         idx += idx_inc
     if HdrMergeInPlace and not is_dng:
         # Perform merge of the HDR image list
@@ -1547,10 +1560,11 @@ def capture_hdr(mode):
 def capture_single(mode):
     global CurrentFrame
     global capture_display_queue, capture_save_queue
+    global total_wait_time_save_image
 
     is_dng = file_type_dropdown_selected.get() == 'dng'
     if not DisableThreads:
-        if not negative_image.get() or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
+        if not negative_image.get(): # or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
             request = camera.capture_request(capture_config)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             captured_image = request.make_image('main')
@@ -1586,6 +1600,7 @@ def capture_single(mode):
             captured_image = reverse_image(captured_image)
             draw_preview_image(captured_image, 0)
             captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
+            logging.debug("Capture single, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         else:
             draw_preview_image(captured_image, 0)
             if is_dng:
@@ -1593,7 +1608,7 @@ def capture_single(mode):
             else:
                 request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
             request.release()
-        logging.debug("Capture loop, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+            logging.debug("Capture single, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -2914,14 +2929,13 @@ def exposure_spinbox_auto():
             camera.controls.ExposureTime = 0  # Set auto exposure (maybe will not work, check pag 26 of picamera2 specs)
     else:
         if not SimulatedRun and not CameraDisabled:
-            # Since we are in auto exposure mode, retrieve current value to start from there
-            metadata = camera.capture_metadata()
-            aux = metadata["ExposureTime"]
+            # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
+            # Since we update values in the UI regularly, use those.
+            aux = int(exposure_value.get() * 1000)
+            camera.set_controls({"ExposureTime": aux})
         else:
             aux = 3500  # Arbitrary Value for Simulated run
         SessionData["CurrentExposure"] = aux
-        exposure_value.set(aux / 1000)
-        ###exposure_btn.config(fg="black", text="Exposure:")
 
     auto_exp_wait_checkbox.config(state=NORMAL if AE_enabled.get() else DISABLED)
     arrange_widget_state(AE_enabled.get(), [exposure_btn, exposure_spinbox])
@@ -3989,29 +4003,29 @@ def create_widgets():
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
 
         # Experimental statictics sub-frame
-        experimental_stats_frame = LabelFrame(experimental_frame, text='Averages (ms)', font=("Arial", FontSize-1))
+        experimental_stats_frame = LabelFrame(experimental_frame, text='Average times (ms)', font=("Arial", FontSize-1))
         experimental_stats_frame.pack(side=LEFT, padx=5, pady=2, ipady=5, fill='both', expand=True)
         # Average Time to save image
         time_save_image_label = tk.Label(experimental_stats_frame, text='Save:', font=("Arial", FontSize-1))
-        time_save_image_label.grid(row=0, column=0, padx=2, sticky=E)
+        time_save_image_label.grid(row=0, column=0, padx=6, sticky=E)
         time_save_image_value = tk.IntVar(value=0)
         time_save_image_value_label = tk.Label(experimental_stats_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
         time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
         # Average Time to display preview
         time_preview_display_label = tk.Label(experimental_stats_frame, text='Prvw:', font=("Arial", FontSize-1))
-        time_preview_display_label.grid(row=1, column=0, padx=2, sticky=E)
+        time_preview_display_label.grid(row=1, column=0, padx=6, sticky=E)
         time_preview_display_value = tk.IntVar(value=0)
         time_preview_display_value_label = tk.Label(experimental_stats_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
         time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
         # Average Time spent waiting for AWB to adjust
         time_awb_label = tk.Label(experimental_stats_frame, text='AWB:', font=("Arial", FontSize-1))
-        time_awb_label.grid(row=2, column=0, padx=2, sticky=E)
+        time_awb_label.grid(row=2, column=0, padx=6, sticky=E)
         time_awb_value = tk.IntVar(value=0)
         time_awb_value_label = tk.Label(experimental_stats_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
         time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
         # Average Time spent waiting for AE to adjust
         time_autoexp_label = tk.Label(experimental_stats_frame, text='AE:', font=("Arial", FontSize-1))
-        time_autoexp_label.grid(row=3, column=0, padx=2, sticky=E)
+        time_autoexp_label.grid(row=3, column=0, padx=6, sticky=E)
         time_autoexp_value = tk.IntVar(value=0)
         time_autoexp_value_label = tk.Label(experimental_stats_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
         time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
