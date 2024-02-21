@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.35"
+__version__ = "1.9.36"
 __date__ = "2024-02-20"
-__version_highlight__ = "Improve automatic exposure by adding additional PiCam2 controls"
+__version_highlight__ = "Added in UI 3 new PiCam2 controls: AeConstraintMode, AeMeteringMode, AeExposureMode"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -245,6 +245,40 @@ PreviousGainRed = 1
 PreviousGainBlue = 1
 ManualScanEnabled = False
 CameraDisabled = False  # To allow testing scanner without a camera installed
+
+# Dictionaries for additional exposure control with PiCamera2
+if not SimulatedRun and not CameraDisabled:
+    AeConstraintMode_dict = {
+        "Normal": controls.AeConstraintModeEnum.Normal,
+        "Highlight": controls.AeConstraintModeEnum.Highlight,
+        "Shadows": controls.AeConstraintModeEnum.Shadows
+    }
+    AeMeteringMode_dict = {
+        "CentreWeighted": controls.AeMeteringModeEnum.CentreWeighted,
+        "Spot": controls.AeMeteringModeEnum.Spot,
+        "Matrix": controls.AeMeteringModeEnum.Matrix
+    }
+    AeExposureMode_dict = {
+        "Normal": controls.AeExposureModeEnum.Normal,
+        "Long": controls.AeExposureModeEnum.Long,
+        "Short": controls.AeExposureModeEnum.Short
+    }
+else:
+    AeConstraintMode_dict = {
+        "Normal": 1,
+        "Highlight": 2,
+        "Shadows": 3
+    }
+    AeMeteringMode_dict = {
+        "CentreWeighted": 1,
+        "Spot": 2,
+        "Matrix": 3
+    }
+    AeExposureMode_dict = {
+        "Normal": 1,
+        "Long": 2,
+        "Short": 3
+    }
 
 # Statistical information about where time is spent (expert mode only)
 total_wait_time_save_image = 0
@@ -2562,6 +2596,22 @@ def load_session_data():
                 if 'GainBlue' in SessionData:
                     aux = float(SessionData["GainBlue"])
                     wb_blue_value.set(round(aux,1))
+                # Recover miscellaneous PiCamera2 controls
+                if "AeConstraintMode" in SessionData:
+                    aux = SessionData["AeConstraintMode"]
+                    AeConstraintMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[aux]})
+                if "AeMeteringMode" in SessionData:
+                    aux = SessionData["AeMeteringMode"]
+                    AeMeteringMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[aux]})
+                if "AeExposureMode" in SessionData:
+                    aux = SessionData["AeExposureMode"]
+                    AeExposureMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeExposureMode": AeExposureMode_dict[aux]})
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = int(SessionData["MinFrameSteps"])
@@ -2754,7 +2804,7 @@ def create_main_window():
         app_height = PreviewHeight + 50
         plotter_height -= 55
     if ExpertMode or ExperimentalMode:
-        app_height += 220 if BigSize else 170
+        app_height += 290 if BigSize else 230
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -3001,6 +3051,30 @@ def match_wait_margin_selection():
 
 def match_wait_margin_validation(new_value):
     return value_validation(new_value, match_wait_margin_spinbox, 0, 100)
+
+
+def set_AeConstraintMode(selected):
+    global AeConstraintMode_dict
+    SessionData["AeConstraintMode"] = selected
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[selected]})
+    print(f"AeConstraintMode: {selected}")
+
+
+def set_AeMeteringMode(selected):
+    global AeMeteringMode_dict
+    SessionData["AeMeteringMode"] = selected
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[selected]})
+    print(f"AeMeteringMode: {selected}")
+
+
+def set_AeExposureMode(selected):
+    global AeExposureMode_dict
+    SessionData["AeExposureMode"] = selected
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"AeExposureMode": AeExposureMode_dict[selected]})
+    print(f"AeExposureMode: {selected}")
 
 
 def steps_per_frame_auto():
@@ -3277,6 +3351,7 @@ def create_widgets():
     global AE_enabled, AWB_enabled
     global expert_frame, experimental_frame
     global time_save_image_value, time_preview_display_value, time_awb_value, time_autoexp_value
+    global AeConstraintMode_dropdown_selected, AeMeteringMode_dropdown_selected, AeExposureMode_dropdown_selected
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -3651,20 +3726,20 @@ def create_widgets():
         exp_wb_row = 0
 
         exp_wb_auto_label = tk.Label(exp_wb_frame, text='Auto', font=("Arial", FontSize-1))
-        exp_wb_auto_label.grid(row=exp_wb_row, column=3, padx=5, pady=1)
+        exp_wb_auto_label.grid(row=exp_wb_row, column=3, pady=1)
 
         catch_up_delay_label = tk.Label(exp_wb_frame, text='Match\nwait', font=("Arial", FontSize-1))
-        catch_up_delay_label.grid(row=exp_wb_row, column=4, padx=5, pady=1)
+        catch_up_delay_label.grid(row=exp_wb_row, column=4, pady=1)
         exp_wb_row += 1
 
         # Automatic exposure
         exposure_label = tk.Label(exp_wb_frame, text='Exposure:', font=("Arial", FontSize-1))
-        exposure_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
+        exposure_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
 
         exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = DynamicSpinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
                                       from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1), readonlybackground='pale green')
-        exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1)
+        exposure_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
         as_tooltips.add(exposure_spinbox, "When manual exposure enabled, select wished exposure.")
@@ -3687,7 +3762,7 @@ def create_widgets():
 
         # Automatic White Balance red
         wb_red_label = tk.Label(exp_wb_frame, text='WB Red:', font=("Arial", FontSize-1))
-        wb_red_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
+        wb_red_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
         wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='pale green',
@@ -3731,7 +3806,7 @@ def create_widgets():
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
         match_wait_margin_label = tk.Label(exp_wb_frame, text='Match margin (%):', font=("Arial", FontSize-1))
-        match_wait_margin_label.grid(row=exp_wb_row, column=0, padx=5, pady=1, sticky=E)
+        match_wait_margin_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
         match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8, readonlybackground='pale green',
@@ -3741,6 +3816,48 @@ def create_widgets():
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_wait_margin_validation_cmd, '%P'))
         as_tooltips.add(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
         match_wait_margin_spinbox.bind("<FocusOut>", lambda event: match_wait_margin_selection())
+        exp_wb_row+= 1
+
+        # Miscelaneous exposure controls from PiCamera2 - AeConstraintMode
+        AeConstraintMode_dropdown_selected = tk.StringVar()
+        AeConstraintMode_dropdown_selected.set("Normal")  # Set the initial value
+        AeConstraintMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize-1))
+        AeConstraintMode_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
+        AeConstraintMode_dropdown = OptionMenu(exp_wb_frame,
+                                         AeConstraintMode_dropdown_selected, *AeConstraintMode_dict.keys(), command=set_AeConstraintMode)
+        AeConstraintMode_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
+        AeConstraintMode_dropdown.grid(row=exp_wb_row, columnspan=4, column=1, pady=1, sticky=W)
+        # AeConstraintMode_dropdown.config(state=DISABLED)
+        as_tooltips.add(AeConstraintMode_dropdown, "Sets the constraint mode of the AEC/AGC algorithm.")
+        exp_wb_row+= 1
+
+        # Miscelaneous exposure controls from PiCamera2 - AeMeteringMode
+        #camera.set_controls({"AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted})  # CentreWeighted, Spot, Matrix, Custom
+        AeMeteringMode_dropdown_selected = tk.StringVar()
+        AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
+        AeMeteringMode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize-1))
+        AeMeteringMode_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
+        AeMeteringMode_dropdown = OptionMenu(exp_wb_frame,
+                                         AeMeteringMode_dropdown_selected, *AeMeteringMode_dict.keys(), command=set_AeMeteringMode)
+        AeMeteringMode_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
+        AeMeteringMode_dropdown.grid(row=exp_wb_row, columnspan=4, column=1, pady=1, sticky=W)
+        # AeMeteringMode_dropdown.config(state=DISABLED)
+        as_tooltips.add(AeMeteringMode_dropdown, "Sets the metering mode of the AEC/AGC algorithm.")
+        exp_wb_row+= 1
+
+        # Miscelaneous exposure controls from PiCamera2 - AeExposureMode
+        #camera.set_controls({"AeExposureMode": controls.AeExposureModeEnum.Normal})  # Normal, Long, Short, Custom
+        AeExposureMode_dropdown_selected = tk.StringVar()
+        AeExposureMode_dropdown_selected.set("Normal")  # Set the initial value
+        AeExposureMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize-1))
+        AeExposureMode_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
+        AeExposureMode_dropdown = OptionMenu(exp_wb_frame,
+                                         AeExposureMode_dropdown_selected, *AeExposureMode_dict.keys(), command=set_AeExposureMode)
+        AeExposureMode_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
+        AeExposureMode_dropdown.grid(row=exp_wb_row, columnspan=4, column=1, pady=1, sticky=W)
+        # AeExposureMode_dropdown.config(state=DISABLED)
+        as_tooltips.add(AeExposureMode_dropdown, "Sets the exposure mode of the AEC/AGC algorithm.")
+        exp_wb_row+= 1
 
         # Display markers for film hole reference
         film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
