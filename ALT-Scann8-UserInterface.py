@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.36"
-__date__ = "2024-02-20"
-__version_highlight__ = "Added in UI 3 new PiCam2 controls: AeConstraintMode, AeMeteringMode, AeExposureMode"
+__version__ = "1.9.37"
+__date__ = "2024-02-22"
+__version_highlight__ = "Various bugfixes anf code cleanup"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -170,7 +170,6 @@ FramesPerMinute = 0
 FramesToGo = 0
 RPiTemp = 0
 last_temp = 1  # Needs to be different from RPiTemp the first time
-TempInFahrenheit = False
 LastTempInFahrenheit = False
 save_bg = 'gray'
 save_fg = 'black'
@@ -178,8 +177,8 @@ ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
 simulated_images_in_list = 0
-FilmHoleY1 = 260 if BigSize else 210
-FilmHoleY2 = 260 if BigSize else 210
+FilmHoleY1 = 246 if BigSize else 196
+FilmHoleY2 = 246 if BigSize else 196
 
 # Commands (RPI to Arduino)
 CMD_VERSION_ID = 1
@@ -240,7 +239,6 @@ MinPT = 800
 Tolerance_AE = 8000
 Tolerance_AWB = 1
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
-AwbPause = False   # by default (non-expert) we wait for camera to stabilize when AWB changes
 PreviousGainRed = 1
 PreviousGainBlue = 1
 ManualScanEnabled = False
@@ -263,6 +261,14 @@ if not SimulatedRun and not CameraDisabled:
         "Long": controls.AeExposureModeEnum.Long,
         "Short": controls.AeExposureModeEnum.Short
     }
+    AwbMode_dict = {
+    "Auto": controls.AwbModeEnum.Auto,
+    "Tungsten": controls.AwbModeEnum.Tungsten,
+    "Fluorescent": controls.AwbModeEnum.Fluorescent,
+    "Indoor": controls.AwbModeEnum.Indoor,
+    "Daylight": controls.AwbModeEnum.Daylight,
+    "Cloudy": controls.AwbModeEnum.Cloudy
+    }
 else:
     AeConstraintMode_dict = {
         "Normal": 1,
@@ -278,6 +284,14 @@ else:
         "Normal": 1,
         "Long": 2,
         "Short": 3
+    }
+    AwbMode_dict = {
+    "Auto": 1,
+    "Tungsten": 2,
+    "Fluorescent": 3,
+    "Indoor": 4,
+    "Daylight": 5,
+    "Cloudy": 6
     }
 
 # Statistical information about where time is spent (expert mode only)
@@ -319,8 +333,6 @@ hdr_rev_exp_list = []
 HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 force_adjust_hdr_bracket = False
-HdrBracketAuto = False
-HdrMergeInPlace = False
 hdr_auto_bracket_frames = 8    # Every n frames, bracket is recalculated
 
 # *** Simulated sensor modes to ellaborate resolution list
@@ -387,12 +399,7 @@ SessionData = {
 # ********************************************************
 
 def exit_app():  # Exit Application
-    global win
-    global SimulatedRun
-    global camera
-    global PreviewMode
     global ExitingApp
-    global onesec_after, arduino_after
 
     win.config(cursor="watch")
     win.update()
@@ -441,9 +448,6 @@ def exit_app():  # Exit Application
 
 def set_free_mode():
     global FreeWheelActive
-    global save_bg, save_fg
-    global SimulatedRun
-    global Free_btn
 
     if not FreeWheelActive:
         Free_btn.config(text='Lock Reels', bg='red', fg='white', relief=SUNKEN)
@@ -471,10 +475,6 @@ def set_auto_stop_enabled():
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global FocusZoomActive
-    global save_bg, save_fg
-    global SimulatedRun
-    global ZoomSize
-    global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
 
     if real_time_zoom.get():
         real_time_zoom_checkbox.config(fg="white")  # Change background color and text color when checked
@@ -495,30 +495,28 @@ def set_focus_zoom():
     FocusZoomActive = not FocusZoomActive
 
     # Enable disable buttons for focus move
-    if ExpertMode:
-        focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-        focus_up_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-        focus_dn_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-        focus_rt_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-        focus_plus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-        focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_up_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_dn_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_rt_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_plus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
 
 def adjust_focus_zoom():
-    global ZoomSize
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
                                            (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
 
 
 def set_focus_up():
-    global FocusZoomPosX, FocusZoomPosY
+    global FocusZoomPosY
     if FocusZoomPosY >= 0.05:
         FocusZoomPosY = round(FocusZoomPosY - 0.05, 2)
         adjust_focus_zoom()
         logging.debug("Zoom up (%.2f,%.2f) (%.2f,%.2f)", FocusZoomPosX, FocusZoomPosY, FocusZoomFactorX, FocusZoomFactorY)
 
 def set_focus_left():
-    global FocusZoomPosX, FocusZoomPosY
+    global FocusZoomPosX
     if FocusZoomPosX >= 0.05:
         FocusZoomPosX = round(FocusZoomPosX - 0.05, 2)
         adjust_focus_zoom()
@@ -526,7 +524,7 @@ def set_focus_left():
 
 
 def set_focus_right():
-    global FocusZoomPosX, FocusZoomPosY
+    global FocusZoomPosX
     if FocusZoomPosX <= (1-(FocusZoomFactorX - 0.05)):
         FocusZoomPosX = round(FocusZoomPosX + 0.05, 2)
         adjust_focus_zoom()
@@ -534,7 +532,7 @@ def set_focus_right():
 
 
 def set_focus_down():
-    global FocusZoomPosX, FocusZoomPosY
+    global FocusZoomPosY
     if FocusZoomPosY <= (1-(FocusZoomFactorY - 0.05)):
         FocusZoomPosY = round(FocusZoomPosY + 0.05, 2)
         adjust_focus_zoom()
@@ -578,9 +576,6 @@ def set_focus_minus():
 
 def set_new_folder():
     global CurrentDir, CurrentFrame
-    global SimulatedRun
-    global folder_frame_target_dir
-    global Scanned_Images_number_str
 
     requested_dir = ""
     success = False
@@ -620,7 +615,6 @@ def set_new_folder():
 
 def set_existing_folder():
     global CurrentDir, CurrentFrame
-    global SimulatedRun
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
@@ -663,14 +657,7 @@ def set_existing_folder():
         SessionData["CurrentDir"] = str(CurrentDir)
 
 
-def wb_spinbox_auto():
-    global wb_red_spinbox
-    global wb_blue_spinbox
-    global auto_wb_wait_btn
-    global colour_gains_auto_btn, awb_frame
-    global colour_gains_red_btn_plus, colour_gains_red_btn_minus
-    global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
-
+def set_auto_wb():
     if not ExpertMode:
         return
 
@@ -696,15 +683,11 @@ def wb_spinbox_auto():
 
 
 def auto_white_balance_change_pause_selection():
-    global auto_white_balance_change_pause
-    global AwbPause
-    AwbPause = auto_white_balance_change_pause.get()
-    SessionData["AwbPause"] = str(AwbPause)
+    SessionData["AwbPause"] = auto_white_balance_change_pause.get()
 
 
 def Manual_scan_activated_selection():
-    global ManualScanEnabled, Manual_scan_activated
-    global manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn, manual_scan_take_snap_btn
+    global ManualScanEnabled
     ManualScanEnabled = Manual_scan_activated.get()
     manual_scan_advance_fraction_5_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
     manual_scan_advance_fraction_20_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
@@ -712,7 +695,7 @@ def Manual_scan_activated_selection():
 
 
 def manual_scan_advance_frame_fraction(steps):
-    if not ExpertMode:
+    if not ExperimentalMode:
         return
     if not SimulatedRun:
         send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
@@ -729,7 +712,7 @@ def manual_scan_advance_frame_fraction_20():
 
 
 def manual_scan_take_snap():
-    if not ExpertMode:
+    if not ExperimentalMode:
         return
     if not SimulatedRun:
         capture('manual')
@@ -742,7 +725,6 @@ def manual_scan_take_snap():
 
 def rwnd_speed_down():
     global rwnd_speed_delay
-    global rwnd_speed_control_delay
 
     if not SimulatedRun:
         send_arduino_command(CMD_INCREASE_WIND_SPEED)
@@ -754,7 +736,6 @@ def rwnd_speed_down():
 
 def rwnd_speed_up():
     global rwnd_speed_delay
-    global rwnd_speed_control_delay
 
     if not SimulatedRun:
         send_arduino_command(CMD_DECREASE_WIND_SPEED)
@@ -772,14 +753,7 @@ def frame_extra_steps_selection():
 
 
 def button_status_change_except(except_button, active):
-    global Free_btn, SingleStep_btn, Snapshot_btn, AdvanceMovie_btn, RetreatMovie_btn
-    global Rewind_btn, FastForward_btn, Start_btn
-    global Start_btn, Exit_btn
-    global film_type_S8_rb, film_type_R8_rb
-    global hdr_btn
     global button_lock_counter
-    global hdr_capture_active_checkbox
-    global real_time_zoom_checkbox, negative_image_checkbox
 
     if active:
         button_lock_counter += 1
@@ -820,9 +794,10 @@ def button_status_change_except(except_button, active):
             RetreatMovie_btn.config(state=DISABLED if active else NORMAL)
         if except_button != Free_btn:
             Free_btn.config(state=DISABLED if active else NORMAL)
-        if except_button != new_folder_btn:
-            new_folder_btn.config(state=DISABLED if active else NORMAL)
-        hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
+        if except_button != hdr_capture_active_checkbox:
+            hdr_capture_active_checkbox.config(state=DISABLED if active else NORMAL)
+    if except_button != new_folder_btn:
+        new_folder_btn.config(state=DISABLED if active else NORMAL)
     if except_button != real_time_display_checkbox:
         real_time_display_checkbox.config(state=DISABLED if active else NORMAL)
     if except_button != real_time_zoom_checkbox:
@@ -841,9 +816,6 @@ def button_status_change_except(except_button, active):
 
 def advance_movie(from_arduino = False):
     global AdvanceMovieActive
-    global save_bg, save_fg
-    global SimulatedRun
-    global AdvanceMovie_btn
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
@@ -863,9 +835,6 @@ def advance_movie(from_arduino = False):
 
 def retreat_movie():
     global RetreatMovieActive
-    global save_bg, save_fg
-    global SimulatedRun
-    global RetreatMovie_btn
 
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
@@ -885,9 +854,7 @@ def retreat_movie():
 
 def rewind_movie():
     global RewindMovieActive
-    global SimulatedRun
     global RewindErrorOutstanding, RewindEndOutstanding
-    global save_bg, save_fg
 
     if SimulatedRun and RewindMovieActive:  # no callback from Arduino in simulated mode
         RewindEndOutstanding = True
@@ -935,9 +902,6 @@ def rewind_movie():
 
 
 def rewind_loop():
-    global RewindMovieActive
-    global SimulatedRun
-    global RewindErrorOutstanding
 
     if RewindMovieActive:
         # Invoke rewind_loop one more time, as long as rewind is ongoing
@@ -949,9 +913,7 @@ def rewind_loop():
 
 def fast_forward_movie():
     global FastForwardActive
-    global SimulatedRun
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
-    global save_bg, save_fg
 
     if SimulatedRun and FastForwardActive:  # no callback from Arduino in simulated mode
         FastForwardEndOutstanding = True
@@ -997,10 +959,6 @@ def fast_forward_movie():
 
 
 def fast_forward_loop():
-    global FastForwardActive
-    global SimulatedRun
-    global FastForwardErrorOutstanding
-
     if FastForwardActive:
         # Invoke fast_forward_loop one more time, as long as rewind is ongoing
         if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:
@@ -1048,7 +1006,6 @@ def capture_display_thread(queue, event, id):
 
 
 def capture_save_thread(queue, event, id):
-    global CurrentDir
     global ScanStopRequested
     global active_threads
     global total_wait_time_save_image
@@ -1116,10 +1073,7 @@ def capture_save_thread(queue, event, id):
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 def draw_preview_image(preview_image, idx):
-    global draw_capture_canvas
-    global win
     global total_wait_time_preview_display
-    global hdr_view_4_image
 
     curtime = time.time()
 
@@ -1162,7 +1116,6 @@ def capture_single_step():
 
 
 def single_step_movie():
-    global SimulatedRun
     global camera
 
     if not SimulatedRun:
@@ -1178,13 +1131,11 @@ def single_step_movie():
 
 
 def emergency_stop():
-    global SimulatedRun
     if not SimulatedRun:
         send_arduino_command(90)
 
 
 def update_rpi_temp():
-    global SimulatedRun
     global RPiTemp
     if not SimulatedRun:
         file = open('/sys/class/thermal/thermal_zone0/temp', 'r')
@@ -1195,7 +1146,7 @@ def update_rpi_temp():
         RPiTemp = 64.5
 
 def disk_space_available():
-    global CurrentDir, available_space_mb, disk_space_error_to_notify
+    global available_space_mb, disk_space_error_to_notify
 
     if not check_disk_space:
         return True
@@ -1211,8 +1162,7 @@ def disk_space_available():
 
 
 def hdr_set_controls():
-
-    if not ExpertMode:
+    if not ExperimentalMode:
         return
     hdr_viewx4_active_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
     hdr_min_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
@@ -1228,11 +1178,8 @@ def hdr_set_controls():
 
 
 def switch_hdr_capture():
-    global SimulatedRun
-    global hdr_capture_active, HdrCaptureActive, HdrBracketAuto
-    global hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox
+    global HdrCaptureActive
     global max_inactivity_delay
-
 
     HdrCaptureActive = hdr_capture_active.get()
     SessionData["HdrCaptureActive"] = str(HdrCaptureActive)
@@ -1240,7 +1187,7 @@ def switch_hdr_capture():
     hdr_set_controls()
     if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
         max_inactivity_delay = max_inactivity_delay * 2
-        arrange_widget_state(HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
+        arrange_widget_state(hdr_bracket_auto.get(), [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
     else:    # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
         if AE_enabled.get():  # Automatic mode
@@ -1260,7 +1207,7 @@ def switch_hdr_capture():
     logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
 
 def switch_hdr_viewx4():
-    global HdrViewX4Active, hdr_viewx4_active
+    global HdrViewX4Active
     HdrViewX4Active = hdr_viewx4_active.get()
     SessionData["HdrViewX4Active"] = str(HdrViewX4Active)
 
@@ -1274,17 +1221,16 @@ def set_negative_image():
 
 
 def toggle_ui_size():
-    global app_width, app_height
-    global expert_frame, experimental_frame
+    global app_height
 
     if toggle_ui_small.get():
-        app_height -= 220 if BigSize else 170
+        app_height -= 290 if BigSize else 230
         expert_frame.pack_forget()
         experimental_frame.pack_forget()
     else:
-        app_height += 220 if BigSize else 170
-        expert_frame.pack(side=LEFT)
-        experimental_frame.pack(side=LEFT)
+        app_height += 290 if BigSize else 230
+        expert_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
+        experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -1296,10 +1242,6 @@ def toggle_ui_size():
 #  - Color adjustment
 #  - Exposure adjustment
 def set_real_time_display():
-    global win
-    global capture_config, preview_config
-    global real_time_display, Start_btn
-
     if real_time_display.get():
         logging.debug("Real time display enabled")
         real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
@@ -1330,12 +1272,7 @@ def set_real_time_display():
 
 
 def set_s8():
-    global SimulatedRun, ExpertMode
-    global PTLevelS8
-    global MinFrameStepsS8
     global FilmHoleY1, FilmHoleY2
-    global ALT_scann_init_done
-    global film_hole_frame_1, film_hole_frame_2
 
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
@@ -1349,22 +1286,17 @@ def set_s8():
         pt_level_value.set(PTLevel)
         steps_per_frame_value.set(MinFrameSteps)
     # Set reference film holes
-    FilmHoleY1 = 260 if BigSize else 210
-    FilmHoleY2 = 260 if BigSize else 210
-    if ExpertMode:
-        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
-        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=150 if BigSize else 130)
+    FilmHoleY1 = 246 if BigSize else 196
+    FilmHoleY2 = 246 if BigSize else 196
+    film_hole_frame_1.place(x=0, y=FilmHoleY2, height=150 if BigSize else 130)
+    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=150 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
-        if ExpertMode:
-            send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
-            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 def set_r8():
-    global SimulatedRun
-    global PTLevelR8
-    global MinFrameStepsR8
     global film_hole_frame_1, film_hole_frame_2
 
     SessionData["FilmType"] = "R8"
@@ -1379,20 +1311,17 @@ def set_r8():
         pt_level_value.set(PTLevel)
         steps_per_frame_value.set(MinFrameSteps)
     # Set reference film holes
-    FilmHoleY1 = 20 if BigSize else 20
-    FilmHoleY2 = 540 if BigSize else 380
-    if ExpertMode:
-        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=130 if BigSize else 70)
-        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=110 if BigSize else 130)
+    FilmHoleY1 = 6 if BigSize else 6
+    FilmHoleY2 = 526 if BigSize else 366
+    film_hole_frame_1.place(x=0, y=FilmHoleY1, height=130 if BigSize else 70)
+    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=110 if BigSize else 130)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
-        if ExpertMode:
-            send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
-            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
+        send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else MinFrameSteps)
 
 
 def register_frame():
-    global FPM_LastMinuteFrameTimes
     global FPM_StartTime
     global FPM_CalculatedValue
 
@@ -1417,35 +1346,25 @@ def register_frame():
 
 
 def adjust_hdr_bracket_auto():
-    global HdrCaptureActive, HdrBracketAuto, hdr_bracket_auto
-    global hdr_max_exp_spinbox, hdr_min_exp_spinbox
-
     if not HdrCaptureActive:
         return
 
-    HdrBracketAuto = hdr_bracket_auto.get()
-    SessionData["HdrBracketAuto"] = HdrBracketAuto
+    SessionData["HdrBracketAuto"] = hdr_bracket_auto.get()
 
-    arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
+    arrange_widget_state(hdr_bracket_auto.get(), [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
 
 def adjust_merge_in_place():
-    global HdrCaptureActive, HdrMergeInPlace, hdr_merge_in_place
-
     if not HdrCaptureActive:
         return
 
-    HdrMergeInPlace = hdr_merge_in_place.get()
-    SessionData["HdrMergeInPlace"] = HdrMergeInPlace
+    SessionData["HdrMergeInPlace"] = hdr_merge_in_place.get()
 
 
 def adjust_hdr_bracket():
-    global camera, HdrCaptureActive
-    global recalculate_hdr_exp_list, dry_run_iterations
+    global recalculate_hdr_exp_list
     global hdr_best_exp
-    global PreviousCurrentExposure, HdrBracketAuto
-    global hdr_max_exp_spinbox, hdr_min_exp_spinbox
-    global save_bg, save_fg
+    global PreviousCurrentExposure
     global force_adjust_hdr_bracket
 
     if not HdrCaptureActive:
@@ -1477,14 +1396,9 @@ def adjust_hdr_bracket():
 
 
 def capture_hdr(mode):
-    global CurrentFrame
-    global capture_display_queue, capture_save_queue
-    global camera, hdr_exp_list, hdr_rev_exp_list
-    global recalculate_hdr_exp_list, dry_run_iterations
-    global HdrBracketAuto
-    global MergeMertens
+    global recalculate_hdr_exp_list
 
-    if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
+    if hdr_bracket_auto.get() and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
 
     if recalculate_hdr_exp_list:
@@ -1524,7 +1438,7 @@ def capture_hdr(mode):
         # as it is the same exposure as the last capture of the previous one
         perform_dry_run = True
         # For PiCamera2, preview and save to file are handled in asynchronous threads
-        if HdrMergeInPlace and not is_dng:  # For now we do not even try to merge DNG images in place
+        if hdr_merge_in_place.get() and not is_dng:  # For now we do not even try to merge DNG images in place
             captured_image = camera.capture_image("main")    # If merge in place, Capture snapshot (no DNG allowed)
             # Convert Pillow image to NumPy array
             img_np = np.array(captured_image)
@@ -1538,10 +1452,10 @@ def capture_hdr(mode):
                 # Reuse captured_image from preview
                 # captured_image = request.make_image('main')
                 if DisableThreads:  # Save image in main loop
-                    draw_preview_image(captured_image, idx)  # Display preview
                     curtime = time.time()
                     if negative_image.get():
                         captured_image = reverse_image(captured_image)
+                        draw_preview_image(captured_image, idx)  # Display preview
                         request.release()  # release request, already have image, don't need it for non-DNG
                         if idx > 1:  # Hdr frame 1 has standard filename
                             captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
@@ -1551,6 +1465,7 @@ def capture_hdr(mode):
                                                 quality=95)
                         logging.debug("Capture hdr, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
                     else:   # id non-negative, save request as it is more efficient, specially for PNG
+                        draw_preview_image(captured_image, idx)  # Display preview
                         if idx > 1:  # Hdr frame 1 has standard filename
                             request.save('main', HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                         else:
@@ -1558,23 +1473,30 @@ def capture_hdr(mode):
                         request.release()  # release request, already have image, don't need it for non-DNG
                         logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
                 else:   # send image to threads
-                    request.release()  # release request, already have image, don't need it for non-DNG
+                    #request.release()  # release request, already have image, don't need it for non-DNG
                     # Having the preview handled by a thread is not only not efficient, but algo quite sluggish
-                    draw_preview_image(captured_image, idx)
-                    """
-                    # Leave this code commented for now
-                    queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                    capture_display_queue.put(queue_item)
-                    """
                     if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
-                        queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                        capture_save_queue.put(queue_item)
-                        logging.debug("Saving frame %i", CurrentFrame)
+                        if not negative_image.get():  # or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
+                            """
+                            draw_preview_image(captured_image, idx)
+                            save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, idx))
+                            capture_save_queue.put(save_queue_item)
+                            logging.debug("Queueing frame request %i to be saved", CurrentFrame)
+                            """
+                            # In HDR we cannot really pass a request to the thread since it will interfere with the
+                            # dry run captures done in the main capture loop. Maybe with synchronization it could be
+                            # made to work, but then the small advantage offered by threads would be lost
+                            request.release()
+                            draw_preview_image(captured_image, idx)
+                            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                            logging.debug("Queueing frame image %i to be saved", CurrentFrame)
+                        else:
+                            request.release()
+                            captured_image = reverse_image(captured_image)
+                            draw_preview_image(captured_image, idx)
+                            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                            logging.debug("Queueing frame image %i to be saved", CurrentFrame)
             else:  # DNG + HDR, threads not possible due to request conflicting with retrieve metadata
-                """
-                queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                capture_display_queue.put(queue_item)
-                """
                 draw_preview_image(captured_image, idx)  # Display preview
                 curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
@@ -1584,7 +1506,7 @@ def capture_hdr(mode):
                 request.release()
                 logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
         idx += idx_inc
-    if HdrMergeInPlace and not is_dng:
+    if hdr_merge_in_place.get() and not is_dng:
         # Perform merge of the HDR image list
         img = MergeMertens.process(images_to_merge)
         # Convert the result back to PIL
@@ -1596,7 +1518,6 @@ def capture_hdr(mode):
 
 def capture_single(mode):
     global CurrentFrame
-    global capture_display_queue, capture_save_queue
     global total_wait_time_save_image
 
     is_dng = file_type_dropdown_selected.get() == 'dng'
@@ -1606,20 +1527,15 @@ def capture_single(mode):
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             captured_image = request.make_image('main')
             draw_preview_image(captured_image, 0)
-            """
-            display_queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
-            capture_display_queue.put(display_queue_item)
-            logging.debug("Queueing frame %i for display", CurrentFrame)
-            """
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, 0))
                 capture_save_queue.put(save_queue_item)
                 logging.debug("Queueing frame %i to be saved", CurrentFrame)
         else:
             captured_image = camera.capture_image("main")
+            captured_image = reverse_image(captured_image)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
-            #capture_display_queue.put(queue_item)
             draw_preview_image(captured_image, 0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 capture_save_queue.put(queue_item)
@@ -1661,15 +1577,10 @@ def capture_single(mode):
 # 'still': Button to capture still (specific filename)
 # 'preview': Manual scan, display only, do not save
 def capture(mode):
-    global CurrentDir, CurrentFrame
-    global SessionData
     global PreviousCurrentExposure
-    global SimulatedRun
-    global AwbPause
     global PreviousGainRed, PreviousGainBlue
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
-    global HdrCaptureActive
 
     if SimulatedRun or CameraDisabled:
         return
@@ -1677,26 +1588,29 @@ def capture(mode):
     os.chdir(CurrentDir)
 
     # Wait for auto exposure to adapt only if allowed (and if not using HDR)
-    if AE_enabled.get() and auto_exposure_change_pause.get() and not HdrCaptureActive:
+    if AE_enabled.get() and not HdrCaptureActive:
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
             metadata = camera.capture_metadata()
             aux_current_exposure = metadata["ExposureTime"]
-            # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000, then to 4000
-            # Finally changed to allow a percentage of the value used previously
-            # As we initialize this percentage to 50%, we start with double the original value
-            if abs(aux_current_exposure - PreviousCurrentExposure) > (match_wait_margin_value.get() * Tolerance_AE)/100:
-                if (wait_loop_count % 10 == 0):
-                    logging.debug(f"AE match: ({aux_current_exposure/1000},Auto {PreviousCurrentExposure/1000})")
-                wait_loop_count += 1
-                PreviousCurrentExposure = aux_current_exposure
-                time.sleep(0.2)
-                if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
-                    break;
+            if auto_exposure_change_pause.get():
+                # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000, then to 4000
+                # Finally changed to allow a percentage of the value used previously
+                # As we initialize this percentage to 50%, we start with double the original value
+                if abs(aux_current_exposure - PreviousCurrentExposure) > (match_wait_margin_value.get() * Tolerance_AE)/100:
+                    if (wait_loop_count % 10 == 0):
+                        logging.debug(f"AE match: ({aux_current_exposure/1000},Auto {PreviousCurrentExposure/1000})")
+                    wait_loop_count += 1
+                    PreviousCurrentExposure = aux_current_exposure
+                    time.sleep(0.2)
+                    if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
+                        break;
+                else:
+                    break
             else:
                 break
-        if wait_loop_count > 0:
+        if wait_loop_count >= 0:
             exposure_value.set(aux_current_exposure / 1000)
             aux = time.time() - curtime
             total_wait_time_autoexp += aux
@@ -1707,7 +1621,7 @@ def capture(mode):
 
 
     # Wait for auto white balance to adapt only if allowed
-    if AWB_enabled.get() and AwbPause:
+    if AWB_enabled.get():
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1715,21 +1629,24 @@ def capture(mode):
             camera_colour_gains = metadata["ColourGains"]
             aux_gain_red = camera_colour_gains[0]
             aux_gain_blue = camera_colour_gains[1]
-            # Same as for exposure, difference allowed is a percentage of the maximum value
-            if abs(aux_gain_red-PreviousGainRed) >= (match_wait_margin_value.get() * Tolerance_AWB/100) or \
-               abs(aux_gain_blue-PreviousGainBlue) >= (match_wait_margin_value.get() * Tolerance_AWB/100):
-                if (wait_loop_count % 10 == 0):
-                    aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
-                    logging.debug("AWB Match: %s", aux_gains_str)
-                wait_loop_count += 1
-                PreviousGainRed = aux_gain_red
-                PreviousGainBlue = aux_gain_blue
-                time.sleep(0.2)
-                if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
-                    break;
+            if auto_white_balance_change_pause.get():
+                # Same as for exposure, difference allowed is a percentage of the maximum value
+                if abs(aux_gain_red-PreviousGainRed) >= (match_wait_margin_value.get() * Tolerance_AWB/100) or \
+                   abs(aux_gain_blue-PreviousGainBlue) >= (match_wait_margin_value.get() * Tolerance_AWB/100):
+                    if (wait_loop_count % 10 == 0):
+                        aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
+                        logging.debug("AWB Match: %s", aux_gains_str)
+                    wait_loop_count += 1
+                    PreviousGainRed = aux_gain_red
+                    PreviousGainBlue = aux_gain_blue
+                    time.sleep(0.2)
+                    if (time.time() - curtime) * 1000 > max_wait_time:  # Never wait more than 5 seconds
+                        break;
+                else:
+                    break
             else:
                 break
-        if wait_loop_count > 0:
+        if wait_loop_count >= 0:
             if ExpertMode:
                 wb_red_value.set(round(aux_gain_red, 1))
                 wb_blue_value.set(round(aux_gain_blue, 1))
@@ -1766,8 +1683,6 @@ def capture(mode):
 
 
 def start_scan_simulated():
-    global CurrentDir
-    global CurrentFrame
     global ScanOngoing
     global CurrentScanStartFrame, CurrentScanStartTime
     global simulated_captured_frame_list, simulated_images_in_list
@@ -1820,8 +1735,6 @@ def start_scan_simulated():
 
 def stop_scan_simulated():
     global ScanOngoing
-    global save_bg
-    global save_fg
 
     Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
 
@@ -1833,41 +1746,32 @@ def stop_scan_simulated():
 
 
 def capture_loop_simulated():
-    global CurrentDir, CurrentFrame
-    global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str, frames_to_go_entry, time_to_go_time
-    global NewFrameAvailable
-    global ScanOngoing
+    global CurrentFrame
+    global FramesPerMinute, FramesToGo
     global simulated_capture_image
-    global simulated_captured_frame_list, simulated_images_in_list
-    global ScanStopRequested
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames
-    global SessionData
-    global Scanned_Images_time_str, Scanned_Images_Fpm_str
     global disk_space_error_to_notify
-    global frames_to_go_key_press_time
 
     if ScanStopRequested:
         stop_scan_simulated()
         ScanStopRequested = False
         curtime = time.time()
-        if ExpertMode:
-            logging.debug("Total session time: %s seg for %i frames (%i ms per frame)",
-                         str(round((curtime-session_start_time),1)),
-                         session_frames,
-                         round(((curtime-session_start_time)*1000/session_frames),1))
-            logging.debug("Total time to save images: %s seg, (%i ms per frame)",
-                         str(round((total_wait_time_save_image),1)),
-                         round((total_wait_time_save_image*1000/session_frames),1))
-            logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
-                         str(round((total_wait_time_preview_display),1)),
-                         round((total_wait_time_preview_display*1000/session_frames),1))
-            logging.debug("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
-                         str(round((total_wait_time_awb),1)),
-                         round((total_wait_time_awb*1000/session_frames),1))
-            logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
-                         str(round((total_wait_time_autoexp),1)),
-                         round((total_wait_time_autoexp*1000/session_frames),1))
+        logging.debug("Total session time: %s seg for %i frames (%i ms per frame)",
+                     str(round((curtime-session_start_time),1)),
+                     session_frames,
+                     round(((curtime-session_start_time)*1000/session_frames),1))
+        logging.debug("Total time to save images: %s seg, (%i ms per frame)",
+                     str(round((total_wait_time_save_image),1)),
+                     round((total_wait_time_save_image*1000/session_frames),1))
+        logging.debug("Total time to display preview image: %s seg, (%i ms per frame)",
+                     str(round((total_wait_time_preview_display),1)),
+                     round((total_wait_time_preview_display*1000/session_frames),1))
+        logging.debug("Total time waiting for AWB adjustment: %s seg, (%i ms per frame)",
+                     str(round((total_wait_time_awb),1)),
+                     round((total_wait_time_awb*1000/session_frames),1))
+        logging.debug("Total time waiting for AE adjustment: %s seg, (%i ms per frame)",
+                     str(round((total_wait_time_autoexp),1)),
+                     round((total_wait_time_autoexp*1000/session_frames),1))
         if disk_space_error_to_notify:
             tk.messagebox.showwarning("Disk space low",
                                       f"Running out of disk space, only {int(available_space_mb)} MB remain. Please delete some files before continuing current scan.")
@@ -1930,12 +1834,8 @@ def capture_loop_simulated():
 
 
 def start_scan():
-    global CurrentDir, CurrentFrame
-    global SessionData
     global ScanOngoing
     global CurrentScanStartFrame, CurrentScanStartTime
-    global save_bg, save_fg
-    global SimulatedRun
     global ScanStopRequested
     global NewFrameAvailable
     global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
@@ -1984,8 +1884,6 @@ def start_scan():
 
 def stop_scan():
     global ScanOngoing
-    global save_bg
-    global save_fg
 
     if ScanOngoing:  # Scanner session to be stopped
         Start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
@@ -2003,26 +1901,19 @@ def stop_scan():
 
 
 def capture_loop():
-    global CurrentDir
     global CurrentFrame
-    global SessionData
-    global FramesPerMinute, FramesToGo, frames_to_go_str, time_to_go_str
+    global FramesPerMinute, FramesToGo
     global NewFrameAvailable
     global ScanProcessError, ScanProcessError_LastTime
-    global ScanOngoing
-    global SimulatedRun
     global ScanStopRequested
-    global total_wait_time_autoexp, total_wait_time_awb, total_wait_time_preview_display, session_start_time, total_wait_time_save_image
     global session_frames, CurrentStill
-    global Scanned_Images_time_str, Scanned_Images_Fpm_str
     global disk_space_error_to_notify
-    global frames_to_go_key_press_time
 
     if ScanStopRequested:
         stop_scan()
         ScanStopRequested = False
         curtime = time.time()
-        if ExpertMode and session_frames > 0:
+        if session_frames > 0:
             logging.debug("Total session time: %s seg for %i frames (%i ms per frame)",
                          str(round((curtime-session_start_time),1)),
                          session_frames,
@@ -2129,23 +2020,16 @@ def capture_loop():
 
 
 def temp_in_fahrenheit_selection():
-    global temp_in_fahrenheit
-    global TempInFahrenheit
-    TempInFahrenheit = temp_in_fahrenheit.get()
-    SessionData["TempInFahrenheit"] = str(TempInFahrenheit)
+    SessionData["TempInFahrenheit"] = str(temp_in_fahrenheit.get())
 
 
 def temperature_check():
     global last_temp
-    global RPi_temp_value_label
-    global RPiTemp
-    global temp_in_fahrenheit
     global LastTempInFahrenheit
-    global TempInFahrenheit
 
     update_rpi_temp()
-    if last_temp != RPiTemp or LastTempInFahrenheit != TempInFahrenheit:
-        if TempInFahrenheit:
+    if last_temp != RPiTemp or LastTempInFahrenheit != temp_in_fahrenheit.get():
+        if temp_in_fahrenheit.get():
             rounded_temp = round(RPiTemp*1.8+32, 1)
             temp_str = str(rounded_temp) + 'ºF'
         else:
@@ -2153,7 +2037,7 @@ def temperature_check():
             temp_str = str(rounded_temp) + 'º'
         RPi_temp_value_label.config(text=str(temp_str))
         last_temp = RPiTemp
-        LastTempInFahrenheit = TempInFahrenheit
+        LastTempInFahrenheit = temp_in_fahrenheit.get()
 
 
 def frames_to_go_key_press(event):
@@ -2168,8 +2052,6 @@ def frames_to_go_key_press(event):
 
 
 def preview_check():
-    global real_time_display
-
     if SimulatedRun or CameraDisabled:
         return
 
@@ -2192,7 +2074,7 @@ def set_file_type(event):
 
 
 def set_resolution(event):
-    global max_inactivity_delay, camera_resolutions
+    global max_inactivity_delay
     SessionData["CaptureResolution"] = resolution_dropdown_selected.get()
     camera_resolutions.set_active(resolution_dropdown_selected.get())
     if resolution_dropdown_selected.get() == "4056x3040":
@@ -2206,9 +2088,7 @@ def set_resolution(event):
 
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
-    global plotter_canvas
     global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel
-    global plotter_width, plotter_height
 
     if plotter_canvas == None:
         logging.error("Plotter canvas does not exist, exiting...")
@@ -2248,10 +2128,6 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
 
 # send_arduino_command: No response expected
 def send_arduino_command(cmd, param=0):
-    global SimulatedRun, ALT_Scann8_controller_detected
-    global i2c
-    global CurrentFrame
-
     if not SimulatedRun:
         time.sleep(0.0001)  #wait 100 µs, to avoid I/O errors
         try:
@@ -2269,14 +2145,11 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global RewindErrorOutstanding, RewindEndOutstanding
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
     global ArduinoTrigger
-    global SimulatedRun
     global ScanProcessError
-    global ScanOngoing
-    global ALT_Scann8_controller_detected
-    global last_frame_time, max_inactivity_delay
+    global last_frame_time
     global Controller_Id
     global ScanStopRequested
-    global i2c, arduino_after
+    global arduino_after
 
     if not SimulatedRun:
         try:
@@ -2356,7 +2229,6 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
 
 def load_persisted_data_from_disk():
-    global PersistedDataFilename
     global SessionData
     global PersistedDataLoaded
 
@@ -2369,20 +2241,13 @@ def load_persisted_data_from_disk():
 
 
 def load_config_data():
-    global SessionData
-    global PostviewModule
-    global TempInFahrenheit
-    global temp_in_fahrenheit_checkbox
-    global PersistedDataLoaded
-    global camera
-
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
         logging.debug("SessionData loaded from disk:")
         if 'TempInFahrenheit' in SessionData:
-            TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
-            if TempInFahrenheit:
+            temp_in_fahrenheit.set(eval(SessionData["TempInFahrenheit"]))
+            if temp_in_fahrenheit.get():
                 temp_in_fahrenheit_checkbox.select()
         if ExpertMode:
             if 'MatchWaitMargin' in SessionData:
@@ -2395,15 +2260,6 @@ def load_config_data():
                 stabilization_delay_value.set(round(aux * 1000))
             else:
                 stabilization_delay_value.set(100)
-
-        if ExperimentalMode:
-            if 'SharpnessValue' in SessionData:
-                SharpnessValue = int(SessionData["SharpnessValue"])     # In case it is stored as string
-                sharpness_value.set(SharpnessValue)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"Sharpness": SharpnessValue})
-            else:
-                sharpness_value.set(1)
 
 
 def arrange_widget_state(disabled, widget_list):
@@ -2430,25 +2286,13 @@ def arrange_custom_spinboxes_status(widget):
 
 
 def load_session_data():
-    global SessionData
     global CurrentDir
     global CurrentFrame, FramesToGo
-    global folder_frame_target_dir
-    global hdr_btn
-    global AwbPause
-    global auto_wb_wait_btn
-    global PersistedDataLoaded
     global MinFrameStepsS8, MinFrameStepsR8
     global PTLevelS8, PTLevelR8
-    global hdr_capture_active_checkbox, HdrCaptureActive
-    global hdr_viewx4_active_checkbox, HdrViewX4Active
-    global hdr_bracket_width_auto_checkbox
-    global HdrBracketAuto, hdr_bracket_auto, hdr_max_exp_spinbox, hdr_min_exp_spinbox
-    global HdrMergeInPlace, hdr_merge_in_place
-    global auto_exposure_btn, auto_wb_btn, exposure_spinbox, wb_red_spinbox, wb_blue_spinbox
-    global frames_to_go_str
+    global HdrCaptureActive
+    global HdrViewX4Active
     global max_inactivity_delay
-    global Scanned_Images_number_str
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2512,28 +2356,26 @@ def load_session_data():
                         hdr_capture_active_checkbox.select()
                 if 'HdrViewX4Active' in SessionData:
                     HdrViewX4Active = eval(SessionData["HdrViewX4Active"])
-                    if HdrViewX4Active and ExpertMode:
+                    if HdrViewX4Active:
                         hdr_viewx4_active_checkbox.select()
+                    else:
+                        hdr_viewx4_active_checkbox.deselect()
                 if 'HdrMinExp' in SessionData:
                     aux = int(SessionData["HdrMinExp"])
-                    if ExpertMode:
-                        hdr_min_exp_value.set(aux)
-                elif ExpertMode:
+                    hdr_min_exp_value.set(aux)
+                else:
                     hdr_min_exp_value.set(hdr_lower_exp)
                 if 'HdrMaxExp' in SessionData:
                     aux = int(SessionData["HdrMaxExp"])
-                    if ExpertMode:
-                        hdr_max_exp_value.set(aux)
-                elif ExpertMode:
+                    hdr_max_exp_value.set(aux)
+                else:
                     hdr_max_exp_value.set(hdr_higher_exp)
                 if 'HdrBracketAuto' in SessionData:
-                    HdrBracketAuto = SessionData["HdrBracketAuto"]
-                    hdr_bracket_auto.set(HdrBracketAuto)
-                elif ExpertMode:
+                    hdr_bracket_auto.set(SessionData["HdrBracketAuto"])
+                else:
                     hdr_bracket_auto.set(hdr_higher_exp-hdr_lower_exp)
                 if 'HdrMergeInPlace' in SessionData:
-                    HdrMergeInPlace = SessionData["HdrMergeInPlace"]
-                    hdr_merge_in_place.set(HdrMergeInPlace)
+                    hdr_merge_in_place.set(SessionData["HdrMergeInPlace"])
                 if 'HdrBracketWidth' in SessionData:
                     aux = int(SessionData["HdrBracketWidth"])
                     hdr_bracket_width_value.set(aux)
@@ -2576,9 +2418,14 @@ def load_session_data():
                     arrange_widget_state(not AWB_enabled.get(), [auto_wb_wait_btn])
                     arrange_widget_state(AWB_enabled.get(), [wb_red_spinbox, wb_blue_spinbox])
                 if 'AwbPause' in SessionData:
-                    AwbPause = eval(SessionData["AwbPause"])
-                    if AwbPause:
+                    if isinstance(SessionData["CurrentAwbAuto"], bool):
+                        aux = SessionData["AwbPause"]
+                    else:
+                        aux = eval(SessionData["AwbPause"])
+                    if aux:
                         auto_wb_wait_btn.select()
+                    else:
+                        auto_wb_wait_btn.deselect()
                 if 'GainRed' in SessionData:
                     aux = float(SessionData["GainRed"])
                     wb_red_value.set(round(aux,1))
@@ -2601,6 +2448,11 @@ def load_session_data():
                     AeExposureMode_dropdown_selected.set(aux)
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"AeExposureMode": AeExposureMode_dict[aux]})
+                if "AwbMode" in SessionData:
+                    aux = SessionData["AwbMode"]
+                    AwbMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AwbMode": AwbMode_dict[aux]})
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = int(SessionData["MinFrameSteps"])
@@ -2669,6 +2521,12 @@ def load_session_data():
                     exposure_compensation_value.set(aux)
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"ExposureValue": aux})
+                if 'SharpnessValue' in SessionData:
+                    aux = int(SessionData["SharpnessValue"])     # In case it is stored as string
+                    sharpness_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"Sharpness": aux})
+
 
 
 
@@ -2678,13 +2536,14 @@ def load_session_data():
         arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                    AeExposureMode_label, AeExposureMode_dropdown])
+                                                    AeExposureMode_label, AeExposureMode_dropdown,
+                                                    AwbMode_label, AwbMode_dropdown])
         arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
         arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
     if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
-            arrange_widget_state(HdrBracketAuto, [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
+            arrange_widget_state(hdr_bracket_auto.get(), [hdr_max_exp_spinbox, hdr_min_exp_spinbox])
 
 
 def reinit_controller():
@@ -2713,8 +2572,6 @@ def reinit_controller():
 
 
 def PiCam2_change_resolution():
-    global camera, capture_config, preview_config, camera_resolutions
-
     target_res = resolution_dropdown_selected.get()
     camera_resolutions.set_active(target_res)
     if SimulatedRun or CameraDisabled:
@@ -2730,7 +2587,7 @@ def PiCam2_change_resolution():
 
 
 def PiCam2_configure():
-    global camera, capture_config, preview_config, camera_resolutions
+    global capture_config, preview_config
 
     camera.stop()
     capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_sensor_resolution()},
@@ -2742,7 +2599,6 @@ def PiCam2_configure():
     camera.configure(capture_config)
     # WB controls
     camera.set_controls({"AwbEnable": False})
-    #camera.set_controls({"AwbMode": AwbModeEnum.Auto})
     camera.set_controls({"ColourGains": (2.2, 2.2)})  # 0.0 to 32.0, Red 2.2, Blue 2.2 seem to be OK
     # Exposure controls
     camera.set_controls({"AeEnable": True})
@@ -2766,13 +2622,13 @@ def PiCam2_configure():
 
 
 def hdr_init():
-    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_num_exposures, hdr_view_4_image
+    global hdr_view_4_image
 
     hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
     hdr_reinit()
 
 def hdr_reinit():
-    global hdr_step_value, hdr_exp_list, hdr_rev_exp_list, hdr_best_exp, hdr_num_exposures, hdr_view_4_image
+    global hdr_exp_list, hdr_rev_exp_list, hdr_num_exposures
 
     if not ExperimentalMode:
         return
@@ -2792,7 +2648,7 @@ def create_main_window():
     global win
     global plotter_width, plotter_height
     global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
-    global ForceSmallSize, ForceBigSize, FontSize, BigSize
+    global FontSize, BigSize
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
 
@@ -2812,7 +2668,7 @@ def create_main_window():
         FontSize = 11
         PreviewWidth = 844
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 500
+        app_width = PreviewWidth + 510
         app_height = PreviewHeight + 50
         plotter_width += 50
     else:
@@ -2820,11 +2676,11 @@ def create_main_window():
         FontSize = 8
         PreviewWidth = 650
         PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 430
+        app_width = PreviewWidth + 440
         app_height = PreviewHeight + 50
         plotter_height -= 55
     if ExpertMode or ExperimentalMode:
-        app_height += 290 if BigSize else 230
+        app_height += 325 if BigSize else 265
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -2850,10 +2706,8 @@ def create_main_window():
 def tscann8_init():
     global camera
     global i2c
-    global CurrentDir, CurrentFrame
+    global CurrentDir
     global ZoomSize
-    global capture_config, preview_config
-    global LogLevel, ExperimentalMode, PlotterMode
     global capture_display_queue, capture_display_event
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
@@ -2990,14 +2844,15 @@ def value_validation(new_value, widget, min, max, default, is_double=False):
 
 
 
-def exposure_spinbox_auto():
+def set_auto_exposure():
     aux = 0 if AE_enabled.get() else int(exposure_value.get() * 1000)
 
     arrange_widget_state(AE_enabled.get(), [exposure_spinbox])
     arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                 AeConstraintMode_label, AeConstraintMode_dropdown,
                                                 AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                AeExposureMode_label, AeExposureMode_dropdown])
+                                                AeExposureMode_label, AeExposureMode_dropdown,
+                                                AwbMode_label, AwbMode_dropdown])
 
     if not SimulatedRun and not CameraDisabled:
         # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
@@ -3013,7 +2868,7 @@ def auto_exposure_change_pause_selection():
 
 
 def exposure_selection():
-    if not ExpertMode or AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AE_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
     aux = value_normalize(exposure_value, camera_resolutions.get_min_exp()/1000, camera_resolutions.get_max_exp()/1000, 100)
     aux = aux * 1000
@@ -3032,7 +2887,7 @@ def exposure_validation(new_value):
 
 
 def wb_red_selection():
-    if not ExpertMode or AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     aux = value_normalize(wb_red_value, 0, 32, 2.2)
@@ -3047,7 +2902,7 @@ def wb_red_validation(new_value):
 
 
 def wb_blue_selection():
-    if not ExpertMode or AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
+    if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     aux = value_normalize(wb_blue_value, 0, 32, 2.2)
@@ -3062,40 +2917,40 @@ def wb_blue_validation(new_value):
 
 
 def match_wait_margin_selection():
-    if not ExpertMode:
-        return
-    aux = value_normalize(match_wait_margin_value, 0, 100, 50)
+    aux = value_normalize(match_wait_margin_value, 5, 100, 50)
     SessionData["MatchWaitMargin"] = aux
 
 
 def match_wait_margin_validation(new_value):
-    return value_validation(new_value, match_wait_margin_spinbox, 0, 100, 50)
+    return value_validation(new_value, match_wait_margin_spinbox, 5, 100, 50)
 
 
 def set_AeConstraintMode(selected):
-    global AeConstraintMode_dict
     SessionData["AeConstraintMode"] = selected
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[selected]})
 
 
 def set_AeMeteringMode(selected):
-    global AeMeteringMode_dict
     SessionData["AeMeteringMode"] = selected
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[selected]})
 
 
 def set_AeExposureMode(selected):
-    global AeExposureMode_dict
     SessionData["AeExposureMode"] = selected
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeExposureMode": AeExposureMode_dict[selected]})
 
 
+def set_AwbMode(selected):
+    SessionData["AwbMode"] = selected
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"AwbMode": AwbMode_dict[selected]})
+
+
 def steps_per_frame_auto():
     arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
-
     SessionData["FrameStepsAuto"] = auto_framesteps_enabled.get()
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else steps_per_frame_value.get())
 
@@ -3113,9 +2968,8 @@ def steps_per_frame_validation(new_value):
     return value_validation(new_value, steps_per_frame_spinbox, 100, 600, 250)
 
 
-def pt_level_spinbox_auto():
+def set_auto_pt_level():
     arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
-
     SessionData["PTLevelAuto"] = auto_pt_level_enabled.get()
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else pt_level_value.get())
 
@@ -3159,8 +3013,6 @@ def scan_speed_validation(new_value):
 
 
 def stabilization_delay_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(stabilization_delay_value, 0, 1000, 150)
     aux = aux/1000
     SessionData["CaptureStabilizationDelay"] = aux
@@ -3172,9 +3024,6 @@ def stabilization_delay_validation(new_value):
 
 def hdr_min_exp_selection():
     global force_adjust_hdr_bracket, recalculate_hdr_exp_list
-
-    if not ExpertMode:
-        return
 
     min_exp = value_normalize(hdr_min_exp_value, hdr_lower_exp, 999, 100)
     bracket = hdr_bracket_width_value.get()
@@ -3200,9 +3049,6 @@ def hdr_max_exp_selection():
     global recalculate_hdr_exp_list
     global force_adjust_hdr_bracket
 
-    if not ExpertMode:
-        return
-
     max_exp = value_normalize(hdr_max_exp_value, 2, 1000, 200)
     bracket = hdr_bracket_width_value.get()
     min_exp = max_exp - bracket
@@ -3225,9 +3071,6 @@ def hdr_max_exp_validation(new_value):
 
 def hdr_bracket_width_selection():
     global force_adjust_hdr_bracket
-
-    if not ExpertMode:
-        return
 
     aux_bracket = value_normalize(hdr_bracket_width_value, hdr_min_bracket_width, hdr_max_bracket_width, 200)
 
@@ -3257,8 +3100,6 @@ def hdr_bracket_shift_validation(new_value):
 
 
 def exposure_compensation_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(exposure_compensation_value, -8, 8, 0)
     SessionData["ExposureCompensation"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3270,8 +3111,6 @@ def exposure_compensation_validation(new_value):
 
 
 def brightness_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(brightness_value, -1, 1, 0)
     SessionData["Brightness"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3283,8 +3122,6 @@ def brightness_validation(new_value):
 
 
 def contrast_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(contrast_value, 0, 32, 1)
     SessionData["Contrast"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3296,8 +3133,6 @@ def contrast_validation(new_value):
 
 
 def saturation_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(saturation_value, 0, 32, 1)
     SessionData["Saturation"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3309,8 +3144,6 @@ def saturation_validation(new_value):
 
 
 def analogue_gain_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(analogue_gain_value, 0, 32, 0)
     SessionData["AnalogueGain"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3322,8 +3155,6 @@ def analogue_gain_validation(new_value):
 
 
 def sharpness_selection():
-    if not ExpertMode:
-        return
     aux = value_normalize(sharpness_value, 0, 16, 1)
     SessionData["SharpnessValue"] = aux
     if not SimulatedRun and not CameraDisabled:
@@ -3335,9 +3166,6 @@ def sharpness_validation(new_value):
 
 
 def rwnd_speed_control_selection():
-    if not ExpertMode:
-        return
-
     value_normalize(rwnd_speed_control_value, 40, 800, 800)
     '''
     if event == 'Up':
@@ -3356,9 +3184,6 @@ def rewind_speed_validation(new_value):
 # Widget creation
 # ***************
 def create_widgets():
-    global win
-    global ExperimentalMode
-    global app_width
     global AdvanceMovie_btn
     global SingleStep_btn
     global Snapshot_btn
@@ -3378,15 +3203,10 @@ def create_widgets():
     global auto_exposure_wait_btn
     global decrease_exp_btn, increase_exp_btn
     global temp_in_fahrenheit
-    global TempInFahrenheit
-    global colour_gains_auto_btn, awb_frame
-    global colour_gains_red_btn_plus, colour_gains_red_btn_minus
-    global colour_gains_blue_btn_plus, colour_gains_blue_btn_minus
     global auto_white_balance_change_pause
     global auto_wb_wait_btn
     global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
     global temp_in_fahrenheit_checkbox
-    global rwnd_speed_control_delay
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
     global auto_stop_enabled_checkbox, auto_stop_enabled
@@ -3416,7 +3236,6 @@ def create_widgets():
     global hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn
-    # global file_type_jpg_rb, file_type_png_rb
     global file_type_dropdown, file_type_dropdown_selected
     global resolution_dropdown, resolution_dropdown_selected
     global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
@@ -3425,30 +3244,46 @@ def create_widgets():
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
     global full_ui_checkbox, toggle_ui_small
     global AE_enabled, AWB_enabled
-    global expert_frame, experimental_frame
+    global extended_frame, expert_frame, experimental_frame
     global time_save_image_value, time_preview_display_value, time_awb_value, time_autoexp_value
-    global AeConstraintMode_dropdown_selected, AeMeteringMode_dropdown_selected, AeExposureMode_dropdown_selected
-    global AeConstraintMode_dropdown, AeMeteringMode_dropdown, AeExposureMode_dropdown
-    global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label
+    global AeConstraintMode_dropdown_selected, AeMeteringMode_dropdown_selected, AeExposureMode_dropdown_selected, AwbMode_dropdown_selected
+    global AeConstraintMode_dropdown, AeMeteringMode_dropdown, AeExposureMode_dropdown, AwbMode_dropdown
+    global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label, AwbMode_label
     global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
-    top_area_frame.pack(side=TOP, anchor=NW)
+    top_area_frame.pack(side=TOP, anchor=NW, fill='both')
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
     top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(20, 0), fill=Y)
     # Create a LabelFrame to act as a border
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
-    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(15, 0), pady=(20, 0))
+    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(15, 0), pady=(20, 0), fill='y')
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey',
                                  width=PreviewWidth, height=PreviewHeight)
-    draw_capture_canvas.pack(side=TOP, anchor=N, padx=(20,0))
+    draw_capture_canvas.pack(padx=(20,5), pady=5)
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame)
     top_right_area_frame.pack(side=LEFT, anchor=NW, padx=(5, 0), pady=(20, 0), fill=Y)
+
+    # ***************************************
+    # Display markers for film hole reference
+    film_hole_frame_1 = Frame(draw_capture_frame, width=1, height=1, bg='black')
+    film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
+    film_hole_frame_1.place(x=0, y=FilmHoleY1, height=140 if BigSize else 100)
+    film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
+                              bg='white', fg='white')
+    film_hole_label_1.pack(side=TOP)
+
+    film_hole_frame_2 = Frame(draw_capture_frame, width=1, height=1, bg='black')
+    film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
+    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=140 if BigSize else 100)
+    film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
+                              bg='white', fg='white')
+    film_hole_label_2.pack(side=TOP)
 
     # Advance movie button (slow forward through filmgate)
     bottom_area_column = 0
@@ -3580,7 +3415,7 @@ def create_widgets():
 
     bottom_area_row += 1
 
-    # Toggle UI size
+    # Toggle UI size & stats only in expert mode
     if ExpertMode:
         toggle_ui_small = tk.BooleanVar(value=False)
         full_ui_checkbox = tk.Checkbutton(top_left_area_frame, text='Toggle UI', height=1,
@@ -3598,27 +3433,43 @@ def create_widgets():
         # Average Time to save image
         time_save_image_label = tk.Label(statistics_frame, text='Save:', font=("Arial", FontSize-1))
         time_save_image_label.grid(row=0, column=0, padx=6, sticky=E)
+        as_tooltips.add(time_save_image_label, "Average time spent in saving each frame (in milliseconds)")
         time_save_image_value = tk.IntVar(value=0)
         time_save_image_value_label = tk.Label(statistics_frame, textvariable=time_save_image_value, font=("Arial", FontSize-1))
         time_save_image_value_label.grid(row=0, column=1, padx=2, sticky=W)
+        as_tooltips.add(time_save_image_value_label, "Average time spent in saving each frame (in milliseconds)")
+        time_save_image_label_ms = tk.Label(statistics_frame, text='ms', font=("Arial", FontSize-1))
+        time_save_image_label_ms.grid(row=0, column=2, padx=6, sticky=E)
         # Average Time to display preview
         time_preview_display_label = tk.Label(statistics_frame, text='Prvw:', font=("Arial", FontSize-1))
         time_preview_display_label.grid(row=1, column=0, padx=6, sticky=E)
+        as_tooltips.add(time_preview_display_label, "Average time spent in displaying a preview of each frame (in milliseconds)")
         time_preview_display_value = tk.IntVar(value=0)
         time_preview_display_value_label = tk.Label(statistics_frame, textvariable=time_preview_display_value, font=("Arial", FontSize-1))
         time_preview_display_value_label.grid(row=1, column=1, padx=2, sticky=W)
+        as_tooltips.add(time_preview_display_value_label, "Average time spent in displaying a preview of each frame (in milliseconds)")
+        time_preview_display_label_ms = tk.Label(statistics_frame, text='ms', font=("Arial", FontSize-1))
+        time_preview_display_label_ms.grid(row=1, column=2, padx=6, sticky=E)
         # Average Time spent waiting for AWB to adjust
         time_awb_label = tk.Label(statistics_frame, text='AWB:', font=("Arial", FontSize-1))
         time_awb_label.grid(row=2, column=0, padx=6, sticky=E)
+        as_tooltips.add(time_awb_label, "Average time spent waiting for white balance to match automatic value (in milliseconds)")
         time_awb_value = tk.IntVar(value=0)
         time_awb_value_label = tk.Label(statistics_frame, textvariable=time_awb_value, font=("Arial", FontSize-1))
         time_awb_value_label.grid(row=2, column=1, padx=2, sticky=W)
+        as_tooltips.add(time_awb_value_label, "Average time spent waiting for white balance to match automatic value (in milliseconds)")
+        time_awb_label_ms = tk.Label(statistics_frame, text='ms', font=("Arial", FontSize-1))
+        time_awb_label_ms.grid(row=2, column=2, padx=6, sticky=E)
         # Average Time spent waiting for AE to adjust
         time_autoexp_label = tk.Label(statistics_frame, text='AE:', font=("Arial", FontSize-1))
         time_autoexp_label.grid(row=3, column=0, padx=6, sticky=E)
+        as_tooltips.add(time_autoexp_label, "Average time spent waiting for exposure to match automatic value (in milliseconds)")
         time_autoexp_value = tk.IntVar(value=0)
         time_autoexp_value_label = tk.Label(statistics_frame, textvariable=time_autoexp_value, font=("Arial", FontSize-1))
         time_autoexp_value_label.grid(row=3, column=1, padx=2, sticky=W)
+        as_tooltips.add(time_autoexp_value_label, "Average time spent waiting for exposure to match automatic value (in milliseconds)")
+        time_autoexp_label_ms = tk.Label(statistics_frame, text='ms', font=("Arial", FontSize-1))
+        time_autoexp_label_ms.grid(row=3, column=2, padx=6, sticky=E)
         bottom_area_row += 1
 
 
@@ -3680,10 +3531,7 @@ def create_widgets():
     resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
     resolution_dropdown.pack(side=LEFT)
     # resolution_dropdown.config(state=DISABLED)
-    if ExperimentalMode:
-        as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with * are cropped, requiring lens adjustment")
-    else:
-        as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames")
+    as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with * are cropped, requiring lens adjustment")
 
     # File format (JPG or PNG)
     # Drop down to select file type
@@ -3773,7 +3621,7 @@ def create_widgets():
     RPi_temp_value_label.pack(side=TOP, padx=4)
     as_tooltips.add(RPi_temp_value_label, "Raspberry Pi Temperature.")
 
-    temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
+    temp_in_fahrenheit = tk.BooleanVar(value=False)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(rpi_temp_frame, text='Fahrenheit', height=1,
                                                  variable=temp_in_fahrenheit, onvalue=True, offvalue=False,
                                                  command=temp_in_fahrenheit_selection, font=("Arial", FontSize))
@@ -3783,22 +3631,20 @@ def create_widgets():
 
     # Integrated plotter
     if PlotterMode:
-        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', height=5,
-                                              font=("Arial", FontSize - 1))
-        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, pady=4, sticky='NSEW')
-        plotter_canvas = Canvas(integrated_plotter_frame, bg='white',
-                                width=plotter_width, height=plotter_height)
-        plotter_canvas.pack(side=TOP, anchor=N)
+        integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', font=("Arial", FontSize - 1))
+        integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=4, sticky='NS')
+        plotter_canvas = Canvas(integrated_plotter_frame, bg='white', width=plotter_width, height=plotter_height)
+        plotter_canvas.pack(side=TOP, anchor=N, padx=5, pady=5)
     top_right_area_row += 1
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
         extended_frame = Frame(win)
-        extended_frame.pack(side=TOP, anchor=W, padx=5)
+        extended_frame.pack(side=TOP, anchor=W, padx=5, expand=True, fill="y")
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
-        expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True, fill='both')
-
+        expert_frame.pack(side=LEFT, padx=5, pady=5, ipadx=5, ipady=5, expand=True, fill='y')
+        #expert_frame.place(relx=0.25, rely=0.5, anchor="center")
         # *********************************
         # Exposure / white balance
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', font=("Arial", FontSize-1))
@@ -3827,7 +3673,7 @@ def create_widgets():
 
         AE_enabled = tk.BooleanVar(value=False)
         auto_exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
-                                      font=("Arial", FontSize-1), command=exposure_spinbox_auto)
+                                      font=("Arial", FontSize-1), command=set_auto_exposure)
         auto_exposure_btn.grid(row=exp_wb_row, column=3, pady=1)
         as_tooltips.add(auto_exposure_btn, "Toggle automatic exposure status (on/off).")
 
@@ -3857,11 +3703,11 @@ def create_widgets():
 
         AWB_enabled = tk.BooleanVar(value=False)
         auto_wb_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
-                                    font=("Arial", FontSize-1), command=wb_spinbox_auto)
+                                    font=("Arial", FontSize-1), command=set_auto_wb)
         auto_wb_btn.grid(row=exp_wb_row, rowspan=2, column=3, pady=1)
         as_tooltips.add(auto_wb_btn, "Toggle automatic white balance for red channel (on/off).")
 
-        auto_white_balance_change_pause = tk.BooleanVar(value=AwbPause)
+        auto_white_balance_change_pause = tk.BooleanVar(value=False)
         auto_wb_wait_btn = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
                                                onvalue=True, offvalue=False, font=("Arial", FontSize-1),
                                                 command=auto_white_balance_change_pause_selection)
@@ -3889,11 +3735,11 @@ def create_widgets():
 
         match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
         match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8, readonlybackground='pale green',
-            textvariable=match_wait_margin_value, from_=0, to=100, increment=5, font=("Arial", FontSize-1))
+            textvariable=match_wait_margin_value, from_=5, to=100, increment=5, font=("Arial", FontSize-1))
         match_wait_margin_spinbox.grid(row=exp_wb_row, column=1, padx=5, pady=1, sticky=W)
         match_wait_margin_validation_cmd = match_wait_margin_spinbox.register(match_wait_margin_validation)
         match_wait_margin_spinbox.configure(validate="key", validatecommand=(match_wait_margin_validation_cmd, '%P'))
-        as_tooltips.add(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and catch-up delay is selected, the tolerance for the match (0%, no tolerance, exact match required, 100% any value will match)")
+        as_tooltips.add(match_wait_margin_spinbox, "When automatic exposure/WB enabled, and match wait delay is selected, the tolerance for the match (5%, lowest tolerance, almost exact match required, 100% any value will match)")
         match_wait_margin_spinbox.bind("<FocusOut>", lambda event: match_wait_margin_selection())
         exp_wb_row+= 1
 
@@ -3926,7 +3772,7 @@ def create_widgets():
         #camera.set_controls({"AeExposureMode": controls.AeExposureModeEnum.Normal})  # Normal, Long, Short, Custom
         AeExposureMode_dropdown_selected = tk.StringVar()
         AeExposureMode_dropdown_selected.set("Normal")  # Set the initial value
-        AeExposureMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize-1), state=DISABLED)
+        AeExposureMode_label = Label(exp_wb_frame, text='AE Exposure mode:', font=("Arial", FontSize-1), state=DISABLED)
         AeExposureMode_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
         AeExposureMode_dropdown = OptionMenu(exp_wb_frame, AeExposureMode_dropdown_selected,
                                              *AeExposureMode_dict.keys(), command=set_AeExposureMode)
@@ -3935,20 +3781,17 @@ def create_widgets():
         as_tooltips.add(AeExposureMode_dropdown, "Sets the exposure mode of the AEC/AGC algorithm.")
         exp_wb_row+= 1
 
-        # Display markers for film hole reference
-        film_hole_frame_1 = Frame(win, width=1, height=1, bg='black')
-        film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_1.place(x=150 if BigSize else 130, y=FilmHoleY1, height=140 if BigSize else 100)
-        film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
-                                bg='white', fg='white')
-        film_hole_label_1.pack(side=TOP)
-
-        film_hole_frame_2 = Frame(win, width=1, height=1, bg='black')
-        film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
-        film_hole_frame_2.place(x=150 if BigSize else 130, y=FilmHoleY2, height=140 if BigSize else 100)
-        film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
-                                bg='white', fg='white')
-        film_hole_label_2.pack(side=TOP)
+        # Miscelaneous exposure controls from PiCamera2 - AwbMode
+        #camera.set_controls({"AwbMode": controls.AwbModeEnum.Normal})  # Normal, Long, Short, Custom
+        AwbMode_dropdown_selected = tk.StringVar()
+        AwbMode_dropdown_selected.set("Normal")  # Set the initial value
+        AwbMode_label = Label(exp_wb_frame, text='AWB mode:', font=("Arial", FontSize-1), state=DISABLED)
+        AwbMode_label.grid(row=exp_wb_row, column=0, pady=1, sticky=E)
+        AwbMode_dropdown = OptionMenu(exp_wb_frame, AwbMode_dropdown_selected,
+                                             *AwbMode_dict.keys(), command=set_AwbMode)
+        AwbMode_dropdown.config(takefocus=1, font=("Arial", FontSize-1), state=DISABLED)
+        AwbMode_dropdown.grid(row=exp_wb_row, columnspan=4, column=1, pady=1, sticky=W)
+        as_tooltips.add(AwbMode_dropdown, "Sets the AWB mode of the AEC/AGC algorithm.")
         exp_wb_row+= 1
 
         # *****************************************
@@ -4060,10 +3903,10 @@ def create_widgets():
         steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
         steps_per_frame_spinbox.configure(validate="key", validatecommand=(steps_per_frame_validation_cmd, '%P'))
-        as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame.")
+        as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame (100 to 600, depends on capstan diameter).")
         steps_per_frame_spinbox.bind("<FocusOut>", lambda event: steps_per_frame_selection())
 
-        auto_framesteps_enabled = tk.BooleanVar(value=False)
+        auto_framesteps_enabled = tk.BooleanVar(value=True)
         steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
                                              offvalue=False, font=("Arial", FontSize-1), command=steps_per_frame_auto)
         steps_per_frame_btn.grid(row=frame_align_row, column=2, pady=3)
@@ -4081,13 +3924,13 @@ def create_widgets():
         pt_level_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
-        as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole.")
+        as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole (20 to 900, depends on PT used and size of hole).")
         pt_level_spinbox.bind("<FocusOut>", lambda event: pt_level_selection())
 
-        auto_pt_level_enabled = tk.BooleanVar(value=False)
+        auto_pt_level_enabled = tk.BooleanVar(value=True)
         pt_level_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_pt_level_enabled,
                                       onvalue=True, offvalue=False, font=("Arial", FontSize-1),
-                                      command=pt_level_spinbox_auto)
+                                      command=set_auto_pt_level)
         pt_level_btn.grid(row=frame_align_row, column=2, pady=3)
         as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
@@ -4103,7 +3946,7 @@ def create_widgets():
         frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(fine_tune_validation_cmd, '%P'))
-        as_tooltips.add(frame_fine_tune_spinbox, "Fine tune of frame detection: Can move the frame slightly up or down at detection time.")
+        as_tooltips.add(frame_fine_tune_spinbox, "Fine tune frame detection: Shift frame detection threshold up of down (5 to 95% of PT amplitude).")
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: frame_fine_tune_selection())
         frame_align_row += 1
 
@@ -4117,7 +3960,7 @@ def create_widgets():
         frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=2, pady=3, sticky=W)
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(extra_steps_validation_cmd, '%P'))
-        as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before detection (n between -30 and 30). Can be useful only in rare cases, 'Fine tune' should be enough.")
+        as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before detection (n between -30 and 30). Negative values can help if film gate is not correctly positioned.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: frame_extra_steps_selection())
 
         # ***************************************************
@@ -4151,7 +3994,8 @@ def create_widgets():
 
     if ExperimentalMode:
         experimental_frame = LabelFrame(extended_frame, text='Experimental Area', font=("Arial", FontSize-1))
-        experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
+        experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, expand=True, fill='y')
+        #experimental_frame.place(relx=0.75, rely=0.5, anchor="center")
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", font=("Arial", FontSize-1))
@@ -4220,7 +4064,7 @@ def create_widgets():
         hdr_bracket_shift_spinbox.bind("<FocusOut>", lambda event: hdr_bracket_shift_selection())
         hdr_row += 1
 
-        hdr_bracket_auto = tk.BooleanVar(value=HdrBracketAuto)
+        hdr_bracket_auto = tk.BooleanVar(value=False)
         hdr_bracket_width_auto_checkbox = tk.Checkbutton(hdr_frame, text='Auto bracket', height=1,
                                               variable=hdr_bracket_auto, onvalue=True, offvalue=False,
                                               command=adjust_hdr_bracket_auto, font=("Arial", FontSize-1))
@@ -4228,7 +4072,7 @@ def create_widgets():
         as_tooltips.add(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 will retrieve the auto-exposure level reported by the RPi HQ camera, adn will use it for the middle exposure, calculating the lower/upper values according to the bracket defined.")
         hdr_row += 1
 
-        hdr_merge_in_place = tk.BooleanVar(value=HdrMergeInPlace)
+        hdr_merge_in_place = tk.BooleanVar(value=False)
         hdr_merge_in_place_checkbox = tk.Checkbutton(hdr_frame, text='Merge in place', height=1,
                                               variable=hdr_merge_in_place, onvalue=True, offvalue=False,
                                               command=adjust_merge_in_place, font=("Arial", FontSize-1))
@@ -4300,10 +4144,11 @@ def create_widgets():
         arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                    AeExposureMode_label, AeExposureMode_dropdown])
+                                                    AeExposureMode_label, AeExposureMode_dropdown,
+                                                    AwbMode_label, AwbMode_dropdown])
+
 
 def get_controller_version():
-    global Controller_Id
     if Controller_Id == 0:
         logging.debug("Requesting controller version")
         send_arduino_command(CMD_VERSION_ID)
@@ -4318,8 +4163,6 @@ def main(argv):
     global SimulatedRun
     global ExpertMode, ExperimentalMode, PlotterMode
     global LogLevel, LoggingMode
-    global capture_display_event, capture_save_event
-    global capture_display_queue, capture_save_queue
     global ALT_scann_init_done
     global CameraDisabled, DisableThreads
     global ForceSmallSize, ForceBigSize
@@ -4362,7 +4205,6 @@ def main(argv):
             exit()
 
 
-    # ExpertMode = True   # Expert mode becomes default
     LogLevel = getattr(logging, LoggingMode.upper(), None)
     if not isinstance(LogLevel, int):
         raise ValueError('Invalid log level: %s' % LogLevel)
@@ -4372,6 +4214,10 @@ def main(argv):
     load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
 
     tscann8_init()
+
+    if ExpertMode or ExperimentalMode:
+        aux = int((win.winfo_width() - extended_frame.winfo_width())/2)
+        extended_frame.config(padx=aux)
 
     load_config_data()
     load_session_data()
@@ -4402,16 +4248,6 @@ def main(argv):
 
     # Main Loop
     win.mainloop()  # running3 the loop that works as a trigger
-
-    '''
-    if not SimulatedRun and not CameraDisabled:
-        capture_display_event.set()
-        capture_save_event.set()
-        capture_display_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-        capture_save_queue.put(END_TOKEN)
-    '''
 
     if not SimulatedRun and not CameraDisabled:
         camera.close()
