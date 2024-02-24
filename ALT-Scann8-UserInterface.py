@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.9.37"
-__date__ = "2024-02-22"
-__version_highlight__ = "Various bugfixes anf code cleanup"
+__version__ = "1.10.0"
+__date__ = "2024-02-24"
+__version_highlight__ = "New PiCamera2 controls (9) added to UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -996,9 +996,6 @@ def capture_display_thread(queue, event, id):
         if (MaxQueueSize - queue.qsize() <= 5):
             logging.warning("Display queue almost full: Skipping frame display")
         else:
-            # Invert image if button selected
-            if negative_image.get():
-                image = reverse_image(image)
             draw_preview_image(image, hdr_idx)
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
     active_threads -= 1
@@ -1033,12 +1030,17 @@ def capture_save_thread(queue, event, id):
         if type == REQUEST_TOKEN:
             request = message[1]
         elif type == IMAGE_TOKEN:
+            if is_dng:
+                logging.error("Cannot save plain image to DNG file.")
+                ScanStopRequested = True  # If target dir does not exist, stop scan
+                return
             captured_image = message[1]
         else:
             logging.error(f"Invalid message type received: {type}")
         frame_idx = message[2]
         hdr_idx = message[3]
         if is_dng:
+            # Saving DNG implies passing a request, not an image, therefore no additional checks (no negative allowed)
             if hdr_idx > 1:  # Hdr frame 1 has standard filename
                 request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
             else:  # Non HDR
@@ -1046,26 +1048,22 @@ def capture_save_thread(queue, event, id):
             request.release()
             logging.debug("Thread %i saved request DNG image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
         else:
-            #if is_jpg or negative_image.get() and not is_dng:  # Plain file save
-            if negative_image.get():
-                if type == REQUEST_TOKEN:
-                    captured_image = request.make_image('main')
-                    request.release()
-                captured_image = reverse_image(captured_image)
+            # If not is_dng AND negative_image AND request: Convert to image now, and do a PIL save
+            if not negative_image.get() and type == REQUEST_TOKEN:
+                if hdr_idx > 1:  # Hdr frame 1 has standard filename
+                    request.save('main',
+                                 HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+                else:  # Non HDR
+                    request.save('main', FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+                request.release()
+                logging.debug("Thread %i saved request image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
+            else:
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     logging.debug("Saving HDR frame n.%i", hdr_idx)
                     captured_image.save(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()), quality=95)
                 else:
                     captured_image.save(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()), quality=95)
                 logging.debug("Thread %i saved image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
-            else:
-                if hdr_idx > 1:  # Hdr frame 1 has standard filename
-                    request.save('main', HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
-                else:  # Non HDR
-                    request.save('main', FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
-                request.release()
-                logging.debug("Thread %i saved request image: %s ms", id, str(round((time.time() - curtime) * 1000, 1)))
-
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -1424,6 +1422,7 @@ def capture_hdr(mode):
         idx = hdr_num_exposures
         idx_inc = -1
     is_dng = file_type_dropdown_selected.get() == 'dng'
+    is_png = file_type_dropdown_selected.get() == 'png'
     for exp in work_list:
         exp = max(1, exp + hdr_bracket_shift_value.get())   # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
@@ -1446,65 +1445,42 @@ def capture_hdr(mode):
             img_np_float32 = img_np.astype(np.float32)
             images_to_merge.append(img_np_float32)  # Add frame
         else:
-            request = camera.capture_request(capture_config)
-            captured_image = request.make_image('main')
-            if not is_dng:  # If not using DNG we can still use multithread (if not disabled)
-                # Reuse captured_image from preview
-                # captured_image = request.make_image('main')
-                if DisableThreads:  # Save image in main loop
-                    curtime = time.time()
-                    if negative_image.get():
-                        captured_image = reverse_image(captured_image)
-                        draw_preview_image(captured_image, idx)  # Display preview
-                        request.release()  # release request, already have image, don't need it for non-DNG
-                        if idx > 1:  # Hdr frame 1 has standard filename
-                            captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx,
-                                                                           file_type_dropdown_selected.get()), quality=95)
-                        else:
-                            captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()),
-                                                quality=95)
-                        logging.debug("Capture hdr, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
-                    else:   # id non-negative, save request as it is more efficient, specially for PNG
-                        draw_preview_image(captured_image, idx)  # Display preview
-                        if idx > 1:  # Hdr frame 1 has standard filename
-                            request.save('main', HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
-                        else:
-                            request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
-                        request.release()  # release request, already have image, don't need it for non-DNG
-                        logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
-                else:   # send image to threads
-                    #request.release()  # release request, already have image, don't need it for non-DNG
-                    # Having the preview handled by a thread is not only not efficient, but algo quite sluggish
-                    if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
-                        if not negative_image.get():  # or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
-                            """
-                            draw_preview_image(captured_image, idx)
-                            save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, idx))
-                            capture_save_queue.put(save_queue_item)
-                            logging.debug("Queueing frame request %i to be saved", CurrentFrame)
-                            """
-                            # In HDR we cannot really pass a request to the thread since it will interfere with the
-                            # dry run captures done in the main capture loop. Maybe with synchronization it could be
-                            # made to work, but then the small advantage offered by threads would be lost
-                            request.release()
-                            draw_preview_image(captured_image, idx)
-                            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                            logging.debug("Queueing frame image %i to be saved", CurrentFrame)
-                        else:
-                            request.release()
-                            captured_image = reverse_image(captured_image)
-                            draw_preview_image(captured_image, idx)
-                            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                            logging.debug("Queueing frame image %i to be saved", CurrentFrame)
-            else:  # DNG + HDR, threads not possible due to request conflicting with retrieve metadata
-                draw_preview_image(captured_image, idx)  # Display preview
+            if is_dng or is_png:  # If not using DNG we can still use multithread (if not disabled)
+                # DNG + HDR, save threads not possible due to request conflicting with retrieve metadata
+                request = camera.capture_request(capture_config)
+                captured_image = request.make_image('main')
+                # Display preview using thread, not directly
+                queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                capture_display_queue.put(queue_item)
                 curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
                     request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                 else:  # Non HDR
                     request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
                 request.release()
-                logging.debug("Capture hdr, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+                logging.debug(f"Capture hdr, saved request image ({CurrentFrame}, {idx}: {round((time.time() - curtime) * 1000, 1)}")
+            else:
+                captured_image = camera.capture_image("main")
+                if negative_image.get():
+                    captured_image = reverse_image(captured_image)
+                if DisableThreads:  # Save image in main loop
+                    curtime = time.time()
+                    draw_preview_image(captured_image, idx)
+                    if idx > 1:  # Hdr frame 1 has standard filename
+                        captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
+                    else:
+                        captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                    logging.debug(f"Capture hdr, saved image ({CurrentFrame}, {idx}): {round((time.time() - curtime) * 1000, 1)} ms")
+                else:   # send image to threads
+                    if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
+                        # In HDR we cannot really pass a request to the thread since it will interfere with the
+                        # dry run captures done in the main capture loop. Maybe with synchronization it could be
+                        # made to work, but then the small advantage offered by threads would be lost
+                        queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                        # Display preview using thread, not directly
+                        capture_display_queue.put(queue_item)
+                        capture_save_queue.put(queue_item)
+                        logging.debug(f"Queueing hdr image ({CurrentFrame}, {idx})")
         idx += idx_inc
     if hdr_merge_in_place.get() and not is_dng:
         # Perform merge of the HDR image list
@@ -1512,7 +1488,10 @@ def capture_hdr(mode):
         # Convert the result back to PIL
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
         img = Image.fromarray(img)
-        draw_preview_image(img, 0)  # Display preview
+        # Display preview using thread, not directly
+        queue_item = tuple((IMAGE_TOKEN, img, CurrentFrame, 0))
+        capture_display_queue.put(queue_item)
+        ###draw_preview_image(img, 0)  # Display preview
         img.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
 
 
@@ -1521,47 +1500,52 @@ def capture_single(mode):
     global total_wait_time_save_image
 
     is_dng = file_type_dropdown_selected.get() == 'dng'
+    is_png = file_type_dropdown_selected.get() == 'png'
     if not DisableThreads:
-        if not negative_image.get(): # or is_dng: # Cannot capture negative if target is DNG file, so we ignore it
+        if is_dng or is_png:  # Save as request only for DNG captures
             request = camera.capture_request(capture_config)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             captured_image = request.make_image('main')
-            draw_preview_image(captured_image, 0)
+            # Display preview using thread, not directly
+            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
+            capture_display_queue.put(queue_item)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, 0))
                 capture_save_queue.put(save_queue_item)
-                logging.debug("Queueing frame %i to be saved", CurrentFrame)
+                logging.debug(f"Queueing frame ({CurrentFrame}")
         else:
             captured_image = camera.capture_image("main")
-            captured_image = reverse_image(captured_image)
+            if negative_image.get():
+                captured_image = reverse_image(captured_image)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
-            draw_preview_image(captured_image, 0)
+            # Display preview using thread, not directly
+            capture_display_queue.put(queue_item)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 capture_save_queue.put(queue_item)
-                logging.debug("Saving frame %i", CurrentFrame)
+                logging.debug(f"Queuing frame {CurrentFrame}")
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
             Scanned_Images_number_str.set(str(CurrentFrame))
     else:
-        request = camera.capture_request(capture_config)
-        captured_image = request.make_image('main')
         curtime = time.time()
-        if negative_image.get() and not is_dng: # Cannot capture negative if target is DNG file, so we ignore it
+        if is_dng or is_png:
+            request = camera.capture_request(capture_config)
+            captured_image = request.make_image('main')
+            draw_preview_image(captured_image, 0)
+            if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
+                request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                logging.debug(f"Saving DNG frame ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
             request.release()
-            captured_image = reverse_image(captured_image)
+        else:
+            captured_image = camera.capture_image("main")
+            if negative_image.get():
+                captured_image = reverse_image(captured_image)
             draw_preview_image(captured_image, 0)
             captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
-            logging.debug("Capture single, saved image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
-        else:
-            draw_preview_image(captured_image, 0)
-            if is_dng:
-                request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
-            else:
-                request.save('main', FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
-            request.release()
-            logging.debug("Capture single, saved request image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+            logging.debug(
+                f"Saving image ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -1855,6 +1839,13 @@ def start_scan():
         SessionData["CurrentFrame"] = str(CurrentFrame)
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
+
+        is_dng = file_type_dropdown_selected.get() == 'dng'
+        is_png = file_type_dropdown_selected.get() == 'png'
+        if (is_dng or is_png) and negative_image.get():  # Incompatible choices, display error and quit
+            tk.messagebox.showerror("Error!", "Cannot scan negative images to DNG or PNG files. Please correct and retry.")
+            logging.debug("Cannot scan negative images to DNG file. Please correct and retry.")
+            return
 
         ScanOngoing = True
         arrange_custom_spinboxes_status(win)
