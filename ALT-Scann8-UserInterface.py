@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.0"
-__date__ = "2024-02-24"
-__version_highlight__ = "New PiCamera2 controls (9) added to UI"
+__version__ = "1.10.1"
+__date__ = "2024-02-25"
+__version_highlight__ = "Fragmented Preview"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1075,7 +1075,6 @@ def draw_preview_image(preview_image, idx):
 
     curtime = time.time()
 
-
     if idx == 0 or (idx == 2 and not HdrViewX4Active):
         preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
         PreviewAreaImage = ImageTk.PhotoImage(preview_image)
@@ -1448,10 +1447,11 @@ def capture_hdr(mode):
             if is_dng or is_png:  # If not using DNG we can still use multithread (if not disabled)
                 # DNG + HDR, save threads not possible due to request conflicting with retrieve metadata
                 request = camera.capture_request(capture_config)
-                captured_image = request.make_image('main')
-                # Display preview using thread, not directly
-                queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                capture_display_queue.put(queue_item)
+                if CurrentFrame % preview_module_value.get() == 0:
+                    captured_image = request.make_image('main')
+                    # Display preview using thread, not directly
+                    queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
+                    capture_display_queue.put(queue_item)
                 curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
                     request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
@@ -1465,7 +1465,8 @@ def capture_hdr(mode):
                     captured_image = reverse_image(captured_image)
                 if DisableThreads:  # Save image in main loop
                     curtime = time.time()
-                    draw_preview_image(captured_image, idx)
+                    if CurrentFrame % preview_module_value.get() == 0:
+                        draw_preview_image(captured_image, idx)
                     if idx > 1:  # Hdr frame 1 has standard filename
                         captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                     else:
@@ -1477,8 +1478,9 @@ def capture_hdr(mode):
                         # dry run captures done in the main capture loop. Maybe with synchronization it could be
                         # made to work, but then the small advantage offered by threads would be lost
                         queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, idx))
-                        # Display preview using thread, not directly
-                        capture_display_queue.put(queue_item)
+                        if CurrentFrame % preview_module_value.get() == 0:
+                            # Display preview using thread, not directly
+                            capture_display_queue.put(queue_item)
                         capture_save_queue.put(queue_item)
                         logging.debug(f"Queueing hdr image ({CurrentFrame}, {idx})")
         idx += idx_inc
@@ -1488,10 +1490,10 @@ def capture_hdr(mode):
         # Convert the result back to PIL
         img = cv2.normalize(img, None, 0, 255, cv2.NORM_MINMAX, cv2.CV_8U)
         img = Image.fromarray(img)
-        # Display preview using thread, not directly
-        queue_item = tuple((IMAGE_TOKEN, img, CurrentFrame, 0))
-        capture_display_queue.put(queue_item)
-        ###draw_preview_image(img, 0)  # Display preview
+        if CurrentFrame % preview_module_value.get() == 0:
+            # Display preview using thread, not directly
+            queue_item = tuple((IMAGE_TOKEN, img, CurrentFrame, 0))
+            capture_display_queue.put(queue_item)
         img.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
 
 
@@ -1505,10 +1507,11 @@ def capture_single(mode):
         if is_dng or is_png:  # Save as request only for DNG captures
             request = camera.capture_request(capture_config)
             # For PiCamera2, preview and save to file are handled in asynchronous threads
-            captured_image = request.make_image('main')
-            # Display preview using thread, not directly
-            queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
-            capture_display_queue.put(queue_item)
+            if CurrentFrame % preview_module_value.get() == 0:
+                captured_image = request.make_image('main')
+                # Display preview using thread, not directly
+                queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
+                capture_display_queue.put(queue_item)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, 0))
                 capture_save_queue.put(save_queue_item)
@@ -1517,10 +1520,11 @@ def capture_single(mode):
             captured_image = camera.capture_image("main")
             if negative_image.get():
                 captured_image = reverse_image(captured_image)
-            # For PiCamera2, preview and save to file are handled in asynchronous threads
             queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
-            # Display preview using thread, not directly
-            capture_display_queue.put(queue_item)
+            # For PiCamera2, preview and save to file are handled in asynchronous threads
+            if CurrentFrame % preview_module_value.get() == 0:
+                # Display preview using thread, not directly
+                capture_display_queue.put(queue_item)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 capture_save_queue.put(queue_item)
                 logging.debug(f"Queuing frame {CurrentFrame}")
@@ -1532,8 +1536,9 @@ def capture_single(mode):
         curtime = time.time()
         if is_dng or is_png:
             request = camera.capture_request(capture_config)
-            captured_image = request.make_image('main')
-            draw_preview_image(captured_image, 0)
+            if CurrentFrame % preview_module_value.get() == 0:
+                captured_image = request.make_image('main')
+                draw_preview_image(captured_image, 0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
                 logging.debug(f"Saving DNG frame ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
@@ -1542,7 +1547,8 @@ def capture_single(mode):
             captured_image = camera.capture_image("main")
             if negative_image.get():
                 captured_image = reverse_image(captured_image)
-            draw_preview_image(captured_image, 0)
+            if CurrentFrame % preview_module_value.get() == 0:
+                draw_preview_image(captured_image, 0)
             captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
             logging.debug(
                 f"Saving image ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
@@ -1600,8 +1606,8 @@ def capture(mode):
             total_wait_time_autoexp += aux
             time_autoexp.add_value(aux)
             logging.debug("AE match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
-        else:
-            time_autoexp.add_value(0)
+    else:
+        time_autoexp.add_value(0)
 
 
     # Wait for auto white balance to adapt only if allowed
@@ -1638,8 +1644,8 @@ def capture(mode):
             total_wait_time_awb += aux
             time_awb.add_value(aux)
             logging.debug("AWB Match delay: %s ms", str(round((time.time() - curtime) * 1000,1)))
-        else:
-            time_awb.add_value(0)
+    else:
+        time_awb.add_value(0)
 
 
     if PiCam2PreviewEnabled:
@@ -2487,6 +2493,9 @@ def load_session_data():
                     aux = int(SessionData["ScanSpeed"])
                     scan_speed_value.set(aux)
                     send_arduino_command(CMD_SET_SCAN_SPEED, aux)
+                if 'PreviewModule' in SessionData:
+                    aux = int(SessionData["PreviewModule"])
+                    preview_module_value.set(aux)
                 if 'Brightness' in SessionData:
                     aux = SessionData["Brightness"]
                     brightness_value.set(aux)
@@ -3003,6 +3012,15 @@ def scan_speed_validation(new_value):
     return value_validation(new_value, scan_speed_spinbox, 1, 10, 5)
 
 
+def preview_module_selection():
+    aux = value_normalize(preview_module_value, 1, 50, 1)
+    SessionData["PreviewModule"] = aux
+
+
+def preview_module_validation(new_value):
+    return value_validation(new_value, preview_module_spinbox, 1, 50, 1)
+
+
 def stabilization_delay_selection():
     aux = value_normalize(stabilization_delay_value, 0, 1000, 150)
     aux = aux/1000
@@ -3240,8 +3258,8 @@ def create_widgets():
     global AeConstraintMode_dropdown_selected, AeMeteringMode_dropdown_selected, AeExposureMode_dropdown_selected, AwbMode_dropdown_selected
     global AeConstraintMode_dropdown, AeMeteringMode_dropdown, AeExposureMode_dropdown, AwbMode_dropdown
     global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label, AwbMode_label
-    global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value
-    global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox
+    global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value, preview_module_value
+    global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
 
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
@@ -4129,6 +4147,18 @@ def create_widgets():
                           activebackground='#f0f0f0', wraplength=100, relief=RAISED, font=("Arial", FontSize-1))
         Free_btn.grid(row=4, column=0, columnspan=2, padx=4, sticky='')
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always unlocked when not performing any specific operation.")
+
+        # Spinbox to select Preview module
+        preview_module_label = tk.Label(experimental_miscellaneous_frame, text='Preview module:', font=("Arial", FontSize-1))
+        preview_module_label.grid(row=5, column=0, padx=3, pady=1, sticky=E)
+        preview_module_value = tk.IntVar(value=1)   # Default value, overriden by configuration
+        preview_module_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=preview_module_selection, width=8,
+                    textvariable=preview_module_value, from_=1, to=50, font=("Arial", FontSize-1))
+        preview_module_spinbox.grid(row=5, column=1, padx=4, pady=3, sticky=W)
+        preview_module_validation_cmd = preview_module_spinbox.register(preview_module_validation)
+        preview_module_spinbox.configure(validate="key", validatecommand=(preview_module_validation_cmd, '%P'))
+        as_tooltips.add(preview_module_spinbox, "Select preview display frequency (1 every n frames).")
+        preview_module_spinbox.bind("<FocusOut>", lambda event: preview_module_selection())
 
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_spinbox])
