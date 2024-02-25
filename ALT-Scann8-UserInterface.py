@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.1"
+__version__ = "1.10.2"
 __date__ = "2024-02-25"
-__version_highlight__ = "Fragmented Preview"
+__version_highlight__ = "Fix disable tooltips"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -4207,7 +4207,7 @@ def main(argv):
         elif opt == '-2':
             ForceBigSize = True
         elif opt == '-n':
-            disable_tooltips()
+            go_disable_tooptips = True
         elif opt == '-t':
             DisableThreads = True
         elif opt == '-p':
@@ -4235,6 +4235,9 @@ def main(argv):
     load_persisted_data_from_disk()     # Read json file in memory, to be processed by 'load_session_data'
 
     tscann8_init()
+
+    if go_disable_tooptips:
+        as_tooltips.disable()
 
     if ExpertMode or ExperimentalMode:
         aux = int((win.winfo_width() - extended_frame.winfo_width())/2)
