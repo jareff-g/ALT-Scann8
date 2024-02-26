@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.2"
-__date__ = "2024-02-25"
+__version__ = "1.10.3"
+__date__ = "2024-02-26"
 __version_highlight__ = "Fix disable tooltips"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -4188,6 +4188,7 @@ def main(argv):
     global CameraDisabled, DisableThreads
     global ForceSmallSize, ForceBigSize
 
+    go_disable_tooptips = False
 
     opts, args = getopt.getopt(argv, "sexl:ph12nt")
 
