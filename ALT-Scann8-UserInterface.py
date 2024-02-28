@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.5"
-__date__ = "2024-02-27"
-__version_highlight__ = "Back to buttons"
+__version__ = "1.10.6"
+__date__ = "2024-02-28"
+__version_highlight__ = "Adjust sprocket holes for better match"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -152,9 +152,10 @@ PreviewWinX = 90
 PreviewWinY = 75
 PreviewWidth = 0
 PreviewHeight = 0
-FilmHoleY1 = 0
-FilmHoleY2 = 0
-FilmHoleHeight = 0
+FilmHoleY_Top = 0
+FilmHoleY_Bottom = 0
+FilmHoleHeightTop = 0
+FilmHoleHeightBottom = 0
 DeltaX = 0
 DeltaY = 0
 WinInitDone = False
@@ -1263,8 +1264,7 @@ def set_real_time_display():
 
 
 def set_s8():
-    global FilmHoleY1, FilmHoleY2
-    global PreviewHeight, FilmHoleY1, FilmHoleY2
+    global PreviewHeight, FilmHoleY_Top, FilmHoleY_Bottom
 
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
@@ -1278,10 +1278,10 @@ def set_s8():
         pt_level_value.set(PTLevel)
         steps_per_frame_value.set(MinFrameSteps)
     # Size and position of hole markers
-    FilmHoleY1 = int(PreviewHeight / 2.3)
-    FilmHoleY2 = FilmHoleY1
-    film_hole_frame_1.place(x=0, y=FilmHoleY1, height=FilmHoleHeight)
-    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=FilmHoleHeight)
+    FilmHoleY_Top = int(PreviewHeight / 2.6)
+    FilmHoleY_Bottom = FilmHoleY_Top
+    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
+    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
@@ -1289,8 +1289,8 @@ def set_s8():
 
 
 def set_r8():
-    global film_hole_frame_1, film_hole_frame_2
-    global PreviewHeight, FilmHoleY1, FilmHoleY2, FilmHoleHeight
+    global film_hole_frame_top, film_hole_frame_bottom
+    global PreviewHeight, FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
 
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
@@ -1304,10 +1304,10 @@ def set_r8():
         pt_level_value.set(PTLevel)
         steps_per_frame_value.set(MinFrameSteps)
     # Size and position of hole markers
-    FilmHoleY1 = 6
-    FilmHoleY2 = int(PreviewHeight / 1.26)
-    film_hole_frame_1.place(x=0, y=FilmHoleY1, height=FilmHoleHeight)
-    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=FilmHoleHeight)
+    FilmHoleY_Top = 6
+    FilmHoleY_Bottom = int(PreviewHeight / 1.30)
+    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
+    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else PTLevel)
@@ -2649,7 +2649,7 @@ def create_main_window():
     global FontSize, BigSize
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
-    global FilmHoleHeight, FilmHoleY1, FilmHoleY2
+    global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
 
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     if SimulatedRun:
@@ -2678,9 +2678,10 @@ def create_main_window():
         plotter_width = 160
         plotter_height = 60
     # Size and position of hole markers
-    FilmHoleHeight = int(PreviewHeight / 4.6)
-    FilmHoleY1 = 6
-    FilmHoleY2 = int(PreviewHeight / 1.26)
+    FilmHoleHeightTop = int(PreviewHeight / 5.9)
+    FilmHoleHeightBottom = int(PreviewHeight / 4.2)
+    FilmHoleY_Top = 6
+    FilmHoleY_Bottom = int(PreviewHeight / 1.30)
     if ExpertMode or ExperimentalMode:
         app_height += 325 if BigSize else 265
     # Prevent window resize
@@ -3228,7 +3229,7 @@ def create_widgets():
     global temp_in_fahrenheit
     global auto_white_balance_change_pause
     global auto_wb_wait_btn
-    global film_hole_frame_1, film_hole_frame_2, FilmHoleY1, FilmHoleY2
+    global film_hole_frame_top, film_hole_frame_bottom, FilmHoleY_Top, FilmHoleY_Bottom
     global temp_in_fahrenheit_checkbox
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
@@ -3280,35 +3281,35 @@ def create_widgets():
     x_pad = (2, 2)
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
-    top_area_frame.pack(side=TOP, anchor=NW, fill='both')
+    top_area_frame.pack(side=TOP, pady=(8, 0), anchor=NW, fill='both')
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
-    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0), pady=(10, 0), fill=Y)
+    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0), fill=Y)
     # Create a LabelFrame to act as a border of preview canvas
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
-    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(10, 0))
+    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2,0))  # Pady+=2 to compensate
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey',
                                  width=PreviewWidth, height=PreviewHeight)
     draw_capture_canvas.pack(padx=(20,5), pady=5)
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame)
-    top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(10, 0))
+    top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
 
     # ***************************************
     # Display markers for film hole reference
     # Size & postition of markers relative to preview height
-    film_hole_frame_1 = Frame(draw_capture_frame, width=1, height=1, bg='black')
-    film_hole_frame_1.pack(side=TOP, padx=1, pady=1)
-    film_hole_frame_1.place(x=0, y=FilmHoleY1, height=FilmHoleHeight)
-    film_hole_label_1 = Label(film_hole_frame_1, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
+    film_hole_frame_top = Frame(draw_capture_frame, width=1, height=1, bg='black')
+    film_hole_frame_top.pack(side=TOP, padx=1, pady=1)
+    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
+    film_hole_label_1 = Label(film_hole_frame_top, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                               bg='white', fg='white')
     film_hole_label_1.pack(side=TOP)
 
-    film_hole_frame_2 = Frame(draw_capture_frame, width=1, height=1, bg='black')
-    film_hole_frame_2.pack(side=TOP, padx=1, pady=1)
-    film_hole_frame_2.place(x=0, y=FilmHoleY2, height=FilmHoleHeight)
-    film_hole_label_2 = Label(film_hole_frame_2, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
+    film_hole_frame_bottom = Frame(draw_capture_frame, width=1, height=1, bg='black')
+    film_hole_frame_bottom.pack(side=TOP, padx=1, pady=1)
+    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
+    film_hole_label_2 = Label(film_hole_frame_bottom, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
                               bg='white', fg='white')
     film_hole_label_2.pack(side=TOP)
 
