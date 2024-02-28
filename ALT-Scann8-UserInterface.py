@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.6"
+__version__ = "1.10.7"
 __date__ = "2024-02-28"
-__version_highlight__ = "Adjust sprocket holes for better match"
+__version_highlight__ = "Extended area scrollbar if focring big size"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -80,6 +80,7 @@ from rolling_average import RollingAverage
 win = None
 as_tooltips = None
 ExitingApp = False
+add_vertical_scrollbar = False
 Controller_Id = 0   # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -1216,13 +1217,27 @@ def toggle_ui_size():
     global app_height
 
     if toggle_ui_small.get():
-        app_height -= 290 if BigSize else 230
-        expert_frame.pack_forget()
-        experimental_frame.pack_forget()
+        ###app_height -= 290 if BigSize else 230
+        if main_canvas is None:
+            extended_frame.pack_forget()
+        else:
+            main_canvas.pack_forget()
+            main_scrollbar.pack_forget()
+        # Update the window's geometry to fit its content
+        win.update_idletasks()
+        app_width = win.winfo_reqwidth()
+        app_height = win.winfo_reqheight()
     else:
-        app_height += 290 if BigSize else 230
-        expert_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
-        experimental_frame.pack(side=LEFT, padx=5, ipadx=5, pady=5, fill='both', expand=True)
+        ###app_height += 290 if BigSize else 230
+        if main_canvas is None:
+            extended_frame.pack(side=TOP, padx=10, expand=True, fill="y")
+        else:
+            main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+            main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Update the window's geometry to fit its content
+        win.update_idletasks()
+        app_width = win.winfo_reqwidth()
+        app_height = win.winfo_reqheight()
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -2642,11 +2657,15 @@ def hdr_reinit():
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
 
 
+def on_configure_main_canvas(event):
+    main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+
+
 def create_main_window():
     global win
     global plotter_width, plotter_height
     global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
-    global FontSize, BigSize
+    global FontSize, BigSize, add_vertical_scrollbar
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
     global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
@@ -2684,6 +2703,11 @@ def create_main_window():
     FilmHoleY_Bottom = int(PreviewHeight / 1.30)
     if ExpertMode or ExperimentalMode:
         app_height += 325 if BigSize else 265
+    # Check if window fits on screen, otherwise reduce and add croll bar
+    if app_height > screen_height:
+        app_height = screen_height - 100
+        app_width += 20
+        add_vertical_scrollbar = True
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -3275,13 +3299,41 @@ def create_widgets():
     global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label, AwbMode_label
     global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value, preview_module_value
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
+    global main_canvas, main_scrollbar
 
     # Global value for separations between widgets
     y_pad = (2, 2)
     x_pad = (2, 2)
+
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(win)
     top_area_frame.pack(side=TOP, pady=(8, 0), anchor=NW, fill='both')
+
+    # Check if vertical scrollbar required
+    if add_vertical_scrollbar:
+        # Create a canvas widget
+        main_canvas = tk.Canvas(win)
+        main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Add a scrollbar to the canvas
+        main_scrollbar = tk.Scrollbar(win, command=main_canvas.yview)
+        main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Configure the canvas to use the scrollbar
+        main_canvas.configure(yscrollcommand=main_scrollbar.set)
+
+        # Create a frame inside the canvas to hold the content
+        main_frame = tk.Frame(main_canvas)
+        main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+
+        # Bind the frame to the canvas so it resizes properly
+        main_frame.bind("<Configure>", on_configure_main_canvas)
+
+        main_window = main_frame
+    else:
+        main_canvas = None
+        main_window = win
+
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
     top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0), fill=Y)
@@ -3661,7 +3713,7 @@ def create_widgets():
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
-        extended_frame = Frame(win)
+        extended_frame = Frame(main_window)
         extended_frame.pack(side=TOP, padx=10, expand=True, fill="y")
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
