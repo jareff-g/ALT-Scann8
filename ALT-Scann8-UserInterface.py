@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.8"
+__version__ = "1.10.9"
 __date__ = "2024-02-28"
-__version_highlight__ = "Rename scroll area variables"
+__version_highlight__ = "Change toggle buttons to pale green"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -481,10 +481,8 @@ def set_focus_zoom():
     global FocusZoomActive
 
     if real_time_zoom.get():
-        real_time_zoom_checkbox.config(fg="white")  # Change background color and text color when checked
         real_time_display_checkbox.config(state=DISABLED)
     else:
-        real_time_zoom_checkbox.config(fg="black")  # Change back to default colors when unchecked
         real_time_display_checkbox.config(state=NORMAL)
 
     if not SimulatedRun and not CameraDisabled:
@@ -1207,10 +1205,6 @@ def switch_hdr_viewx4():
 
 def set_negative_image():
     SessionData["NegativeCaptureActive"] = negative_image.get()
-    if negative_image.get():
-        negative_image_checkbox.config(fg="white")  # Change background color and text color when checked
-    else:
-        negative_image_checkbox.config(fg="black")  # Change back to default colors when unchecked
 
 
 def toggle_ui_size():
@@ -1235,7 +1229,7 @@ def toggle_ui_size():
         # Update the window's geometry to fit its content
         win.update_idletasks()
         app_width = win.winfo_reqwidth()
-        app_height = win.winfo_reqheight()
+        app_height = original_app_height
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -1249,10 +1243,8 @@ def toggle_ui_size():
 def set_real_time_display():
     if real_time_display.get():
         logging.debug("Real time display enabled")
-        real_time_display_checkbox.config(fg="white")  # Change background color and text color when checked
     else:
         logging.debug("Real time display disabled")
-        real_time_display_checkbox.config(fg="black")  # Change background color and text color when checked
     if not SimulatedRun and not CameraDisabled:
         if real_time_display.get():
             if camera._preview:
@@ -2272,7 +2264,7 @@ def load_config_data():
 def arrange_widget_state(disabled, widget_list):
     for widget in widget_list:
         if isinstance(widget, tk.Spinbox):
-            widget.config(state='readonly' if disabled else NORMAL)
+            widget.config(state='readonly' if disabled else NORMAL)     # Used to be readonly instead of disabled
         elif isinstance(widget, tk.OptionMenu) or isinstance(widget, tk.Label) or isinstance(widget, tk.Checkbutton):
             widget.config(state=DISABLED if disabled else NORMAL)
         elif isinstance(widget, tk.Checkbutton):
@@ -2662,7 +2654,7 @@ def on_configure_scrolled_canvas(event):
 def create_main_window():
     global win
     global plotter_width, plotter_height
-    global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
+    global PreviewWinX, PreviewWinY, app_width, app_height, original_app_height, PreviewWidth, PreviewHeight
     global FontSize, BigSize, add_vertical_scrollbar
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
@@ -2704,8 +2696,9 @@ def create_main_window():
     # Check if window fits on screen, otherwise reduce and add croll bar
     if app_height > screen_height:
         app_height = screen_height - 128
-        app_width += 20
         add_vertical_scrollbar = True
+    # Save original ap height for toggle UI button
+    original_app_height = app_height
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -2877,8 +2870,7 @@ def value_validation(new_value, widget, min, max, default, is_double=False):
 
 def set_auto_exposure():
     aux = 0 if AE_enabled.get() else int(exposure_value.get() * 1000)
-    if not auto_exposure_btn.cget("indicatoron"):
-        auto_exposure_btn.config(text="Auto Exp:" if AE_enabled.get() else "Exposure:")
+    auto_exposure_btn.config(text="Auto Exp:" if AE_enabled.get() else "Exposure:")
     arrange_widget_state(AE_enabled.get(), [exposure_spinbox])
     arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                 AeConstraintMode_label, AeConstraintMode_dropdown,
@@ -3400,11 +3392,10 @@ def create_widgets():
 
     # Switch Positive/negative modes
     negative_image = tk.BooleanVar(value=False)
-    #toggle_btn = tk.Checkbutton(root, text="Toggle", variable=var, command=toggle_button, indicatoron=False)
     negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film',
                                                  variable=negative_image, onvalue=True, offvalue=False,
                                                  font=("Arial", FontSize), command=set_negative_image,
-                                                 indicatoron=False, selectcolor="sea green")
+                                                 indicatoron=False, selectcolor="pale green")
     negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
     bottom_area_row += 1
@@ -3414,7 +3405,7 @@ def create_widgets():
     real_time_display_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus view', height=1,
                                                 variable=real_time_display, onvalue=True, offvalue=False,
                                                 font=("Arial", FontSize), command=set_real_time_display,
-                                                indicatoron=False, selectcolor="sea green")
+                                                indicatoron=False, selectcolor="pale green")
     real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, useful mainly to focus the film.")
     bottom_area_row += 1
@@ -3424,7 +3415,7 @@ def create_widgets():
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
                                              variable=real_time_zoom, onvalue=True, offvalue=False,
                                              font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
-                                             selectcolor="sea green", state=DISABLED)
+                                             selectcolor="pale green", state=DISABLED)
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
     bottom_area_row += 1
@@ -3730,14 +3721,14 @@ def create_widgets():
         # Automatic exposure
         AE_enabled = tk.BooleanVar(value=False)
         auto_exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
-                                           font=("Arial", FontSize-1), command=set_auto_exposure,
+                                           font=("Arial", FontSize-1), command=set_auto_exposure, selectcolor="pale green",
                                            text="Exposure:", relief="raised", indicatoron=False)
         auto_exposure_btn.grid(row=exp_wb_row, column=0, sticky="EW")
         as_tooltips.add(auto_exposure_btn, "Toggle automatic exposure status (on/off).")
 
         exposure_value = tk.DoubleVar(value=0)  # Auto exposure by default, overriden by configuration if any
         exposure_spinbox = DynamicSpinbox(exp_wb_frame, command=exposure_selection, width=8, textvariable=exposure_value,
-                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1), readonlybackground='pale green')
+                                      from_=0.001, to=10000, increment=1, font=("Arial", FontSize-1))
         exposure_spinbox.grid(row=exp_wb_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         exposure_validation_cmd = exposure_spinbox.register(exposure_validation)
         exposure_spinbox.configure(validate="key", validatecommand=(exposure_validation_cmd, '%P'))
@@ -3755,13 +3746,13 @@ def create_widgets():
         # Automatic White Balance red
         AWB_enabled = tk.BooleanVar(value=False)
         auto_wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
-                                    font=("Arial", FontSize-1), command=set_auto_wb,
+                                    font=("Arial", FontSize-1), command=set_auto_wb, selectcolor="pale green",
                                     text="WB Red:", relief="raised", indicatoron=False)
         auto_wb_red_btn.grid(row=exp_wb_row, column=0, sticky="WE")
         as_tooltips.add(auto_wb_red_btn, "Toggle automatic white balance for both WB channels (on/off).")
 
         wb_red_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8, readonlybackground='pale green',
+        wb_red_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_red_selection, width=8,
             textvariable=wb_red_value, from_=0, to=32, increment=0.1, font=("Arial", FontSize-1))
         wb_red_spinbox.grid(row=exp_wb_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         wb_red_validation_cmd = wb_red_spinbox.register(wb_red_validation)
@@ -3779,13 +3770,13 @@ def create_widgets():
 
         # Automatic White Balance blue
         auto_wb_blue_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
-                                    font=("Arial", FontSize-1), command=set_auto_wb,
+                                    font=("Arial", FontSize-1), command=set_auto_wb, selectcolor="pale green",
                                     text="WB Blue:", relief="raised", indicatoron=False)
         auto_wb_blue_btn.grid(row=exp_wb_row, column=0, sticky="WE")
         as_tooltips.add(auto_wb_blue_btn, "Toggle automatic white balance for both WB channels (on/off).")
 
         wb_blue_value = tk.DoubleVar(value=2.2)  # Default value, overriden by configuration
-        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8, readonlybackground='pale green',
+        wb_blue_spinbox = DynamicSpinbox(exp_wb_frame, command=wb_blue_selection, width=8,
             textvariable=wb_blue_value, from_=0, to=32, increment=0.1, font=("Arial", FontSize-1))
         wb_blue_spinbox.grid(row=exp_wb_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         wb_blue_validation_cmd = wb_blue_spinbox.register(wb_blue_validation)
