@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.7"
+__version__ = "1.10.8"
 __date__ = "2024-02-28"
-__version_highlight__ = "Extended area scrollbar if forcing big size"
+__version_highlight__ = "Rename scroll area variables"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1217,23 +1217,21 @@ def toggle_ui_size():
     global app_height
 
     if toggle_ui_small.get():
-        ###app_height -= 290 if BigSize else 230
-        if main_canvas is None:
+        if scrolled_canvas is None:
             extended_frame.pack_forget()
         else:
-            main_canvas.pack_forget()
-            main_scrollbar.pack_forget()
+            scrolled_canvas.pack_forget()
+            scrolled_canvas_scrollbar.pack_forget()
         # Update the window's geometry to fit its content
         win.update_idletasks()
         app_width = win.winfo_reqwidth()
         app_height = win.winfo_reqheight()
     else:
-        ###app_height += 290 if BigSize else 230
-        if main_canvas is None:
-            extended_frame.pack(side=TOP, padx=10, expand=True, fill="y")
+        if scrolled_canvas is None:
+            extended_frame.pack(side=LEFT, padx=10, expand=True, fill=tk.Y, anchor="center")
         else:
-            main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+            scrolled_canvas.pack(side=LEFT, expand=True, fill=tk.BOTH)
+            scrolled_canvas_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         # Update the window's geometry to fit its content
         win.update_idletasks()
         app_width = win.winfo_reqwidth()
@@ -2657,8 +2655,8 @@ def hdr_reinit():
     hdr_rev_exp_list = list(reversed(hdr_exp_list))
 
 
-def on_configure_main_canvas(event):
-    main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+def on_configure_scrolled_canvas(event):
+    scrolled_canvas.configure(scrollregion=scrolled_canvas.bbox("all"))
 
 
 def create_main_window():
@@ -2702,10 +2700,10 @@ def create_main_window():
     FilmHoleY_Top = 6
     FilmHoleY_Bottom = int(PreviewHeight / 1.30)
     if ExpertMode or ExperimentalMode:
-        app_height += 325 if BigSize else 265
+        app_height += 325 if BigSize else 225
     # Check if window fits on screen, otherwise reduce and add croll bar
     if app_height > screen_height:
-        app_height = screen_height - 100
+        app_height = screen_height - 128
         app_width += 20
         add_vertical_scrollbar = True
     # Prevent window resize
@@ -3299,7 +3297,7 @@ def create_widgets():
     global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label, AwbMode_label
     global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value, preview_module_value
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
-    global main_canvas, main_scrollbar
+    global scrolled_canvas, scrolled_canvas_scrollbar
 
     # Global value for separations between widgets
     y_pad = (2, 2)
@@ -3312,27 +3310,27 @@ def create_widgets():
     # Check if vertical scrollbar required
     if add_vertical_scrollbar:
         # Create a canvas widget
-        main_canvas = tk.Canvas(win)
-        main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrolled_canvas = tk.Canvas(win)
+        scrolled_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Add a scrollbar to the canvas
-        main_scrollbar = tk.Scrollbar(win, command=main_canvas.yview)
-        main_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        scrolled_canvas_scrollbar = tk.Scrollbar(win, command=scrolled_canvas.yview)
+        scrolled_canvas_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Configure the canvas to use the scrollbar
-        main_canvas.configure(yscrollcommand=main_scrollbar.set)
+        scrolled_canvas.configure(yscrollcommand=scrolled_canvas_scrollbar.set)
 
         # Create a frame inside the canvas to hold the content
-        main_frame = tk.Frame(main_canvas)
-        main_canvas.create_window((0, 0), window=main_frame, anchor="nw")
+        scrolled_frame = tk.Frame(scrolled_canvas)
+        scrolled_canvas.create_window((0, 0), window=scrolled_frame, anchor="nw")
 
         # Bind the frame to the canvas so it resizes properly
-        main_frame.bind("<Configure>", on_configure_main_canvas)
+        scrolled_frame.bind("<Configure>", on_configure_scrolled_canvas)
 
-        main_window = main_frame
+        lower_container = scrolled_frame
     else:
-        main_canvas = None
-        main_window = win
+        scrolled_canvas = None
+        lower_container = win
 
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
@@ -3713,8 +3711,8 @@ def create_widgets():
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
-        extended_frame = Frame(main_window)
-        extended_frame.pack(side=TOP, padx=10, expand=True, fill="y")
+        extended_frame = Frame(lower_container)
+        extended_frame.pack(side=LEFT, padx=10, expand=True, fill="y", anchor="center")
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
         expert_frame.pack(side=LEFT, padx=x_pad, pady=y_pad, expand=True, fill='y')
