@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.9"
-__date__ = "2024-02-28"
+__version__ = "1.10.10"
+__date__ = "2024-02-29"
 __version_highlight__ = "Change toggle buttons to pale green"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -762,18 +762,17 @@ def button_status_change_except(except_button, active):
     global button_lock_counter
     general_widget_list=[SingleStep_btn,Snapshot_btn,AdvanceMovie_btn,Rewind_btn,FastForward_btn,negative_image_checkbox,
                         Exit_btn,film_type_S8_rb,film_type_R8_rb,file_type_dropdown,new_folder_btn,real_time_display_checkbox,
-                        resolution_label,resolution_dropdown,file_type_label,file_type_dropdown,existing_folder_btn]
+                        resolution_label,resolution_dropdown,file_type_label,file_type_dropdown,existing_folder_btn, hdr_capture_active_checkbox]
     control_widget_list = [auto_exposure_btn, exposure_spinbox, auto_exposure_wait_btn, auto_wb_red_btn, wb_red_spinbox,
                            auto_wb_wait_btn, auto_wb_blue_btn, wb_blue_spinbox, match_wait_margin_spinbox,
-                           AeConstraintMode_dropdown,
-                           AeMeteringMode_dropdown, AeExposureMode_dropdown, AwbMode_dropdown, brightness_spinbox,
-                           contrast_spinbox, saturation_spinbox,
+                           AeConstraintMode_dropdown, AeMeteringMode_dropdown, AeExposureMode_dropdown,
+                           AwbMode_dropdown, brightness_spinbox, contrast_spinbox, saturation_spinbox,
                            analogue_gain_spinbox, sharpness_spinbox, exposure_compensation_spinbox,
-                           steps_per_frame_spinbox, pt_level_spinbox,
-                           frame_fine_tune_spinbox, frame_extra_steps_spinbox, scan_speed_spinbox,
-                           stabilization_delay_spinbox]
-    hdr_widget_list = [hdr_capture_active_checkbox, hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_spinbox,
-                       hdr_bracket_shift_spinbox,hdr_bracket_width_auto_checkbox,hdr_merge_in_place_checkbox]
+                           steps_per_frame_spinbox, pt_level_spinbox, frame_fine_tune_spinbox,
+                           frame_extra_steps_spinbox, scan_speed_spinbox, stabilization_delay_spinbox,
+                           pt_level_btn, steps_per_frame_btn,hdr_bracket_width_auto_checkbox]
+    hdr_widget_list = [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_spinbox,
+                       hdr_bracket_shift_spinbox,hdr_merge_in_place_checkbox]
     experimental_widget_list = [RetreatMovie_btn,Free_btn,Manual_scan_checkbox]
 
     if active:
@@ -1178,7 +1177,7 @@ def switch_hdr_capture():
     hdr_set_controls()
     if HdrCaptureActive:    # If HDR enabled, handle automatic control settings for widgets
         max_inactivity_delay = max_inactivity_delay * 2
-        arrange_widget_state(hdr_bracket_auto.get(), [hdr_min_exp_spinbox, hdr_max_exp_spinbox, hdr_bracket_width_auto_checkbox])
+        arrange_widget_state(hdr_bracket_auto.get(), [hdr_min_exp_spinbox, hdr_max_exp_spinbox])
     else:    # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
         if AE_enabled.get():  # Automatic mode
@@ -2460,6 +2459,7 @@ def load_session_data():
                     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
                     auto_framesteps_enabled.set(SessionData["FrameStepsAuto"])
+                    steps_per_frame_auto()
                     if auto_framesteps_enabled.get():
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
@@ -2479,6 +2479,7 @@ def load_session_data():
                     send_arduino_command(CMD_SET_EXTRA_STEPS, aux)
                 if 'PTLevelAuto' in SessionData:
                     auto_pt_level_enabled.set(SessionData["PTLevelAuto"])
+                    set_auto_pt_level()
                     if auto_pt_level_enabled.get():
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
@@ -2541,8 +2542,8 @@ def load_session_data():
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown,
                                                     AwbMode_label, AwbMode_dropdown])
-        arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
-        arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
+        arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_spinbox])
+        arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_spinbox])
     if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
@@ -2974,7 +2975,8 @@ def set_AwbMode(selected):
 
 
 def steps_per_frame_auto():
-    arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_btn, steps_per_frame_spinbox])
+    arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_spinbox])
+    steps_per_frame_btn.config(text="Steps/Frame AUTO:" if auto_framesteps_enabled.get() else "Steps/Frame:")
     SessionData["FrameStepsAuto"] = auto_framesteps_enabled.get()
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if auto_framesteps_enabled.get() else steps_per_frame_value.get())
 
@@ -2993,7 +2995,8 @@ def steps_per_frame_validation(new_value):
 
 
 def set_auto_pt_level():
-    arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_btn, pt_level_spinbox])
+    arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_spinbox])
+    pt_level_btn.config(text="PT Level AUTO:" if auto_pt_level_enabled.get() else "PT Level:")
     SessionData["PTLevelAuto"] = auto_pt_level_enabled.get()
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if auto_pt_level_enabled.get() else pt_level_value.get())
 
@@ -3946,16 +3949,17 @@ def create_widgets():
         frame_alignment_frame.grid(row=0, column=2, padx=x_pad, pady=y_pad, sticky='NSEW')
         frame_align_row = 0
 
-        exp_wb_auto_label = tk.Label(frame_alignment_frame, text='Auto', width=4, font=("Arial", FontSize-1))
-        exp_wb_auto_label.grid(row=frame_align_row, column=2)
-        frame_align_row += 1
-
         # Spinbox to select MinFrameSteps on Arduino
-        steps_per_frame_label = tk.Label(frame_alignment_frame, text='Steps/frame:', font=("Arial", FontSize-1))
-        steps_per_frame_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        auto_framesteps_enabled = tk.BooleanVar(value=True)
+        steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
+                                             offvalue=False, font=("Arial", FontSize-1), command=steps_per_frame_auto,
+                                             selectcolor="pale green", text="Steps/Frame AUTO:", relief="raised",
+                                             indicatoron=False, width=18)
+        steps_per_frame_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
         steps_per_frame_value = tk.IntVar(value=250)    # Default to be overridden by configuration
-        steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=8, readonlybackground='pale green',
+        steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=4,
                                                  textvariable=steps_per_frame_value, from_=100, to=600, font=("Arial", FontSize-1))
         steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
@@ -3963,33 +3967,24 @@ def create_widgets():
         as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor steps required to advance one frame (100 to 600, depends on capstan diameter).")
         steps_per_frame_spinbox.bind("<FocusOut>", lambda event: steps_per_frame_selection())
 
-        auto_framesteps_enabled = tk.BooleanVar(value=True)
-        steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
-                                             offvalue=False, font=("Arial", FontSize-1), command=steps_per_frame_auto)
-        steps_per_frame_btn.grid(row=frame_align_row, column=2)
-        as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
-
         frame_align_row += 1
 
         # Spinbox to select PTLevel on Arduino
-        pt_level_label = tk.Label(frame_alignment_frame, text='PT Level:', font=("Arial", FontSize-1))
-        pt_level_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        auto_pt_level_enabled = tk.BooleanVar(value=True)
+        pt_level_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_pt_level_enabled, onvalue=True,
+                                      offvalue=False, font=("Arial", FontSize-1),command=set_auto_pt_level,
+                                      selectcolor="pale green", text="PT Level AUTO:", relief="raised", indicatoron=False)
+        pt_level_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         pt_level_value = tk.IntVar(value=200)   # To be overridden by config
-        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=8, readonlybackground='pale green',
+        pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=4,
             textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize-1))
         pt_level_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(pt_level_validation_cmd, '%P'))
         as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached to determine detection of sprocket hole (20 to 900, depends on PT used and size of hole).")
         pt_level_spinbox.bind("<FocusOut>", lambda event: pt_level_selection())
-
-        auto_pt_level_enabled = tk.BooleanVar(value=True)
-        pt_level_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_pt_level_enabled,
-                                      onvalue=True, offvalue=False, font=("Arial", FontSize-1),
-                                      command=set_auto_pt_level)
-        pt_level_btn.grid(row=frame_align_row, column=2)
-        as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         frame_align_row += 1
 
@@ -3998,7 +3993,7 @@ def create_widgets():
         frame_fine_tune_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
         frame_fine_tune_value = tk.IntVar(value=50)   # To be overridden by config
-        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=8, readonlybackground='pale green',
+        frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=4, readonlybackground='pale green',
                         textvariable=frame_fine_tune_value, from_=5, to=95, increment=5, font=("Arial", FontSize-1))
         frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
@@ -4012,7 +4007,7 @@ def create_widgets():
         frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
         frame_extra_steps_value = tk.IntVar(value=0)  # To be overridden by config
-        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=8, readonlybackground='pale green',
+        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=4, readonlybackground='pale green',
                         textvariable=frame_extra_steps_value, from_=-30, to=30, font=("Arial", FontSize-1))
         frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
@@ -4029,7 +4024,7 @@ def create_widgets():
         scan_speed_label = tk.Label(speed_quality_frame, text='Scan Speed:', font=("Arial", FontSize-1))
         scan_speed_label.grid(row=0, column=0, padx=x_pad, pady=y_pad, sticky=E)
         scan_speed_value = tk.IntVar(value=5)   # Default value, overriden by configuration
-        scan_speed_spinbox = DynamicSpinbox(speed_quality_frame, command=scan_speed_selection, width=8,
+        scan_speed_spinbox = DynamicSpinbox(speed_quality_frame, command=scan_speed_selection, width=4,
                     textvariable=scan_speed_value, from_=1, to=10, font=("Arial", FontSize-1))
         scan_speed_spinbox.grid(row=0, column=1, padx=x_pad, pady=y_pad, sticky=W)
         scan_speed_validation_cmd = scan_speed_spinbox.register(scan_speed_validation)
@@ -4041,7 +4036,7 @@ def create_widgets():
         stabilization_delay_label = tk.Label(speed_quality_frame, text='Stabilization\ndelay (ms):', font=("Arial", FontSize-1))
         stabilization_delay_label.grid(row=1, column=0, padx=x_pad, pady=y_pad, sticky=E)
         stabilization_delay_value = tk.IntVar(value=100)    # default value, overriden by configuration
-        stabilization_delay_spinbox = DynamicSpinbox(speed_quality_frame, command=stabilization_delay_selection, width=8,
+        stabilization_delay_spinbox = DynamicSpinbox(speed_quality_frame, command=stabilization_delay_selection, width=4,
                     textvariable=stabilization_delay_value, from_=0, to=1000, increment=10, font=("Arial", FontSize-1))
         stabilization_delay_spinbox.grid(row=1, column=1, padx=x_pad, pady=y_pad, sticky=W)
         stabilization_delay_validation_cmd = stabilization_delay_spinbox.register(stabilization_delay_validation)
