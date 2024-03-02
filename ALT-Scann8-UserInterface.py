@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.13"
+__version__ = "1.10.14"
 __date__ = "2024-03-02"
-__version_highlight__ = "Change toggle buttons to pale green"
+__version_highlight__ = "Customizable font size + Scrollable main window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1240,28 +1240,12 @@ def set_negative_image():
 
 
 def toggle_ui_size():
-    global app_height
+    global app_width, app_height
 
     if toggle_ui_small.get():
-        if scrolled_canvas is None:
-            extended_frame.pack_forget()
-        else:
-            scrolled_canvas.pack_forget()
-            scrolled_canvas_scrollbar.pack_forget()
-        # Update the window's geometry to fit its content
-        win.update_idletasks()
-        app_width = win.winfo_reqwidth()
-        app_height = win.winfo_reqheight()
+        extended_frame.pack_forget()
     else:
-        if scrolled_canvas is None:
-            extended_frame.pack(side=LEFT, padx=10, expand=True, fill=tk.Y, anchor="center")
-        else:
-            scrolled_canvas.pack(side=LEFT, expand=True, fill=tk.BOTH)
-            scrolled_canvas_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        # Update the window's geometry to fit its content
-        win.update_idletasks()
-        app_width = win.winfo_reqwidth()
-        app_height = original_app_height
+        extended_frame.pack(side=LEFT, padx=10, expand=True, fill=tk.Y, anchor="center")
     # Prevent window resize
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
@@ -1342,7 +1326,7 @@ def set_r8():
         steps_per_frame_value.set(MinFrameSteps)
     # Size and position of hole markers
     FilmHoleY_Top = 6
-    FilmHoleY_Bottom = int(PreviewHeight / 1.30)
+    FilmHoleY_Bottom = int(PreviewHeight / 1.25)
     film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
     film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
     if not SimulatedRun:
@@ -2016,7 +2000,7 @@ def capture_loop():
             # Update Frames per Minute
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:   # FPM not calculated yet, display some indication
-                aux_str = ''.join([char * int(scan_period_frames) for char in '.'])
+                aux_str = ''.join([char * int(min(5, scan_period_frames)) for char in '.'])
                 Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
             else:
                 FramesPerMinute = FPM_CalculatedValue
@@ -2689,10 +2673,11 @@ def create_main_window():
     global win
     global plotter_width, plotter_height
     global PreviewWinX, PreviewWinY, app_width, app_height, original_app_height, PreviewWidth, PreviewHeight
-    global FontSize, add_vertical_scrollbar
+    global FontSize
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
     global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
+    global screen_width, screen_height
 
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     if SimulatedRun:
@@ -2713,15 +2698,14 @@ def create_main_window():
     plotter_height = 10
     # Size and position of hole markers
     FilmHoleHeightTop = int(PreviewHeight / 5.9)
-    FilmHoleHeightBottom = int(PreviewHeight / 4.2)
+    FilmHoleHeightBottom = int(PreviewHeight / 3.7)
     FilmHoleY_Top = 6
-    FilmHoleY_Bottom = int(PreviewHeight / 1.30)
+    FilmHoleY_Bottom = int(PreviewHeight / 1.25)
     if ExpertMode or ExperimentalMode:
         app_height += 325
     # Check if window fits on screen, otherwise reduce and add croll bar
     if app_height > screen_height:
         app_height = screen_height - 128
-        add_vertical_scrollbar = True
     # Save original ap height for toggle UI button
     original_app_height = app_height
     # Prevent window resize
@@ -2742,13 +2726,6 @@ def create_main_window():
 
     create_widgets()
 
-    # Adjust window size to contents
-    win.update_idletasks()
-    app_width = win.winfo_reqwidth()
-    app_height = win.winfo_reqheight()
-    win.geometry(f"{app_width}x{app_height}")
-    win.minsize(app_width, app_height)
-    win.maxsize(app_width, app_height)
 
     # Get Top window coordinates
     TopWinX = win.winfo_x()
@@ -3235,14 +3212,6 @@ def sharpness_validation(new_value):
 
 def rwnd_speed_control_selection():
     value_normalize(rwnd_speed_control_value, 40, 800, 800)
-    '''
-    if event == 'Up':
-        print("Telling arduino to speed up")
-        rwnd_speed_up()
-    elif event == 'Down':
-        print("Telling arduino to slow down")
-        rwnd_speed_down()
-    '''
 
 def rewind_speed_validation(new_value):
     return value_validation(new_value, rwnd_speed_control_spinbox, 40, 800, 800)
@@ -3278,7 +3247,8 @@ def create_widgets():
     global temp_in_fahrenheit
     global auto_white_balance_change_pause
     global auto_wb_wait_btn
-    global film_hole_frame_top, film_hole_frame_bottom, FilmHoleY_Top, FilmHoleY_Bottom
+    global film_hole_frame_top, film_hole_frame_bottom
+    global FilmHoleHeightTop, FilmHoleHeightBottom, FilmHoleY_Top, FilmHoleY_Bottom
     global temp_in_fahrenheit_checkbox
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
@@ -3324,30 +3294,32 @@ def create_widgets():
     global AeConstraintMode_label, AeMeteringMode_label, AeExposureMode_label, AwbMode_label
     global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value, preview_module_value
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
-    global scrolled_canvas, scrolled_canvas_scrollbar
+    global scrolled_canvas
     global PreviewWidth, PreviewHeight
     global plotter_width, plotter_height
+    global app_width, app_height
 
     # Global value for separations between widgets
-    y_pad = (2, 2)
-    x_pad = (2, 2)
-
-    # Create a frame to contain the top area (preview + Right buttons) ***************
-    top_area_frame = Frame(win)
-    top_area_frame.pack(side=TOP, pady=(8, 0), anchor=NW, fill='both')
+    y_pad = 2
+    x_pad = 2
 
     # Check if vertical scrollbar required
     if add_vertical_scrollbar:
         # Create a canvas widget
         scrolled_canvas = tk.Canvas(win)
+
+        # Add a horizontal scrollbar to the canvas
+        scrolled_canvas_scrollbar_h = tk.Scrollbar(win, orient=tk.HORIZONTAL, command=scrolled_canvas.xview)
+        scrolled_canvas_scrollbar_h.pack(side=tk.BOTTOM, fill=tk.X)
+
         scrolled_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        # Add a scrollbar to the canvas
-        scrolled_canvas_scrollbar = tk.Scrollbar(win, command=scrolled_canvas.yview)
-        scrolled_canvas_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        # Add a vertical scrollbar to the canvas
+        scrolled_canvas_scrollbar_v = tk.Scrollbar(win, command=scrolled_canvas.yview)
+        scrolled_canvas_scrollbar_v.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Configure the canvas to use the scrollbar
-        scrolled_canvas.configure(yscrollcommand=scrolled_canvas_scrollbar.set)
+        scrolled_canvas.configure(xscrollcommand=scrolled_canvas_scrollbar_h.set, yscrollcommand=scrolled_canvas_scrollbar_v.set)
 
         # Create a frame inside the canvas to hold the content
         scrolled_frame = tk.Frame(scrolled_canvas)
@@ -3356,14 +3328,18 @@ def create_widgets():
         # Bind the frame to the canvas so it resizes properly
         scrolled_frame.bind("<Configure>", on_configure_scrolled_canvas)
 
-        lower_container = scrolled_frame
+        main_container = scrolled_frame
     else:
         scrolled_canvas = None
-        lower_container = win
+        main_container = win
+
+    # Create a frame to contain the top area (preview + Right buttons) ***************
+    top_area_frame = Frame(main_container)
+    top_area_frame.pack(side=TOP, pady=(8, 0), anchor=NW, fill='both')
 
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
-    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0))
+    top_left_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
     # Create a LabelFrame to act as a border of preview canvas
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2,0))  # Pady+=2 to compensate
@@ -3738,7 +3714,7 @@ def create_widgets():
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
-        extended_frame = Frame(lower_container)
+        extended_frame = Frame(main_container)
         extended_frame.pack(side=LEFT, padx=10, expand=True, fill="y", anchor="center")
     if ExpertMode:
         expert_frame = LabelFrame(extended_frame, text='Expert Area', width=8, font=("Arial", FontSize-1))
@@ -4241,11 +4217,9 @@ def create_widgets():
                                                     AeExposureMode_label, AeExposureMode_dropdown,
                                                     AwbMode_label, AwbMode_dropdown])
 
-
     # Adjust plotter size based on right  frames
     win.update_idletasks()
     plotter_width = integrated_plotter_frame.winfo_width() - 10
-    print(f"Plotter width: {plotter_width}")
     plotter_height = int(plotter_width/2)
     plotter_canvas.config(width=plotter_width, height=plotter_height)
     # Adjust canvas size based on height of lateral frames
@@ -4253,6 +4227,18 @@ def create_widgets():
     PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compansate pady
     PreviewWidth = int(PreviewHeight * 4/3)
     draw_capture_canvas.config(width=PreviewWidth, height=PreviewHeight)
+    # Adjust holes size/position
+    FilmHoleHeightTop = int(PreviewHeight / 5.9)
+    FilmHoleHeightBottom = int(PreviewHeight / 3.7)
+    # Adjust main window size
+    # Prevent window resize
+    # Get screen size - maxsize gives the usable screen size
+    main_container.update_idletasks()
+    app_width = min(main_container.winfo_reqwidth(), screen_width-150)
+    app_height = min(main_container.winfo_reqheight(), screen_height-150)
+    win.minsize(app_width, app_height)
+    win.maxsize(app_width, app_height)
+    win.geometry(f'{app_width}x{app_height-20}')  # setting the size of the window
 
 
 def get_controller_version():
@@ -4272,12 +4258,12 @@ def main(argv):
     global LogLevel, LoggingMode
     global ALT_scann_init_done
     global CameraDisabled, DisableThreads
-    global FontSize
+    global FontSize, add_vertical_scrollbar
     global keep_control_widgets_enabled
 
     go_disable_tooptips = False
 
-    opts, args = getopt.getopt(argv, "sexl:phntwf:")
+    opts, args = getopt.getopt(argv, "sexl:phntwf:b")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -4292,6 +4278,8 @@ def main(argv):
             LoggingMode = arg
         elif opt == '-f':
             FontSize = int(arg)
+        elif opt == '-b':
+            add_vertical_scrollbar = True
         elif opt == '-n':
             go_disable_tooptips = True
         elif opt == '-t':
@@ -4309,7 +4297,8 @@ def main(argv):
             print("  -d             Disable camera (for development purposes)")
             print("  -n             Disable Tooltips")
             print("  -t             Disable multi-threading")
-            print("  -1             Initiate on 'small screen' mode (resolution lower than than Full HD)")
+            print("  -f             Set default font size for UI (11 by default)")
+            print("  -b             Add scrollbars to UI (in case it does not fit)")
             print("  -w             Keep control widgets enabled while scanning")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
