@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.12"
+__version__ = "1.10.13"
 __date__ = "2024-03-02"
 __version_highlight__ = "Change toggle buttons to pale green"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -161,9 +161,7 @@ FilmHoleHeightBottom = 0
 DeltaX = 0
 DeltaY = 0
 WinInitDone = False
-BigSize = True
-ForceSmallSize = False
-ForceBigSize = False
+FontSize = 11
 FolderProcess = 0
 LoggingMode = "INFO"
 LogLevel = 0
@@ -235,8 +233,8 @@ ExperimentalMode = True
 PlotterMode = True
 keep_control_widgets_enabled = False
 plotter_canvas = None
-plotter_width = 160
-plotter_height = 120
+plotter_width = 20
+plotter_height = 10
 PrevPTValue = 0
 PrevThresholdLevel = 0
 MaxPT = 100
@@ -2691,7 +2689,7 @@ def create_main_window():
     global win
     global plotter_width, plotter_height
     global PreviewWinX, PreviewWinY, app_width, app_height, original_app_height, PreviewWidth, PreviewHeight
-    global FontSize, BigSize, add_vertical_scrollbar
+    global FontSize, add_vertical_scrollbar
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
     global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
@@ -2704,31 +2702,22 @@ def create_main_window():
     # Get screen size - maxsize gives the usable screen size
     screen_width, screen_height = win.maxsize()
     # Set dimensions of UI elements adapted to screen size
-    if (screen_height >= 1000 and not ForceSmallSize) or ForceBigSize:
-        BigSize = True
-        FontSize = 11
-        PreviewWidth = 700
-        PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 420
-        app_height = PreviewHeight + 50
-        plotter_width = 200
-        plotter_height = 115
-    else:
-        BigSize = False
+    if screen_height < 1000:
         FontSize = 8
-        PreviewWidth = 512
-        PreviewHeight = int(PreviewWidth/(4/3))
-        app_width = PreviewWidth + 360
-        app_height = PreviewHeight + 70
-        plotter_width = 160
-        plotter_height = 60
+    PreviewWidth = 700
+    PreviewHeight = int(PreviewWidth/(4/3))
+    app_width = PreviewWidth + 420
+    app_height = PreviewHeight + 50
+    # Set minimum plotter size, to be adjusted later based on left frame width
+    plotter_width = 20
+    plotter_height = 10
     # Size and position of hole markers
     FilmHoleHeightTop = int(PreviewHeight / 5.9)
     FilmHoleHeightBottom = int(PreviewHeight / 4.2)
     FilmHoleY_Top = 6
     FilmHoleY_Bottom = int(PreviewHeight / 1.30)
     if ExpertMode or ExperimentalMode:
-        app_height += 325 if BigSize else 225
+        app_height += 325
     # Check if window fits on screen, otherwise reduce and add croll bar
     if app_height > screen_height:
         app_height = screen_height - 128
@@ -3337,6 +3326,7 @@ def create_widgets():
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
     global scrolled_canvas, scrolled_canvas_scrollbar
     global PreviewWidth, PreviewHeight
+    global plotter_width, plotter_height
 
     # Global value for separations between widgets
     y_pad = (2, 2)
@@ -4251,13 +4241,18 @@ def create_widgets():
                                                     AeExposureMode_label, AeExposureMode_dropdown,
                                                     AwbMode_label, AwbMode_dropdown])
 
+
+    # Adjust plotter size based on right  frames
+    win.update_idletasks()
+    plotter_width = integrated_plotter_frame.winfo_width() - 10
+    print(f"Plotter width: {plotter_width}")
+    plotter_height = int(plotter_width/2)
+    plotter_canvas.config(width=plotter_width, height=plotter_height)
     # Adjust canvas size based on height of lateral frames
     win.update_idletasks()
-    print(f"left {top_left_area_frame.winfo_height()}, right {top_right_area_frame.winfo_height()}")
     PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compansate pady
     PreviewWidth = int(PreviewHeight * 4/3)
     draw_capture_canvas.config(width=PreviewWidth, height=PreviewHeight)
-    print(f"canvas {draw_capture_canvas.winfo_height()}")
 
 
 def get_controller_version():
@@ -4277,12 +4272,12 @@ def main(argv):
     global LogLevel, LoggingMode
     global ALT_scann_init_done
     global CameraDisabled, DisableThreads
-    global ForceSmallSize, ForceBigSize
+    global FontSize
     global keep_control_widgets_enabled
 
     go_disable_tooptips = False
 
-    opts, args = getopt.getopt(argv, "sexl:ph12ntw")
+    opts, args = getopt.getopt(argv, "sexl:phntwf:")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -4295,10 +4290,8 @@ def main(argv):
             CameraDisabled = True
         elif opt == '-l':
             LoggingMode = arg
-        elif opt == '-1':
-            ForceSmallSize = True
-        elif opt == '-2':
-            ForceBigSize = True
+        elif opt == '-f':
+            FontSize = int(arg)
         elif opt == '-n':
             go_disable_tooptips = True
         elif opt == '-t':
@@ -4346,10 +4339,8 @@ def main(argv):
         logging.debug("Toggle experimental mode.")
     if CameraDisabled:
         logging.debug("Camera disabled.")
-    if ForceSmallSize:
-        logging.debug("Forces restricted window mode.")
-    if ForceBigSize:
-        logging.debug("Forces full window mode.")
+    if FontSize != 11:
+        logging.debug(f"Font size = {FontSize}")
     if DisableThreads:
         logging.debug("Threads disabled.")
     if PlotterMode:
