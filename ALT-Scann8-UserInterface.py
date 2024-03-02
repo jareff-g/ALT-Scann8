@@ -656,6 +656,7 @@ def set_existing_folder():
     if not NewDir:
         return
 
+    # Get number of files and highest frame number in selected folder
     filecount = 0
     last_frame = 0
     for name in os.listdir(NewDir):
@@ -674,10 +675,10 @@ def set_existing_folder():
         current_frame_str = '0'
     NewCurrentFrame = int(current_frame_str)
 
-    if filecount > 0 and NewCurrentFrame <= filecount:
+    if filecount > 0 and NewCurrentFrame < last_frame:
         confirm = tk.messagebox.askyesno(title='Files exist in target folder',
                                          message=f"Newly selected folder already contains {filecount} files."
-                                         f"\r\nSetting {NewCurrentFrame} as initial frame will overwrite some of them."
+                                         f"\r\nSetting {NewCurrentFrame} as last captured frame will overwrite {last_frame-NewCurrentFrame} frames."
                                          f"Are you sure you want to continue?")
     else:
         confirm = True
