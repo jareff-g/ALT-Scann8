@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.10"
-__date__ = "2024-02-29"
+__version__ = "1.10.11"
+__date__ = "2024-03-02"
 __version_highlight__ = "Change toggle buttons to pale green"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -70,6 +70,7 @@ except ImportError:
 import threading
 import queue
 import cv2
+import re
 
 from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
@@ -615,6 +616,35 @@ def set_new_folder():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
+def get_last_frame_dismiss():
+    last_frame_dlg.grab_release()
+    last_frame_dlg.destroy()
+
+
+def get_last_frame(last_frame):
+    global last_frame_dlg
+    last_frame_dlg = tk.Toplevel(win)
+    last_frame_dlg.title("Last frame")
+    #last_frame_dlg.geometry(f"300x100")
+    last_frame_dlg.rowconfigure(0, weight=1)
+    last_frame_dlg.columnconfigure(0, weight=1)
+
+    last_frame_label = tk.Label(last_frame_dlg, text="Enter number of last captured frame")
+    last_frame_label.grid(row=0, column=0, columnspan=2, sticky='nsew', padx=10, pady=5)
+    last_frame_int = tk.IntVar(value=0)
+    last_frame_int.set(last_frame)
+    last_frame_entry = tk.Entry(last_frame_dlg, textvariable=last_frame_int, width=6, font=("Arial", FontSize), justify="right")
+    last_frame_entry.grid(row=1, column=0, columnspan=2, padx=10, pady=5)
+    last_frame_ok_btn = tk.Button(last_frame_dlg, text="OK", command=get_last_frame_dismiss)
+    last_frame_ok_btn.grid(row=2, column=0, padx=10, pady=5)
+    last_frame_dlg.protocol("WM_DELETE_WINDOW", get_last_frame_dismiss)  # intercept close button
+    last_frame_dlg.transient(win)  # dialog window is related to main
+    last_frame_dlg.wait_visibility()  # can't grab until window appears, so we wait
+    last_frame_dlg.grab_set()  # ensure all input goes to our window
+    last_frame_dlg.wait_window()  # block until window is destroyed
+    return last_frame_int.get()
+
+
 def set_existing_folder():
     global CurrentDir, CurrentFrame
 
@@ -627,12 +657,16 @@ def set_existing_folder():
         return
 
     filecount = 0
+    last_frame = 0
     for name in os.listdir(NewDir):
         if os.path.isfile(os.path.join(NewDir, name)):
+            # Extract frame number using regular expression
+            frame_number = re.findall(r'\d+', name)
+            last_frame = max(last_frame, int(frame_number[0]))   # Only one number in the filename, so we take the first
             filecount += 1
 
-    current_frame_str = tk.simpledialog.askstring(title="Enter number of last captured frame",
-                                                  prompt="Last frame captured?")
+    current_frame_str = str(get_last_frame(last_frame))
+
     if current_frame_str is None:
         current_frame_str = '0'
 
