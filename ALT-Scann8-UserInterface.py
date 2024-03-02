@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.11"
+__version__ = "1.10.12"
 __date__ = "2024-03-02"
 __version_highlight__ = "Change toggle buttons to pale green"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2753,6 +2753,14 @@ def create_main_window():
 
     create_widgets()
 
+    # Adjust window size to contents
+    win.update_idletasks()
+    app_width = win.winfo_reqwidth()
+    app_height = win.winfo_reqheight()
+    win.geometry(f"{app_width}x{app_height}")
+    win.minsize(app_width, app_height)
+    win.maxsize(app_width, app_height)
+
     # Get Top window coordinates
     TopWinX = win.winfo_x()
     TopWinY = win.winfo_y()
@@ -3328,6 +3336,7 @@ def create_widgets():
     global brightness_value, contrast_value, saturation_value, analogue_gain_value, exposure_compensation_value, preview_module_value
     global brightness_spinbox, contrast_spinbox, saturation_spinbox, analogue_gain_spinbox, exposure_compensation_spinbox, preview_module_spinbox
     global scrolled_canvas, scrolled_canvas_scrollbar
+    global PreviewWidth, PreviewHeight
 
     # Global value for separations between widgets
     y_pad = (2, 2)
@@ -3364,13 +3373,12 @@ def create_widgets():
 
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame)
-    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0), fill=Y)
+    top_left_area_frame.pack(side=LEFT, anchor=NW, padx=(10, 0))
     # Create a LabelFrame to act as a border of preview canvas
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE)
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2,0))  # Pady+=2 to compensate
     # Create the canvas
-    draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey',
-                                 width=PreviewWidth, height=PreviewHeight)
+    draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight)
     draw_capture_canvas.pack(padx=(20,5), pady=5)
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame)
@@ -4242,6 +4250,14 @@ def create_widgets():
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown,
                                                     AwbMode_label, AwbMode_dropdown])
+
+    # Adjust canvas size based on height of lateral frames
+    win.update_idletasks()
+    print(f"left {top_left_area_frame.winfo_height()}, right {top_right_area_frame.winfo_height()}")
+    PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compansate pady
+    PreviewWidth = int(PreviewHeight * 4/3)
+    draw_capture_canvas.config(width=PreviewWidth, height=PreviewHeight)
+    print(f"canvas {draw_capture_canvas.winfo_height()}")
 
 
 def get_controller_version():
