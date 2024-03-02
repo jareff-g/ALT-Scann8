@@ -25,7 +25,7 @@ Some of the changes done over original version:
 
 # ALT-Scann8-Controller
 
-This is the application handlign the Arduino board in the T-Scann 8 film scanner. It is a fork of 'Arduino to card Controll T-Scann 8 v1.61' by Torulf.
+This is the application handling the Arduino board in the T-Scann 8 film scanner. It is a fork of 'Arduino to card Controll T-Scann 8 v1.61' by Torulf.
 
 The original intention of this version was to add a specific feature to the existing software, but finally some other changes were done, including code refactoring and an extended feature set. 
 
