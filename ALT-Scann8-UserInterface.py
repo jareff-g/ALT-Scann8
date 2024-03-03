@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.15"
-__date__ = "2024-03-02"
-__version_highlight__ = "AWB Mode enabled control"
+__version__ = "1.10.16"
+__date__ = "2024-03-03"
+__version_highlight__ = "Auto font size"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -161,7 +161,7 @@ FilmHoleHeightBottom = 0
 DeltaX = 0
 DeltaY = 0
 WinInitDone = False
-FontSize = 11
+FontSize = 0
 FolderProcess = 0
 LoggingMode = "INFO"
 LogLevel = 0
@@ -2678,6 +2678,7 @@ def create_main_window():
     global WinInitDone, as_tooltips
     global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
     global screen_width, screen_height
+    resolution_font=[(629,6), (677,7), (728,8), (785,9), (831,10), (895,11), (956,12), (1005,13), (1045,14), (1103,15), (1168,16), (1220,17), (1273,18)]
 
     win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     if SimulatedRun:
@@ -2686,9 +2687,17 @@ def create_main_window():
         win.title('ALT-Scann8 v' + __version__)  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
     screen_width, screen_height = win.maxsize()
-    # Set dimensions of UI elements adapted to screen size
-    if screen_height < 1000:
-        FontSize = 8
+    logging.info(f"Screen size: {screen_width}x{screen_height}")
+
+    # Determine optimal font size
+    if FontSize == 0:
+        FontSize = 5
+        for resfont in resolution_font:
+            if resfont[0] + 128 < screen_height:
+                FontSize = resfont[1]
+            else:
+                break
+        logging.info(f"Font size: {FontSize}")
     PreviewWidth = 700
     PreviewHeight = int(PreviewWidth/(4/3))
     app_width = PreviewWidth + 420
@@ -2715,9 +2724,6 @@ def create_main_window():
     if 'WindowPos' in SessionData:
         win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
 
-    logging.info(f"Screen size: {screen_width}x{screen_height}")
-    logging.info(f"Window size: {app_width}x{app_height+20}")
-
     # Catch closing with 'X' button
     win.protocol("WM_DELETE_WINDOW", exit_app)
 
@@ -2726,6 +2732,7 @@ def create_main_window():
 
     create_widgets()
 
+    logging.info(f"Window size: {app_width}x{app_height+20}")
 
     # Get Top window coordinates
     TopWinX = win.winfo_x()
@@ -4327,7 +4334,7 @@ def main(argv):
         logging.debug("Toggle experimental mode.")
     if CameraDisabled:
         logging.debug("Camera disabled.")
-    if FontSize != 11:
+    if FontSize != 0:
         logging.debug(f"Font size = {FontSize}")
     if DisableThreads:
         logging.debug("Threads disabled.")
