@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.14"
+__version__ = "1.10.15"
 __date__ = "2024-03-02"
-__version_highlight__ = "Customizable font size + Scrollable main window"
+__version_highlight__ = "AWB Mode enabled control"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -718,7 +718,7 @@ def set_auto_wb():
             camera.set_controls({"ColourGains": camera_colour_gains})
     arrange_widget_state(not AWB_enabled.get(), [auto_wb_wait_btn])
     arrange_widget_state(AWB_enabled.get(), [wb_red_spinbox, wb_blue_spinbox])
-
+    arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
 
 
 def auto_white_balance_change_pause_selection():
@@ -2557,8 +2557,8 @@ def load_session_data():
         arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                    AeExposureMode_label, AeExposureMode_dropdown,
-                                                    AwbMode_label, AwbMode_dropdown])
+                                                    AeExposureMode_label, AeExposureMode_dropdown])
+        arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
         arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_spinbox])
         arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_spinbox])
     if ExperimentalMode:
@@ -2885,8 +2885,7 @@ def set_auto_exposure():
     arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                 AeConstraintMode_label, AeConstraintMode_dropdown,
                                                 AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                AeExposureMode_label, AeExposureMode_dropdown,
-                                                AwbMode_label, AwbMode_dropdown])
+                                                AeExposureMode_label, AeExposureMode_dropdown])
 
     if not SimulatedRun and not CameraDisabled:
         # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
@@ -4214,8 +4213,8 @@ def create_widgets():
         arrange_widget_state(not AE_enabled.get(), [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
-                                                    AeExposureMode_label, AeExposureMode_dropdown,
-                                                    AwbMode_label, AwbMode_dropdown])
+                                                    AeExposureMode_label, AeExposureMode_dropdown])
+        arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
