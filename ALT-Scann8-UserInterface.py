@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.16"
+__version__ = "1.10.17"
 __date__ = "2024-03-03"
-__version_highlight__ = "Auto font size"
+__version_highlight__ = "Manual WB values kept separately from AWB"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -231,7 +231,7 @@ RSP_FILM_FORWARD_ENDED = 89
 ExpertMode = True
 ExperimentalMode = True
 PlotterMode = True
-keep_control_widgets_enabled = False
+keep_control_widgets_enabled = True
 plotter_canvas = None
 plotter_width = 20
 plotter_height = 10
@@ -241,6 +241,8 @@ MaxPT = 100
 MinPT = 800
 Tolerance_AE = 8000
 Tolerance_AWB = 1
+manual_wb_red_value = 2.2
+manual_wb_blue_value = 2.2
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
 PreviousGainRed = 1
 PreviousGainBlue = 1
@@ -693,6 +695,8 @@ def set_existing_folder():
 
 
 def set_auto_wb():
+    global manual_wb_red_value, manual_wb_blue_value
+
     if not ExpertMode:
         return
 
@@ -701,12 +705,16 @@ def set_auto_wb():
     SessionData["GainBlue"] = wb_blue_value.get()
 
     if AWB_enabled.get():
+        manual_wb_red_value = wb_red_value.get()
+        manual_wb_blue_value = wb_blue_value.get()
         auto_wb_red_btn.config(text="AWB Red:")
         auto_wb_blue_btn.config(text="AWB Blue:")
         auto_wb_wait_btn.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AwbEnable": True})
     else:
+        wb_red_value.set(manual_wb_red_value)
+        wb_blue_value.set(manual_wb_blue_value)
         auto_wb_red_btn.config(text="WB Red:")
         auto_wb_blue_btn.config(text="WB Blue:")
         auto_wb_wait_btn.config(state=DISABLED)
@@ -1016,13 +1024,14 @@ def capture_display_thread(queue, event, id):
         if type != IMAGE_TOKEN:
             continue
         image = message[1]
+        curframe = message[2]
         hdr_idx = message[3]
 
         # If too many items in queue the skip display
         if (MaxQueueSize - queue.qsize() <= 5):
             logging.warning("Display queue almost full: Skipping frame display")
         else:
-            draw_preview_image(image, hdr_idx)
+            draw_preview_image(image, curframe, hdr_idx)
             logging.debug("Display thread complete: %s ms", str(round((time.time() - curtime) * 1000, 1)))
     active_threads -= 1
     logging.debug("Exiting capture_display_thread")
@@ -1096,41 +1105,42 @@ def capture_save_thread(queue, event, id):
     active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
 
-def draw_preview_image(preview_image, idx):
+def draw_preview_image(preview_image, curframe, idx):
     global total_wait_time_preview_display
 
     curtime = time.time()
 
-    if idx == 0 or (idx == 2 and not HdrViewX4Active):
-        preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
-        PreviewAreaImage = ImageTk.PhotoImage(preview_image)
-    elif HdrViewX4Active:
-        # if using View4X mode and there are 5 exposures, we do not display the 5th
-        # and if there are 3, 4th position will always be empty
-        quarter_image = preview_image.resize((int(PreviewWidth/2), int(PreviewHeight/2)))
-        if idx == 1:
-            hdr_view_4_image.paste(quarter_image, (0, 0))
-        elif idx == 2:
-            hdr_view_4_image.paste(quarter_image, (int(PreviewWidth/2), 0))
-        elif idx == 3:
-            hdr_view_4_image.paste(quarter_image, (0, int(PreviewHeight/2)))
-        elif idx == 4:
-            hdr_view_4_image.paste(quarter_image, (int(PreviewWidth / 2), int(PreviewHeight/2)))
-        PreviewAreaImage = ImageTk.PhotoImage(hdr_view_4_image)
+    if curframe % preview_module_value.get() == 0 and preview_image is not None:
+        if idx == 0 or (idx == 2 and not HdrViewX4Active):
+            preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
+            PreviewAreaImage = ImageTk.PhotoImage(preview_image)
+        elif HdrViewX4Active:
+            # if using View4X mode and there are 5 exposures, we do not display the 5th
+            # and if there are 3, 4th position will always be empty
+            quarter_image = preview_image.resize((int(PreviewWidth/2), int(PreviewHeight/2)))
+            if idx == 1:
+                hdr_view_4_image.paste(quarter_image, (0, 0))
+            elif idx == 2:
+                hdr_view_4_image.paste(quarter_image, (int(PreviewWidth/2), 0))
+            elif idx == 3:
+                hdr_view_4_image.paste(quarter_image, (0, int(PreviewHeight/2)))
+            elif idx == 4:
+                hdr_view_4_image.paste(quarter_image, (int(PreviewWidth / 2), int(PreviewHeight/2)))
+            PreviewAreaImage = ImageTk.PhotoImage(hdr_view_4_image)
 
-    if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
-        # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
-        # next two lines to avoid flickering. However, they might cause memory problems
-        draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
-        draw_capture_canvas.image = PreviewAreaImage
+        if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
+            # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
+            # next two lines to avoid flickering. However, they might cause memory problems
+            draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
+            draw_capture_canvas.image = PreviewAreaImage
 
-        # The Pack geometry manager packs widgets in rows or columns.
-        # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
+            # The Pack geometry manager packs widgets in rows or columns.
+            # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
 
-        aux = time.time() - curtime
-        total_wait_time_preview_display += aux
-        time_preview_display.add_value(aux)
-        logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+    aux = time.time() - curtime
+    total_wait_time_preview_display += aux
+    time_preview_display.add_value(aux)
+    logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
 
 
 def capture_single_step():
@@ -1150,7 +1160,7 @@ def single_step_movie():
             # No need to implement confirmation from Arduino, as we have for regular capture during scan
             time.sleep(0.5)
             single_step_image = camera.capture_image("main")
-            draw_preview_image(single_step_image, 0)
+            draw_preview_image(single_step_image, 0, 0)
 
 
 def emergency_stop():
@@ -1482,8 +1492,7 @@ def capture_hdr(mode):
                     captured_image = reverse_image(captured_image)
                 if DisableThreads:  # Save image in main loop
                     curtime = time.time()
-                    if CurrentFrame % preview_module_value.get() == 0:
-                        draw_preview_image(captured_image, idx)
+                    draw_preview_image(captured_image, CurrentFrame, idx)
                     if idx > 1:  # Hdr frame 1 has standard filename
                         captured_image.save(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
                     else:
@@ -1520,6 +1529,7 @@ def capture_single(mode):
 
     is_dng = file_type_dropdown_selected.get() == 'dng'
     is_png = file_type_dropdown_selected.get() == 'png'
+    curtime = time.time()
     if not DisableThreads:
         if is_dng or is_png:  # Save as request only for DNG captures
             request = camera.capture_request(capture_config)
@@ -1529,6 +1539,8 @@ def capture_single(mode):
                 # Display preview using thread, not directly
                 queue_item = tuple((IMAGE_TOKEN, captured_image, CurrentFrame, 0))
                 capture_display_queue.put(queue_item)
+            else:
+                time_preview_display.add_value(0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 save_queue_item = tuple((REQUEST_TOKEN, request, CurrentFrame, 0))
                 capture_save_queue.put(save_queue_item)
@@ -1542,6 +1554,8 @@ def capture_single(mode):
             if CurrentFrame % preview_module_value.get() == 0:
                 # Display preview using thread, not directly
                 capture_display_queue.put(queue_item)
+            else:
+                time_preview_display.add_value(0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 capture_save_queue.put(queue_item)
                 logging.debug(f"Queuing frame {CurrentFrame}")
@@ -1550,12 +1564,13 @@ def capture_single(mode):
             # Update number of captured frames
             Scanned_Images_number_str.set(str(CurrentFrame))
     else:
-        curtime = time.time()
         if is_dng or is_png:
             request = camera.capture_request(capture_config)
             if CurrentFrame % preview_module_value.get() == 0:
                 captured_image = request.make_image('main')
-                draw_preview_image(captured_image, 0)
+            else:
+                captured_image = None
+            draw_preview_image(captured_image, CurrentFrame, 0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
                 request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
                 logging.debug(f"Saving DNG frame ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
@@ -1564,8 +1579,7 @@ def capture_single(mode):
             captured_image = camera.capture_image("main")
             if negative_image.get():
                 captured_image = reverse_image(captured_image)
-            if CurrentFrame % preview_module_value.get() == 0:
-                draw_preview_image(captured_image, 0)
+            draw_preview_image(captured_image, CurrentFrame, 0)
             captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
             logging.debug(
                 f"Saving image ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
@@ -1595,7 +1609,8 @@ def capture(mode):
     os.chdir(CurrentDir)
 
     # Wait for auto exposure to adapt only if allowed (and if not using HDR)
-    if AE_enabled.get() and not HdrCaptureActive:
+    # If AE disabled, only enter as per preview_module to refresh values
+    if AE_enabled.get() and not HdrCaptureActive and (auto_exposure_change_pause.get() or CurrentFrame % preview_module_value.get() == 0):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1628,7 +1643,8 @@ def capture(mode):
 
 
     # Wait for auto white balance to adapt only if allowed
-    if AWB_enabled.get():
+    # If AWB disabled, only enter as per preview_module to refresh values
+    if AWB_enabled.get() and (auto_white_balance_change_pause.get() or CurrentFrame % preview_module_value.get() == 0):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1792,7 +1808,7 @@ def capture_loop_simulated():
             simulated_capture_image = Image.open(simulated_captured_frame_list[frame_to_display])
             if negative_image.get():
                 simulated_capture_image = reverse_image(simulated_capture_image)
-            draw_preview_image(simulated_capture_image, 0)
+            draw_preview_image(simulated_capture_image, CurrentFrame, 0)
 
         # Update remaining time
         aux = frames_to_go_str.get()
@@ -2308,6 +2324,7 @@ def load_session_data():
     global HdrCaptureActive
     global HdrViewX4Active
     global max_inactivity_delay
+    global manual_wb_red_value, manual_wb_blue_value
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2445,9 +2462,11 @@ def load_session_data():
                 if 'GainRed' in SessionData:
                     aux = float(SessionData["GainRed"])
                     wb_red_value.set(round(aux,1))
+                    manual_wb_red_value = aux
                 if 'GainBlue' in SessionData:
                     aux = float(SessionData["GainBlue"])
                     wb_blue_value.set(round(aux,1))
+                    manual_wb_blue_value = aux
                 # Recover miscellaneous PiCamera2 controls
                 if "AeConstraintMode" in SessionData:
                     aux = SessionData["AeConstraintMode"]
@@ -2548,8 +2567,10 @@ def load_session_data():
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"Sharpness": aux})
 
-
-
+    if not AWB_enabled.get():
+        camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
+        camera.set_controls({"AwbEnable": False})
+        camera.set_controls({"ColourGains": camera_colour_gains})
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
@@ -2712,7 +2733,7 @@ def create_main_window():
     FilmHoleY_Bottom = int(PreviewHeight / 1.25)
     if ExpertMode or ExperimentalMode:
         app_height += 325
-    # Check if window fits on screen, otherwise reduce and add croll bar
+    # Check if window fits on screen, otherwise reduce and add scroll bar
     if app_height > screen_height:
         app_height = screen_height - 128
     # Save original ap height for toggle UI button
@@ -2927,10 +2948,12 @@ def exposure_validation(new_value):
 
 
 def wb_red_selection():
+    global manual_wb_red_value
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     aux = value_normalize(wb_red_value, 0, 32, 2.2)
+    manual_wb_red_value = aux
     SessionData["GainRed"] = aux
 
     if not SimulatedRun and not CameraDisabled:
@@ -2942,10 +2965,12 @@ def wb_red_validation(new_value):
 
 
 def wb_blue_selection():
+    global manual_wb_blue_value
     if AWB_enabled.get():  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
 
     aux = value_normalize(wb_blue_value, 0, 32, 2.2)
+    manual_wb_blue_value = aux
     SessionData["GainBlue"] = aux
 
     if not SimulatedRun and not CameraDisabled:
@@ -4178,15 +4203,15 @@ def create_widgets():
         Manual_scan_btn_frame.pack(side=TOP)
 
         # Manual scan buttons
-        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", width=1, height=1, command=manual_scan_advance_frame_fraction_5,
+        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", height=1, command=manual_scan_advance_frame_fraction_5,
                                 state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_advance_fraction_5_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
-        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", width=1, height=1, command=manual_scan_advance_frame_fraction_20,
+        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", height=1, command=manual_scan_advance_frame_fraction_20,
                                 state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_advance_fraction_20_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
-        manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", width=1, height=1, command=manual_scan_take_snap,
+        manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", height=1, command=manual_scan_take_snap,
                                  state=DISABLED, font=("Arial", FontSize-1))
         manual_scan_take_snap_btn.pack(side=RIGHT, fill=Y)
         as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance to next frame.")
@@ -4211,8 +4236,8 @@ def create_widgets():
                     textvariable=preview_module_value, from_=1, to=50, font=("Arial", FontSize-1))
         preview_module_spinbox.grid(row=4, column=1, padx=x_pad, pady=y_pad, sticky=W)
         preview_module_validation_cmd = preview_module_spinbox.register(preview_module_validation)
+        as_tooltips.add(preview_module_spinbox, "Refresh preview, auto exposure and auto WB values only every 'n' frames. Can speed up scanning significantly")
         preview_module_spinbox.configure(validate="key", validatecommand=(preview_module_validation_cmd, '%P'))
-        as_tooltips.add(preview_module_spinbox, "Select preview display frequency (1 every n frames).")
         preview_module_spinbox.bind("<FocusOut>", lambda event: preview_module_selection())
 
     if ExpertMode:
