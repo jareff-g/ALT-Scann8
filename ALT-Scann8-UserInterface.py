@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.19"
+__version__ = "1.10.20"
 __date__ = "2024-03-08"
 __version_highlight__ = "Various bugfixes"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2641,11 +2641,6 @@ def load_session_data():
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"Sharpness": aux})
 
-    if not AWB_enabled.get() and not(SimulatedRun or CameraDisabled):
-        camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
-        camera.set_controls({"AwbEnable": False})
-        camera.set_controls({"ColourGains": camera_colour_gains})
-
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_spinbox])
@@ -2656,6 +2651,11 @@ def load_session_data():
         arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
         arrange_widget_state(auto_pt_level_enabled.get(), [pt_level_spinbox])
         arrange_widget_state(auto_framesteps_enabled.get(), [steps_per_frame_spinbox])
+        if not AWB_enabled.get() and not(SimulatedRun or CameraDisabled):
+            camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
+            camera.set_controls({"AwbEnable": False})
+            camera.set_controls({"ColourGains": camera_colour_gains})
+
     if ExperimentalMode:
         hdr_set_controls()
         if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
@@ -4460,9 +4460,10 @@ def create_widgets():
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
-    plotter_width = integrated_plotter_frame.winfo_width() - 10
-    plotter_height = int(plotter_width / 2)
-    plotter_canvas.config(width=plotter_width, height=plotter_height)
+    if PlotterMode:
+        plotter_width = integrated_plotter_frame.winfo_width() - 10
+        plotter_height = int(plotter_width / 2)
+        plotter_canvas.config(width=plotter_width, height=plotter_height)
     # Adjust canvas size based on height of lateral frames
     win.update_idletasks()
     PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compensate pady
