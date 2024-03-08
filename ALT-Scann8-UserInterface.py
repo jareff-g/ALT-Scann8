@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.18"
+__version__ = "1.10.19"
 __date__ = "2024-03-08"
-__version_highlight__ = "Reformat code - Cut lines longer than 120 chars"
+__version_highlight__ = "Various bugfixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -405,7 +405,15 @@ SessionData = {
 # ALT-Scann8 code
 # ********************************************************
 
-def exit_app():  # Exit Application
+def app_emergency_exit():
+    exit_app(False)
+
+
+def app_standard_exit():
+    exit_app(True)
+
+
+def exit_app(do_save):  # Exit Application
     global ExitingApp
 
     win.config(cursor="watch")
@@ -445,8 +453,9 @@ def exit_app():  # Exit Application
     if frames_to_go_str.get() == '':
         SessionData["FramesToGo"] = -1
     # Write session data upon exit
-    with open(PersistedDataFilename, 'w') as f:
-        json.dump(SessionData, f)
+    if do_save:
+        with open(PersistedDataFilename, 'w') as f:
+            json.dump(SessionData, f)
 
     win.config(cursor="")
 
@@ -2632,7 +2641,7 @@ def load_session_data():
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"Sharpness": aux})
 
-    if not AWB_enabled.get():
+    if not AWB_enabled.get() and not(SimulatedRun or CameraDisabled):
         camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
         camera.set_controls({"AwbEnable": False})
         camera.set_controls({"ColourGains": camera_colour_gains})
@@ -2820,7 +2829,7 @@ def create_main_window():
         win.geometry(f"+{SessionData['WindowPos'].split('+', 1)[1]}")
 
     # Catch closing with 'X' button
-    win.protocol("WM_DELETE_WINDOW", exit_app)
+    win.protocol("WM_DELETE_WINDOW", app_standard_exit)
 
     # Init ToolTips
     as_tooltips = Tooltips(FontSize)
@@ -3689,7 +3698,7 @@ def create_widgets():
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
-    Exit_btn = Button(top_right_area_frame, text="Exit", height=4, command=exit_app, activebackground='red',
+    Exit_btn = Button(top_right_area_frame, text="Exit", height=4, command=app_standard_exit, activebackground='red',
                       activeforeground='white', font=("Arial", FontSize))
     Exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='EW')
     as_tooltips.add(Exit_btn, "Exit ALT-Scann8.")
@@ -3737,7 +3746,7 @@ def create_widgets():
     # Dropdown menu options
     resolution_list = camera_resolutions.get_list()
     resolution_dropdown_selected = tk.StringVar()
-    resolution_dropdown_selected.set(resolution_list[1])  # Set the initial value
+    resolution_dropdown_selected.set(resolution_list[2])  # Set the initial value
     resolution_label = Label(file_type_frame, text='Resolution:', font=("Arial", FontSize))
     # resolution_label.pack(side=LEFT)
     resolution_label.pack_forget()
@@ -4416,15 +4425,21 @@ def create_widgets():
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always "
                                   "unlocked when not performing any specific operation.")
 
+        # Emergency exit (exit without saving)
+        emergency_exit_btn = Button(experimental_miscellaneous_frame, text="Emergency Exit", command=app_emergency_exit,
+                          activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
+        emergency_exit_btn.grid(row=4, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
+
         # Spinbox to select Preview module
         preview_module_label = tk.Label(experimental_miscellaneous_frame, text='Preview module:',
                                         font=("Arial", FontSize - 1))
-        preview_module_label.grid(row=4, column=0, padx=x_pad, pady=y_pad)
+        preview_module_label.grid(row=5, column=0, padx=x_pad, pady=y_pad)
         preview_module_value = tk.IntVar(value=1)  # Default value, overriden by configuration
         preview_module_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=preview_module_selection,
                                                 width=2, textvariable=preview_module_value, from_=1, to=50,
                                                 font=("Arial", FontSize - 1))
-        preview_module_spinbox.grid(row=4, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        preview_module_spinbox.grid(row=5, column=1, padx=x_pad, pady=y_pad, sticky=W)
         preview_module_validation_cmd = preview_module_spinbox.register(preview_module_validation)
         as_tooltips.add(preview_module_spinbox, "Refresh preview, auto exposure and auto WB values only every 'n' "
                                                 "frames. Can speed up scanning significantly")
@@ -4439,6 +4454,10 @@ def create_widgets():
                                                     AeExposureMode_label, AeExposureMode_dropdown])
         arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
 
+    # Set S8 by default
+    film_type.set("S8")
+    set_s8()
+
     # Adjust plotter size based on right  frames
     win.update_idletasks()
     plotter_width = integrated_plotter_frame.winfo_width() - 10
@@ -4446,7 +4465,7 @@ def create_widgets():
     plotter_canvas.config(width=plotter_width, height=plotter_height)
     # Adjust canvas size based on height of lateral frames
     win.update_idletasks()
-    PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compansate pady
+    PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compensate pady
     PreviewWidth = int(PreviewHeight * 4 / 3)
     draw_capture_canvas.config(width=PreviewWidth, height=PreviewHeight)
     # Adjust holes size/position
