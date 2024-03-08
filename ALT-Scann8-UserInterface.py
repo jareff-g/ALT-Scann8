@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.20"
+__version__ = "1.10.21"
 __date__ = "2024-03-08"
-__version_highlight__ = "Various bugfixes"
+__version_highlight__ = "Error if film type not set"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -380,7 +380,7 @@ SessionData = {
     "CurrentExposure": 0,
     "NegativeCaptureActive": False,
     "HdrCaptureActive": str(HdrCaptureActive),
-    "FilmType": 'S8',
+    "FilmType": '',
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8": 240,
     "MinFrameSteps": 290,
@@ -1763,6 +1763,11 @@ def start_scan_simulated():
     global session_frames
     global last_frame_time
 
+    if film_type.get() == '':
+        tk.messagebox.showerror("Error!",
+                                "Please specify film type (S8/R8) before starting scan process")
+        return
+
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
@@ -1918,6 +1923,11 @@ def start_scan():
     global total_wait_time_save_image
     global session_frames
     global last_frame_time
+
+    if film_type.get() == '':
+        tk.messagebox.showerror("Error!",
+                                "Please specify film type (S8/R8) before starting scan process")
+        return
 
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
@@ -4453,10 +4463,6 @@ def create_widgets():
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown])
         arrange_widget_state(not AWB_enabled.get(), [AwbMode_label, AwbMode_dropdown])
-
-    # Set S8 by default
-    film_type.set("S8")
-    set_s8()
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
