@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.21"
-__date__ = "2024-03-08"
-__version_highlight__ = "Error if film type not set"
+__version__ = "1.10.23"
+__date__ = "2024-03-09"
+__version_highlight__ = "Add options popup (to set most command line options)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -83,7 +83,7 @@ from rolling_average import RollingAverage
 win = None
 as_tooltips = None
 ExitingApp = False
-add_vertical_scrollbar = False
+UIScrollbars = False
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -232,7 +232,8 @@ RSP_FILM_FORWARD_ENDED = 89
 ExpertMode = True
 ExperimentalMode = True
 PlotterMode = True
-keep_control_widgets_enabled = True
+DisableToolTips = False
+WidgetsEnabledWhileScanning = True
 plotter_canvas = None
 plotter_width = 20
 plotter_height = 10
@@ -340,6 +341,7 @@ HdrViewX4Active = False
 recalculate_hdr_exp_list = False
 force_adjust_hdr_bracket = False
 hdr_auto_bracket_frames = 8  # Every n frames, bracket is recalculated
+hdr_view_4_image = None
 
 # *** Simulated sensor modes to ellaborate resolution list
 camera_resolutions = None
@@ -640,12 +642,152 @@ def set_new_folder():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
 
-def get_last_frame_dismiss():
+def set_options_popup_dismiss():
+    options_dlg.grab_release()
+    options_dlg.destroy()
+
+
+def set_options_popup_accept():
+    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global WidgetsEnabledWhileScanning
+    global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
+    global widgets_enabled_while_scanning
+
+    refresh_ui = False
+    if ExpertMode != expert_mode.get():
+        refresh_ui = True
+        ExpertMode = expert_mode.get()
+        SessionData["ExpertMode"] = ExpertMode
+    if ExperimentalMode != experimental_mode.get():
+        refresh_ui = True
+        ExperimentalMode = experimental_mode.get()
+        SessionData["ExperimentalMode"] = ExperimentalMode
+    if PlotterMode != plotter_mode.get():
+        refresh_ui = True
+        PlotterMode = plotter_mode.get()
+        SessionData["PlotterMode"] = PlotterMode
+    if UIScrollbars != ui_scrollbars.get():
+        refresh_ui = True
+        UIScrollbars = ui_scrollbars.get()
+        SessionData["UIScrollbars"] = UIScrollbars
+    if DisableToolTips != disable_tooltips.get():
+        DisableToolTips = disable_tooltips.get()
+        SessionData["DisableToolTips"] = DisableToolTips
+    if WidgetsEnabledWhileScanning != widgets_enabled_while_scanning.get():
+        WidgetsEnabledWhileScanning = widgets_enabled_while_scanning.get()
+        SessionData["WidgetsEnabledWhileScanning"] = WidgetsEnabledWhileScanning
+    if FontSize != font_size_int.get():
+        refresh_ui = True
+        FontSize = font_size_int.get()
+        SessionData["FontSize"] = FontSize
+
+    if refresh_ui:
+        create_main_window()
+        load_session_data()
+
+    if DisableToolTips:
+        as_tooltips.disable()
+    else:
+        as_tooltips.enable()
+
+    options_dlg.grab_release()
+    options_dlg.destroy()
+
+
+def set_options_popup():
+    global options_dlg
+    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global WidgetsEnabledWhileScanning
+    global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
+    global widgets_enabled_while_scanning
+
+    options_row = 0
+
+    options_dlg = tk.Toplevel(win)
+    options_dlg.title("ALT-Scann8 options")
+    # options_dlg.geometry(f"300x100")
+    options_dlg.rowconfigure(0, weight=1)
+    options_dlg.columnconfigure(0, weight=1)
+
+    # Expert Mode
+    expert_mode = tk.BooleanVar(value=ExpertMode)
+    expert_mode_btn = tk.Checkbutton(options_dlg, variable=expert_mode, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Expert mode")
+    expert_mode_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(expert_mode_btn, "Enable expert mode")
+    options_row += 1
+
+    # Experimental Mode
+    experimental_mode = tk.BooleanVar(value=ExperimentalMode)
+    experimental_mode_btn = tk.Checkbutton(options_dlg, variable=experimental_mode, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Experimental mode")
+    experimental_mode_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(experimental_mode_btn, "Enable experimental mode")
+    options_row += 1
+
+    # Plotter Mode
+    plotter_mode = tk.BooleanVar(value=PlotterMode)
+    plotter_mode_btn = tk.Checkbutton(options_dlg, variable=plotter_mode, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Plotter window")
+    plotter_mode_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(plotter_mode_btn, "Display Plotter window")
+    options_row += 1
+
+    # Disable tootilps
+    disable_tooltips = tk.BooleanVar(value=DisableToolTips)
+    disable_tooltips_btn = tk.Checkbutton(options_dlg, variable=disable_tooltips, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Disable tooltips")
+    disable_tooltips_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(disable_tooltips_btn, "Disable tooltips")
+    options_row += 1
+
+    # Font Size
+    font_size_label = tk.Label(options_dlg, text="Main UI font size", font=("Arial", FontSize-1))
+    font_size_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
+    font_size_int = tk.IntVar(value=12)
+    font_size_int.set(FontSize)
+    font_size_spinbox = DynamicSpinbox(options_dlg, command=exposure_selection, width=2, from_=6, to=20,
+                                      textvariable=font_size_int, increment=1, font=("Arial", FontSize - 1))
+    font_size_spinbox.grid(row=options_row, column=1, sticky='W')
+    options_row += 1
+
+    # Display scrollbars
+    ui_scrollbars = tk.BooleanVar(value=UIScrollbars)
+    ui_scrollbars_btn = tk.Checkbutton(options_dlg, variable=ui_scrollbars, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Display scrollbars")
+    ui_scrollbars_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions")
+    options_row += 1
+
+    # Widgets enabled while scanning
+    widgets_enabled_while_scanning = tk.BooleanVar(value=WidgetsEnabledWhileScanning)
+    widgets_enabled_while_scanning_btn = tk.Checkbutton(options_dlg, variable=widgets_enabled_while_scanning,
+                                                        onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
+                                                        text="Keep widgets enabled")
+    widgets_enabled_while_scanning_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(widgets_enabled_while_scanning_btn, "Keep widgets enabled while scanning")
+    options_row += 1
+
+    options_cancel_btn = tk.Button(options_dlg, text="Cancel", command=set_options_popup_dismiss, width=8,
+                                   font=("Arial", FontSize))
+    options_cancel_btn.grid(row=options_row, column=0, padx=10, pady=5, sticky='w')
+    options_ok_btn = tk.Button(options_dlg, text="OK", command=set_options_popup_accept, width=8,
+                               font=("Arial", FontSize))
+    options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='e')
+
+    options_dlg.protocol("WM_DELETE_WINDOW", set_options_popup_dismiss)  # intercept close button
+    options_dlg.transient(win)  # dialog window is related to main
+    options_dlg.wait_visibility()  # can't grab until window appears, so we wait
+    options_dlg.grab_set()  # ensure all input goes to our window
+    options_dlg.wait_window()  # block until window is destroyed
+
+
+def get_last_frame_popup_dismiss():
     last_frame_dlg.grab_release()
     last_frame_dlg.destroy()
 
 
-def get_last_frame(last_frame):
+def get_last_frame_popup(last_frame):
     global last_frame_dlg
     last_frame_dlg = tk.Toplevel(win)
     last_frame_dlg.title("Last frame")
@@ -660,9 +802,9 @@ def get_last_frame(last_frame):
     last_frame_entry = tk.Entry(last_frame_dlg, textvariable=last_frame_int, width=6, font=("Arial", FontSize),
                                 justify="right")
     last_frame_entry.grid(row=1, column=0, columnspan=2, padx=10, pady=5)
-    last_frame_ok_btn = tk.Button(last_frame_dlg, text="OK", command=get_last_frame_dismiss)
+    last_frame_ok_btn = tk.Button(last_frame_dlg, text="OK", command=get_last_frame_popup_dismiss)
     last_frame_ok_btn.grid(row=2, column=0, padx=10, pady=5)
-    last_frame_dlg.protocol("WM_DELETE_WINDOW", get_last_frame_dismiss)  # intercept close button
+    last_frame_dlg.protocol("WM_DELETE_WINDOW", get_last_frame_popup_dismiss)  # intercept close button
     last_frame_dlg.transient(win)  # dialog window is related to main
     last_frame_dlg.wait_visibility()  # can't grab until window appears, so we wait
     last_frame_dlg.grab_set()  # ensure all input goes to our window
@@ -691,7 +833,7 @@ def set_existing_folder():
             last_frame = max(last_frame, int(frame_number[0]))  # Only one number in the filename, so we take the first
             filecount += 1
 
-    current_frame_str = str(get_last_frame(last_frame))
+    current_frame_str = str(get_last_frame_popup(last_frame))
 
     if current_frame_str is None:
         current_frame_str = '0'
@@ -832,7 +974,7 @@ def button_status_change_except(except_button, active):
     general_widget_list = [SingleStep_btn, Snapshot_btn, AdvanceMovie_btn, Rewind_btn, FastForward_btn,
                            negative_image_checkbox,
                            Exit_btn, film_type_S8_rb, film_type_R8_rb, file_type_dropdown, new_folder_btn,
-                           real_time_display_checkbox,
+                           real_time_display_checkbox, options_btn,
                            resolution_label, resolution_dropdown, file_type_label, file_type_dropdown,
                            existing_folder_btn, hdr_capture_active_checkbox]
     control_widget_list = [auto_exposure_btn, exposure_spinbox, auto_exposure_wait_btn, auto_wb_red_btn, wb_red_spinbox,
@@ -859,7 +1001,7 @@ def button_status_change_except(except_button, active):
         if except_button != widget:
             widget.config(state=DISABLED if active else NORMAL)
 
-    if not keep_control_widgets_enabled:
+    if not WidgetsEnabledWhileScanning:
         for widget in control_widget_list:
             if except_button != widget:
                 widget.config(state=DISABLED if active else NORMAL)
@@ -2357,25 +2499,27 @@ def load_persisted_data_from_disk():
 
 
 def load_config_data():
+    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global WidgetsEnabledWhileScanning
+
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
         logging.debug("SessionData loaded from disk:")
-        if 'TempInFahrenheit' in SessionData:
-            temp_in_fahrenheit.set(eval(SessionData["TempInFahrenheit"]))
-            if temp_in_fahrenheit.get():
-                temp_in_fahrenheit_checkbox.select()
-        if ExpertMode:
-            if 'MatchWaitMargin' in SessionData:
-                aux = int(SessionData["MatchWaitMargin"])
-                match_wait_margin_value.set(aux)
-            else:
-                match_wait_margin_value.set(50)
-            if 'CaptureStabilizationDelay' in SessionData:
-                aux = float(SessionData["CaptureStabilizationDelay"])
-                stabilization_delay_value.set(round(aux * 1000))
-            else:
-                stabilization_delay_value.set(100)
+        if 'ExpertMode' in SessionData:
+            ExpertMode = SessionData["ExpertMode"]
+        if 'ExperimentalMode' in SessionData:
+            ExperimentalMode = SessionData["ExperimentalMode"]
+        if 'PlotterMode' in SessionData:
+            PlotterMode = SessionData["PlotterMode"]
+        if 'UIScrollbars' in SessionData:
+            UIScrollbars = SessionData["UIScrollbars"]
+        if 'DisableToolTips' in SessionData:
+            DisableToolTips = SessionData["DisableToolTips"]
+        if 'WidgetsEnabledWhileScanning' in SessionData:
+            WidgetsEnabledWhileScanning = SessionData["WidgetsEnabledWhileScanning"]
+        if 'FontSize' in SessionData:
+            FontSize = SessionData["FontSize"]
 
 
 def arrange_widget_state(disabled, widget_list):
@@ -2416,6 +2560,21 @@ def load_session_data():
                                          \r\nDo you want to continue from where it was stopped?')
         if confirm:
             logging.debug("SessionData loaded from disk:")
+            if 'TempInFahrenheit' in SessionData:
+                temp_in_fahrenheit.set(eval(SessionData["TempInFahrenheit"]))
+                if temp_in_fahrenheit.get():
+                    temp_in_fahrenheit_checkbox.select()
+            if ExpertMode:
+                if 'MatchWaitMargin' in SessionData:
+                    aux = int(SessionData["MatchWaitMargin"])
+                    match_wait_margin_value.set(aux)
+                else:
+                    match_wait_margin_value.set(50)
+                if 'CaptureStabilizationDelay' in SessionData:
+                    aux = float(SessionData["CaptureStabilizationDelay"])
+                    stabilization_delay_value.set(round(aux * 1000))
+                else:
+                    stabilization_delay_value.set(100)
             if 'CurrentDir' in SessionData:
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
@@ -2754,7 +2913,8 @@ def PiCam2_configure():
 def hdr_init():
     global hdr_view_4_image
 
-    hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
+    if hdr_view_4_image is None:
+        hdr_view_4_image = Image.new("RGB", (PreviewWidth, PreviewHeight))
     hdr_reinit()
 
 
@@ -2794,13 +2954,18 @@ def create_main_window():
                        (1103, 15),
                        (1168, 16), (1220, 17), (1273, 18)]
 
-    win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
+    if win is None:
+        win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
+    else:
+        destroy_widgets(win)
     if SimulatedRun:
         win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
     else:
         win.title('ALT-Scann8 v' + __version__)  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
-    screen_width, screen_height = win.maxsize()
+    screen_width = win.winfo_screenwidth()
+    screen_height = win.winfo_screenheight()
+    #screen_width, screen_height = win.maxsize()
     logging.info(f"Screen size: {screen_width}x{screen_height}")
 
     # Determine optimal font size
@@ -3353,6 +3518,13 @@ def update_target_dir_wraplength(event):
 # ***************
 # Widget creation
 # ***************
+
+def destroy_widgets(container):
+    for widget in container.winfo_children():
+        destroy_widgets(widget)
+        widget.destroy()
+
+
 def create_widgets():
     global AdvanceMovie_btn
     global SingleStep_btn
@@ -3431,13 +3603,14 @@ def create_widgets():
     global PreviewWidth, PreviewHeight
     global plotter_width, plotter_height
     global app_width, app_height
+    global options_btn
 
     # Global value for separations between widgets
     y_pad = 2
     x_pad = 2
 
     # Check if vertical scrollbar required
-    if add_vertical_scrollbar:
+    if UIScrollbars:
         # Create a canvas widget
         scrolled_canvas = tk.Canvas(win)
 
@@ -3637,6 +3810,13 @@ def create_widgets():
 
     bottom_area_row += 1
 
+    # Optons button
+    options_btn = Button(top_left_area_frame, text="Set options", command=set_options_popup,
+                         activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
+    options_btn.grid(row=bottom_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
+    as_tooltips.add(options_btn, "Set ALT-Scann8 options.")
+    bottom_area_row += 1
+
     # Toggle UI size & stats only in expert mode
     if ExpertMode:
         toggle_ui_small = tk.BooleanVar(value=False)
@@ -3647,6 +3827,7 @@ def create_widgets():
 
         full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
                               sticky='NSEW')
+        full_ui_checkbox.grid_forget()
         as_tooltips.add(full_ui_checkbox, "Toggle between full/restricted user interface")
         bottom_area_row += 1
 
@@ -4371,26 +4552,30 @@ def create_widgets():
         experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous',
                                                       font=("Arial", FontSize - 1))
         experimental_miscellaneous_frame.pack(side=LEFT, padx=x_pad, pady=y_pad, fill='both', expand=True)
+        experimental_row = 0
 
         # Display entry to throttle Rwnd/FF speed
         rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame, text='RW/FF speed:',
                                             font=("Arial", FontSize - 1))
-        rwnd_speed_control_label.grid(row=0, column=0, padx=x_pad, pady=y_pad)
+        rwnd_speed_control_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
         rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
         rwnd_speed_control_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, state='readonly', width=4,
                                                     command=rwnd_speed_control_selection, from_=40, to=800,
                                                     increment=50,
                                                     textvariable=rwnd_speed_control_value, font=("Arial", FontSize - 1))
-        rwnd_speed_control_spinbox.grid(row=0, column=1, padx=x_pad, pady=y_pad)
+        rwnd_speed_control_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad)
         rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
         rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(rewind_speed_validation_cmd, '%P'))
         as_tooltips.add(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
         # No need to validate on FocusOut, since no keyboard entry is allowed in this one
+        experimental_row += 1
 
         # Damaged film helpers, to help handling damaged film (broken perforations)
         Damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film',
                                         font=("Arial", FontSize - 1))
-        Damaged_film_frame.grid(row=1, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        Damaged_film_frame.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        experimental_row +=1
+
         # Checkbox to enable/disable manual scan
         Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
         Manual_scan_checkbox = tk.Checkbutton(Damaged_film_frame, text='Enable manual scan',
@@ -4424,37 +4609,41 @@ def create_widgets():
         # Retreat movie button (slow backward through filmgate)
         RetreatMovie_btn = Button(experimental_miscellaneous_frame, text="Movie Backward", command=retreat_movie,
                                   activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
-        RetreatMovie_btn.grid(row=2, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        RetreatMovie_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
         as_tooltips.add(RetreatMovie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source "
                                           "reels in left position in order to avoid film jamming at film gate.")
+        experimental_row += 1
 
         # Unlock reels button (to load film, rewind, etc.)
         Free_btn = Button(experimental_miscellaneous_frame, text="Unlock Reels", command=set_free_mode,
                           activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
-        Free_btn.grid(row=3, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        Free_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
         as_tooltips.add(Free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always "
                                   "unlocked when not performing any specific operation.")
+        experimental_row += 1
 
         # Emergency exit (exit without saving)
         emergency_exit_btn = Button(experimental_miscellaneous_frame, text="Emergency Exit", command=app_emergency_exit,
                           activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
-        emergency_exit_btn.grid(row=4, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        emergency_exit_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
         as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
+        experimental_row += 1
 
         # Spinbox to select Preview module
         preview_module_label = tk.Label(experimental_miscellaneous_frame, text='Preview module:',
                                         font=("Arial", FontSize - 1))
-        preview_module_label.grid(row=5, column=0, padx=x_pad, pady=y_pad)
+        preview_module_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
         preview_module_value = tk.IntVar(value=1)  # Default value, overriden by configuration
         preview_module_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=preview_module_selection,
                                                 width=2, textvariable=preview_module_value, from_=1, to=50,
                                                 font=("Arial", FontSize - 1))
-        preview_module_spinbox.grid(row=5, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        preview_module_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         preview_module_validation_cmd = preview_module_spinbox.register(preview_module_validation)
         as_tooltips.add(preview_module_spinbox, "Refresh preview, auto exposure and auto WB values only every 'n' "
                                                 "frames. Can speed up scanning significantly")
         preview_module_spinbox.configure(validate="key", validatecommand=(preview_module_validation_cmd, '%P'))
         preview_module_spinbox.bind("<FocusOut>", lambda event: preview_module_selection())
+        experimental_row += 1
 
     if ExpertMode:
         arrange_widget_state(AE_enabled.get(), [exposure_spinbox])
@@ -4507,10 +4696,11 @@ def main(argv):
     global LogLevel, LoggingMode
     global ALT_scann_init_done
     global CameraDisabled, DisableThreads
-    global FontSize, add_vertical_scrollbar
-    global keep_control_widgets_enabled
+    global FontSize, UIScrollbars
+    global WidgetsEnabledWhileScanning
+    global DisableToolTips
 
-    go_disable_tooptips = False
+    DisableToolTips = False
 
     opts, args = getopt.getopt(argv, "sexl:phntwf:b")
 
@@ -4528,15 +4718,15 @@ def main(argv):
         elif opt == '-f':
             FontSize = int(arg)
         elif opt == '-b':
-            add_vertical_scrollbar = True
+            UIScrollbars = True
         elif opt == '-n':
-            go_disable_tooptips = True
+            DisableToolTips = True
         elif opt == '-t':
             DisableThreads = True
         elif opt == '-p':
             PlotterMode = not PlotterMode
         elif opt == '-w':
-            keep_control_widgets_enabled = not keep_control_widgets_enabled
+            WidgetsEnabledWhileScanning = not WidgetsEnabledWhileScanning
         elif opt == '-h':
             print("ALT-Scann 8 Command line parameters")
             print("  -s             Start Simulated session")
@@ -4560,12 +4750,13 @@ def main(argv):
 
     load_persisted_data_from_disk()  # Read json file in memory, to be processed by 'load_session_data'
 
+    load_config_data()
+
     tscann8_init()
 
-    if go_disable_tooptips:
+    if DisableToolTips:
         as_tooltips.disable()
 
-    load_config_data()
     load_session_data()
 
     if SimulatedRun:
