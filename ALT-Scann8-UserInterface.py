@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.22"
-__date__ = "2024-03-08"
+__version__ = "1.10.23"
+__date__ = "2024-03-09"
 __version_highlight__ = "Add options popup (to set most command line options)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -682,7 +682,8 @@ def set_options_popup_accept():
         SessionData["FontSize"] = FontSize
 
     if refresh_ui:
-        tscann8_init()
+        create_main_window()
+        load_session_data()
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -973,7 +974,7 @@ def button_status_change_except(except_button, active):
     general_widget_list = [SingleStep_btn, Snapshot_btn, AdvanceMovie_btn, Rewind_btn, FastForward_btn,
                            negative_image_checkbox,
                            Exit_btn, film_type_S8_rb, film_type_R8_rb, file_type_dropdown, new_folder_btn,
-                           real_time_display_checkbox,
+                           real_time_display_checkbox, options_btn,
                            resolution_label, resolution_dropdown, file_type_label, file_type_dropdown,
                            existing_folder_btn, hdr_capture_active_checkbox]
     control_widget_list = [auto_exposure_btn, exposure_spinbox, auto_exposure_wait_btn, auto_wb_red_btn, wb_red_spinbox,
@@ -3602,6 +3603,7 @@ def create_widgets():
     global PreviewWidth, PreviewHeight
     global plotter_width, plotter_height
     global app_width, app_height
+    global options_btn
 
     # Global value for separations between widgets
     y_pad = 2
