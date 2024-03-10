@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.23"
-__date__ = "2024-03-09"
-__version_highlight__ = "Add options popup (to set most command line options)"
+__version__ = "1.10.24"
+__date__ = "2024-03-10"
+__version_highlight__ = "Add options popup (logging level)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -649,9 +649,9 @@ def set_options_popup_dismiss():
 
 def set_options_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
-    global WidgetsEnabledWhileScanning
+    global WidgetsEnabledWhileScanning, LoggingMode
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
-    global widgets_enabled_while_scanning
+    global widgets_enabled_while_scanning, debug_level_selected
 
     refresh_ui = False
     if ExpertMode != expert_mode.get():
@@ -680,6 +680,13 @@ def set_options_popup_accept():
         refresh_ui = True
         FontSize = font_size_int.get()
         SessionData["FontSize"] = FontSize
+    if LoggingMode != debug_level_selected.get():
+        LoggingMode = debug_level_selected.get()
+        LogLevel = getattr(logging, LoggingMode.upper(), None)
+        if not isinstance(LogLevel, int):
+            raise ValueError('Invalid log level: %s' % LogLevel)
+        SessionData["LogLevel"] = LogLevel
+        logging.getLogger().setLevel(LogLevel)
 
     if refresh_ui:
         create_main_window()
@@ -699,7 +706,7 @@ def set_options_popup():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
-    global widgets_enabled_while_scanning
+    global widgets_enabled_while_scanning, debug_level_selected
 
     options_row = 0
 
@@ -766,6 +773,20 @@ def set_options_popup():
                                                         text="Keep widgets enabled")
     widgets_enabled_while_scanning_btn.grid(row=options_row, column=0, sticky="W")
     as_tooltips.add(widgets_enabled_while_scanning_btn, "Keep widgets enabled while scanning")
+    options_row += 1
+
+    # Dropdown menu options
+    debug_level_list = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    debug_level_selected = tk.StringVar()
+    debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
+    debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
+    debug_level_label.grid(row=options_row, column=0, sticky="W")
+    debug_level_dropdown = OptionMenu(options_dlg,
+                                     debug_level_selected, *debug_level_list)
+    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
+    # resolution_dropdown.config(state=DISABLED)
+    as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
     options_row += 1
 
     options_cancel_btn = tk.Button(options_dlg, text="Cancel", command=set_options_popup_dismiss, width=8,
@@ -2500,7 +2521,7 @@ def load_persisted_data_from_disk():
 
 def load_config_data():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
-    global WidgetsEnabledWhileScanning
+    global WidgetsEnabledWhileScanning, LogLevel, LoggingMode
 
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
@@ -2520,6 +2541,9 @@ def load_config_data():
             WidgetsEnabledWhileScanning = SessionData["WidgetsEnabledWhileScanning"]
         if 'FontSize' in SessionData:
             FontSize = SessionData["FontSize"]
+        if 'LogLevel' in SessionData:
+            LogLevel = SessionData["LogLevel"]
+            LoggingMode = logging.getLevelName(LogLevel)
 
 
 def arrange_widget_state(disabled, widget_list):
@@ -3811,7 +3835,7 @@ def create_widgets():
     bottom_area_row += 1
 
     # Optons button
-    options_btn = Button(top_left_area_frame, text="Set options", command=set_options_popup,
+    options_btn = Button(top_left_area_frame, text="Settings", command=set_options_popup,
                          activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
     options_btn.grid(row=bottom_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(options_btn, "Set ALT-Scann8 options.")
