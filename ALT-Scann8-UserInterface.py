@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.24"
-__date__ = "2024-03-10"
-__version_highlight__ = "Add options popup (logging level)"
+__version__ = "1.10.25"
+__date__ = "2024-03-11"
+__version_highlight__ = "Various bug fixes - 11/03/2024"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -84,6 +84,7 @@ win = None
 as_tooltips = None
 ExitingApp = False
 UIScrollbars = False
+ColorCodedButtons = True
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
 FocusState = True
 lastFocus = True
@@ -649,9 +650,9 @@ def set_options_popup_dismiss():
 
 def set_options_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
-    global WidgetsEnabledWhileScanning, LoggingMode
+    global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
-    global widgets_enabled_while_scanning, debug_level_selected
+    global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons
 
     refresh_ui = False
     if ExpertMode != expert_mode.get():
@@ -687,6 +688,10 @@ def set_options_popup_accept():
             raise ValueError('Invalid log level: %s' % LogLevel)
         SessionData["LogLevel"] = LogLevel
         logging.getLogger().setLevel(LogLevel)
+    if ColorCodedButtons != color_coded_buttons.get():
+        refresh_ui = True
+        ColorCodedButtons = color_coded_buttons.get()
+        SessionData["ColorCodedButtons"] = ColorCodedButtons
 
     if refresh_ui:
         create_main_window()
@@ -704,9 +709,9 @@ def set_options_popup_accept():
 def set_options_popup():
     global options_dlg
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
-    global WidgetsEnabledWhileScanning
+    global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
-    global widgets_enabled_while_scanning, debug_level_selected
+    global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons
 
     options_row = 0
 
@@ -780,13 +785,22 @@ def set_options_popup():
     debug_level_selected = tk.StringVar()
     debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
     debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
-    debug_level_label.grid(row=options_row, column=0, sticky="W")
+    debug_level_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     debug_level_dropdown = OptionMenu(options_dlg,
                                      debug_level_selected, *debug_level_list)
-    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
     debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
     # resolution_dropdown.config(state=DISABLED)
     as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
+    options_row += 1
+
+    # Color coded buttons
+    color_coded_buttons = tk.BooleanVar(value=ColorCodedButtons)
+    color_coded_buttons_btn = tk.Checkbutton(options_dlg, variable=color_coded_buttons,
+                                                        onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
+                                                        text="Color coded buttons")
+    color_coded_buttons_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(widgets_enabled_while_scanning_btn, "Use colors to highlight button status")
     options_row += 1
 
     options_cancel_btn = tk.Button(options_dlg, text="Cancel", command=set_options_popup_dismiss, width=8,
@@ -890,8 +904,6 @@ def set_auto_wb():
         return
 
     SessionData["CurrentAwbAuto"] = AWB_enabled.get()
-    SessionData["GainRed"] = wb_red_value.get()
-    SessionData["GainBlue"] = wb_blue_value.get()
 
     if AWB_enabled.get():
         manual_wb_red_value = wb_red_value.get()
@@ -902,6 +914,8 @@ def set_auto_wb():
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AwbEnable": True})
     else:
+        SessionData["GainRed"] = wb_red_value.get()
+        SessionData["GainBlue"] = wb_blue_value.get()
         wb_red_value.set(manual_wb_red_value)
         wb_blue_value.set(manual_wb_blue_value)
         auto_wb_red_btn.config(text="WB Red:")
@@ -3739,7 +3753,9 @@ def create_widgets():
     negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film',
                                              variable=negative_image, onvalue=True, offvalue=False,
                                              font=("Arial", FontSize), command=set_negative_image,
-                                             indicatoron=False, selectcolor="pale green")
+                                             indicatoron=False)
+    if ColorCodedButtons:
+        negative_image_checkbox.config(selectcolor="pale green")
     negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
                                  sticky='NSEW')
     as_tooltips.add(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
@@ -3750,7 +3766,9 @@ def create_widgets():
     real_time_display_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus view', height=1,
                                                 variable=real_time_display, onvalue=True, offvalue=False,
                                                 font=("Arial", FontSize), command=set_real_time_display,
-                                                indicatoron=False, selectcolor="pale green")
+                                                indicatoron=False)
+    if ColorCodedButtons:
+        real_time_display_checkbox.config(selectcolor="pale green")
     real_time_display_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
                                     pady=y_pad, sticky='NSEW')
     as_tooltips.add(real_time_display_checkbox, "Enable real-time film preview. Cannot be used while scanning, "
@@ -3762,7 +3780,9 @@ def create_widgets():
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
                                              variable=real_time_zoom, onvalue=True, offvalue=False,
                                              font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
-                                             selectcolor="pale green", state=DISABLED)
+                                             state=DISABLED)
+    if ColorCodedButtons:
+        real_time_display_checkbox.config(selectcolor="pale green")
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
                                  sticky='NSEW')
     as_tooltips.add(real_time_zoom_checkbox, "Zoom in on the real-time film preview. Useful to focus the film")
@@ -3846,8 +3866,9 @@ def create_widgets():
         toggle_ui_small = tk.BooleanVar(value=False)
         full_ui_checkbox = tk.Checkbutton(top_left_area_frame, text='Toggle UI', height=1,
                                           variable=toggle_ui_small, onvalue=True, offvalue=False,
-                                          font=("Arial", FontSize), command=toggle_ui_size, indicatoron=False,
-                                          selectcolor="sea green")
+                                          font=("Arial", FontSize), command=toggle_ui_size, indicatoron=False)
+        if ColorCodedButtons:
+            full_ui_checkbox.config(selectcolor="pale green")
 
         full_ui_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
                               sticky='NSEW')
@@ -4046,11 +4067,15 @@ def create_widgets():
     film_type_S8_rb = tk.Radiobutton(film_type_frame, text="S8", variable=film_type, command=set_s8,
                                      value='S8', font=("Arial", FontSize), indicatoron=0, width=5, height=2,
                                      compound='left', relief="raised", borderwidth=3)
+    if ColorCodedButtons:
+        film_type_S8_rb.config(selectcolor="orange")
     film_type_S8_rb.pack(side=LEFT)
     as_tooltips.add(film_type_S8_rb, "Handle as Super 8 film")
     film_type_R8_rb = tk.Radiobutton(film_type_frame, text="R8", variable=film_type, command=set_r8,
                                      value='R8', font=("Arial", FontSize), indicatoron=0, width=5, height=2,
                                      compound='left', relief="raised", borderwidth=3)
+    if ColorCodedButtons:
+        film_type_R8_rb.config(selectcolor="powder blue")
     film_type_R8_rb.pack(side=RIGHT)
     as_tooltips.add(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
 
@@ -4101,7 +4126,9 @@ def create_widgets():
         AE_enabled = tk.BooleanVar(value=False)
         auto_exposure_btn = tk.Checkbutton(exp_wb_frame, variable=AE_enabled, onvalue=True, offvalue=False,
                                            font=("Arial", FontSize - 1), command=set_auto_exposure, indicatoron=False,
-                                           selectcolor="pale green", text="Exposure:", relief="raised")
+                                           text="Exposure:", relief="raised")
+        if ColorCodedButtons:
+            auto_exposure_btn.config(selectcolor="pale green")
         auto_exposure_btn.grid(row=exp_wb_row, column=0, sticky="EW")
         as_tooltips.add(auto_exposure_btn, "Toggle automatic exposure status (on/off).")
 
@@ -4128,8 +4155,10 @@ def create_widgets():
         # Automatic White Balance red
         AWB_enabled = tk.BooleanVar(value=False)
         auto_wb_red_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
-                                         font=("Arial", FontSize - 1), command=set_auto_wb, selectcolor="pale green",
-                                         text="WB Red:", relief="raised", indicatoron=False)
+                                         font=("Arial", FontSize - 1), command=set_auto_wb, text="WB Red:",
+                                         relief="raised", indicatoron=False)
+        if ColorCodedButtons:
+            auto_wb_red_btn.config(selectcolor="pale green")
         auto_wb_red_btn.grid(row=exp_wb_row, column=0, sticky="WE")
         as_tooltips.add(auto_wb_red_btn, "Toggle automatic white balance for both WB channels (on/off).")
 
@@ -4155,8 +4184,10 @@ def create_widgets():
 
         # Automatic White Balance blue
         auto_wb_blue_btn = tk.Checkbutton(exp_wb_frame, variable=AWB_enabled, onvalue=True, offvalue=False,
-                                          font=("Arial", FontSize - 1), command=set_auto_wb, selectcolor="pale green",
-                                          text="WB Blue:", relief="raised", indicatoron=False)
+                                          font=("Arial", FontSize - 1), command=set_auto_wb, text="WB Blue:",
+                                          relief="raised", indicatoron=False)
+        if ColorCodedButtons:
+            auto_wb_blue_btn.config(selectcolor="pale green")
         auto_wb_blue_btn.grid(row=exp_wb_row, column=0, sticky="WE")
         as_tooltips.add(auto_wb_blue_btn, "Toggle automatic white balance for both WB channels (on/off).")
 
@@ -4359,8 +4390,9 @@ def create_widgets():
         auto_framesteps_enabled = tk.BooleanVar(value=True)
         steps_per_frame_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_framesteps_enabled, onvalue=True,
                                              offvalue=False, font=("Arial", FontSize - 1), command=steps_per_frame_auto,
-                                             selectcolor="pale green", text="Steps/Frame AUTO:", relief="raised",
-                                             indicatoron=False, width=18)
+                                             text="Steps/Frame AUTO:", relief="raised", indicatoron=False, width=18)
+        if ColorCodedButtons:
+            steps_per_frame_btn.config(selectcolor="pale green")
         steps_per_frame_btn.grid(row=frame_align_row, column=0, sticky="EW")
         as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
@@ -4382,8 +4414,9 @@ def create_widgets():
         auto_pt_level_enabled = tk.BooleanVar(value=True)
         pt_level_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_pt_level_enabled, onvalue=True,
                                       offvalue=False, font=("Arial", FontSize - 1), command=set_auto_pt_level,
-                                      selectcolor="pale green", text="PT Level AUTO:", relief="raised",
-                                      indicatoron=False)
+                                      text="PT Level AUTO:", relief="raised", indicatoron=False)
+        if ColorCodedButtons:
+            pt_level_btn.config(selectcolor="pale green")
         pt_level_btn.grid(row=frame_align_row, column=0, sticky="EW")
         as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
