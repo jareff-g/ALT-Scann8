@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.26"
+__version__ = "1.10.27"
 __date__ = "2024-03-12"
 __version_highlight__ = "Keep arranging options"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -236,6 +236,8 @@ DisableToolTips = False
 ColorCodedButtons = True
 WidgetsEnabledWhileScanning = True
 TempInFahrenheit = False
+CaptureResolution = '2028x1520'
+FilmType = 'jpg'
 # Other options (experimental, expert...)
 PreviewModuleValue = 1
 
@@ -655,8 +657,7 @@ def settings_popup_dismiss():
 def settings_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
-    #global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
-    #global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
+    global CaptureResolution, FilmType
 
     refresh_ui = False
     if ExpertMode != expert_mode.get():
@@ -699,6 +700,20 @@ def settings_popup_accept():
     if TempInFahrenheit != temp_in_fahrenheit.get():
         TempInFahrenheit = temp_in_fahrenheit.get()
         SessionData["TempInFahrenheit"] = TempInFahrenheit
+    if CaptureResolution != resolution_dropdown_selected.get():
+        CaptureResolution = resolution_dropdown_selected.get()
+        SessionData["CaptureResolution"] = CaptureResolution
+        camera_resolutions.set_active(CaptureResolution)
+        if resolution_dropdown_selected.get() == "4056x3040":
+            max_inactivity_delay = reference_inactivity_delay * 2
+        else:
+            max_inactivity_delay = reference_inactivity_delay
+        send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+        logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
+        PiCam2_change_resolution()
+    if FilmType != file_type_dropdown_selected.get():
+        FilmType = file_type_dropdown_selected.get()
+        SessionData["FilmType"] = FilmType
 
     if refresh_ui:
         create_main_window()
@@ -717,8 +732,10 @@ def settings_popup():
     global options_dlg
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
+    global CaptureResolution, FilmType
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
+    global resolution_dropdown_selected, file_type_dropdown_selected
 
     options_row = 0
 
@@ -797,7 +814,6 @@ def settings_popup():
     debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
     debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
     debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
-    # resolution_dropdown.config(state=DISABLED)
     as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
     options_row += 1
 
@@ -814,6 +830,43 @@ def settings_popup():
                                                  onvalue=True, offvalue=False, font=("Arial", FontSize - 1))
     temp_in_fahrenheit_checkbox.grid(row=options_row, column=0, sticky="W")
     as_tooltips.add(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
+    options_row += 1
+
+    # Capture resolution Dropdown
+    # Drop down to select capture resolution
+    # Dropdown menu options
+    resolution_list = camera_resolutions.get_list()
+    resolution_dropdown_selected = tk.StringVar()
+    resolution_label = Label(options_dlg, text='Resolution:', font=("Arial", FontSize))
+    resolution_label.widget_type = "general"
+    resolution_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
+    resolution_dropdown = OptionMenu(options_dlg, resolution_dropdown_selected, *resolution_list)
+    resolution_dropdown.widget_type = "general"
+    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    resolution_dropdown_selected.set(CaptureResolution)
+    resolution_dropdown.grid(row=options_row, column=1, sticky="W")
+    as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with "
+                                         "* are cropped, requiring lens adjustment")
+    options_row += 1
+
+    # File format (JPG or PNG)
+    # Drop down to select file type
+    # Dropdown menu options
+    file_type_list = ["jpg", "png", "dng"]
+    file_type_dropdown_selected = tk.StringVar()
+
+    # No label for now
+    file_type_label = Label(options_dlg, text='Type:', font=("Arial", FontSize))
+    file_type_label.widget_type = "general"
+    file_type_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
+    file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
+    file_type_dropdown.widget_type = "general"
+    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    file_type_dropdown_selected.set(FilmType)  # Set the initial value
+    file_type_dropdown.grid(row=options_row, column=1, sticky="W")
+    # file_type_dropdown.config(state=DISABLED)
+    as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
+
     options_row += 1
 
     options_cancel_btn = tk.Button(options_dlg, text="Cancel", command=settings_popup_dismiss, width=8,
@@ -1227,8 +1280,8 @@ def capture_save_thread(queue, event, id):
         if message == END_TOKEN:
             break
         # Invert image if button selected
-        is_dng = file_type_dropdown_selected.get() == 'dng'
-        is_jpg = file_type_dropdown_selected.get() == 'jpg'
+        is_dng = FilmType == 'dng'
+        is_jpg = FilmType == 'jpg'
         # Extract info from message
         type = message[0]
         if type == REQUEST_TOKEN:
@@ -1246,9 +1299,9 @@ def capture_save_thread(queue, event, id):
         if is_dng:
             # Saving DNG implies passing a request, not an image, therefore no additional checks (no negative allowed)
             if hdr_idx > 1:  # Hdr frame 1 has standard filename
-                request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+                request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType))
             else:  # Non HDR
-                request.save_dng(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+                request.save_dng(FrameFilenamePattern % (frame_idx, FilmType))
             request.release()
             logging.debug("Thread %i saved request DNG image: %s ms", id,
                           str(round((time.time() - curtime) * 1000, 1)))
@@ -1257,9 +1310,9 @@ def capture_save_thread(queue, event, id):
             if not negative_image.get() and type == REQUEST_TOKEN:
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     request.save('main',
-                                 HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()))
+                                 HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType))
                 else:  # Non HDR
-                    request.save('main', FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()))
+                    request.save('main', FrameFilenamePattern % (frame_idx, FilmType))
                 request.release()
                 logging.debug("Thread %i saved request image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -1267,9 +1320,9 @@ def capture_save_thread(queue, event, id):
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     logging.debug("Saving HDR frame n.%i", hdr_idx)
                     captured_image.save(
-                        HdrFrameFilenamePattern % (frame_idx, hdr_idx, file_type_dropdown_selected.get()), quality=95)
+                        HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType), quality=95)
                 else:
-                    captured_image.save(FrameFilenamePattern % (frame_idx, file_type_dropdown_selected.get()),
+                    captured_image.save(FrameFilenamePattern % (frame_idx, FilmType),
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -1625,8 +1678,8 @@ def capture_hdr(mode):
         work_list = hdr_rev_exp_list
         idx = hdr_num_exposures
         idx_inc = -1
-    is_dng = file_type_dropdown_selected.get() == 'dng'
-    is_png = file_type_dropdown_selected.get() == 'png'
+    is_dng = FilmType == 'dng'
+    is_png = FilmType == 'png'
     for exp in work_list:
         exp = max(1, exp + hdr_bracket_shift_value.get())  # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
@@ -1659,9 +1712,9 @@ def capture_hdr(mode):
                     capture_display_queue.put(queue_item)
                 curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
-                    request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
+                    request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, FilmType))
                 else:  # Non HDR
-                    request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                    request.save_dng(FrameFilenamePattern % (CurrentFrame, FilmType))
                 request.release()
                 logging.debug(f"Capture hdr, saved request image ({CurrentFrame}, {idx}: "
                               f"{round((time.time() - curtime) * 1000, 1)}")
@@ -1674,9 +1727,9 @@ def capture_hdr(mode):
                     draw_preview_image(captured_image, CurrentFrame, idx)
                     if idx > 1:  # Hdr frame 1 has standard filename
                         captured_image.save(
-                            HdrFrameFilenamePattern % (CurrentFrame, idx, file_type_dropdown_selected.get()))
+                            HdrFrameFilenamePattern % (CurrentFrame, idx, FilmType))
                     else:
-                        captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                        captured_image.save(FrameFilenamePattern % (CurrentFrame, FilmType))
                     logging.debug(f"Capture hdr, saved image ({CurrentFrame}, {idx}): "
                                   f"{round((time.time() - curtime) * 1000, 1)} ms")
                 else:  # send image to threads
@@ -1701,15 +1754,15 @@ def capture_hdr(mode):
             # Display preview using thread, not directly
             queue_item = tuple((IMAGE_TOKEN, img, CurrentFrame, 0))
             capture_display_queue.put(queue_item)
-        img.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
+        img.save(FrameFilenamePattern % (CurrentFrame, FilmType), quality=95)
 
 
 def capture_single(mode):
     global CurrentFrame
     global total_wait_time_save_image
 
-    is_dng = file_type_dropdown_selected.get() == 'dng'
-    is_png = file_type_dropdown_selected.get() == 'png'
+    is_dng = FilmType == 'dng'
+    is_png = FilmType == 'png'
     curtime = time.time()
     if not DisableThreads:
         if is_dng or is_png:  # Save as request only for DNG captures
@@ -1753,7 +1806,7 @@ def capture_single(mode):
                 captured_image = None
             draw_preview_image(captured_image, CurrentFrame, 0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
-                request.save_dng(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()))
+                request.save_dng(FrameFilenamePattern % (CurrentFrame, FilmType))
                 logging.debug(f"Saving DNG frame ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
             request.release()
         else:
@@ -1761,7 +1814,7 @@ def capture_single(mode):
             if negative_image.get():
                 captured_image = reverse_image(captured_image)
             draw_preview_image(captured_image, CurrentFrame, 0)
-            captured_image.save(FrameFilenamePattern % (CurrentFrame, file_type_dropdown_selected.get()), quality=95)
+            captured_image.save(FrameFilenamePattern % (CurrentFrame, FilmType), quality=95)
             logging.debug(
                 f"Saving image ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
         aux = time.time() - curtime
@@ -2081,8 +2134,8 @@ def start_scan():
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
 
-        is_dng = file_type_dropdown_selected.get() == 'dng'
-        is_png = file_type_dropdown_selected.get() == 'png'
+        is_dng = FilmType == 'dng'
+        is_png = FilmType == 'png'
         if (is_dng or is_png) and negative_image.get():  # Incompatible choices, display error and quit
             tk.messagebox.showerror("Error!",
                                     "Cannot scan negative images to DNG or PNG files. "
@@ -2306,23 +2359,6 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
     if not ExitingApp:
         onesec_after = win.after(1000, onesec_periodic_checks)
 
-
-def set_file_type(event):
-    SessionData["FileType"] = file_type_dropdown_selected.get()
-
-
-def set_resolution(event):
-    global max_inactivity_delay
-    SessionData["CaptureResolution"] = resolution_dropdown_selected.get()
-    camera_resolutions.set_active(resolution_dropdown_selected.get())
-    if resolution_dropdown_selected.get() == "4056x3040":
-        max_inactivity_delay = reference_inactivity_delay * 2
-    else:
-        max_inactivity_delay = reference_inactivity_delay
-    send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
-    logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
-
-    PiCam2_change_resolution()
 
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
@@ -2635,9 +2671,9 @@ def load_session_data():
                     if selected_resolution + ' *' in valid_resolution_list:
                         selected_resolution = selected_resolution + ' *'
                     else:
-                        selected_resolution = valid_resolution_list[0]
-                resolution_dropdown_selected.set(selected_resolution)
-                if resolution_dropdown_selected.get() == "4056x3040":
+                        selected_resolution = valid_resolution_list[2]
+                CaptureResolution = selected_resolution
+                if CaptureResolution == "4056x3040":
                     max_inactivity_delay = reference_inactivity_delay * 2
                 else:
                     max_inactivity_delay = reference_inactivity_delay
@@ -2890,8 +2926,7 @@ def reinit_controller():
 
 
 def PiCam2_change_resolution():
-    target_res = resolution_dropdown_selected.get()
-    camera_resolutions.set_active(target_res)
+    camera_resolutions.set_active(CaptureResolution)
     if SimulatedRun or CameraDisabled:
         return  # Skip camera specific part
 
@@ -3617,7 +3652,7 @@ def create_widgets():
     global frames_to_go_str, FramesToGo, time_to_go_str
     global RetreatMovie_btn, Manual_scan_checkbox
     global file_type_dropdown, file_type_dropdown_selected
-    global resolution_dropdown, resolution_dropdown_selected
+    global resolution_dropdown
     global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
     global resolution_label, file_type_label
     global existing_folder_btn, new_folder_btn
@@ -3978,54 +4013,6 @@ def create_widgets():
     existing_folder_btn.widget_type = "general"
     existing_folder_btn.pack(side=LEFT)
     as_tooltips.add(existing_folder_btn, "Select existing folder to store frames generated during the scan.")
-    top_right_area_row += 1
-
-    # Create frame to select target file specs
-    file_type_frame = LabelFrame(top_right_area_frame, text='Capture resolution & file type',
-                                 font=("Arial", FontSize - 2))
-    file_type_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='EW')
-
-    # Capture resolution Dropdown
-    # Drop down to select capture resolution
-    # Dropdown menu options
-    resolution_list = camera_resolutions.get_list()
-    resolution_dropdown_selected = tk.StringVar()
-    resolution_dropdown_selected.set(resolution_list[2])  # Set the initial value
-    resolution_label = Label(file_type_frame, text='Resolution:', font=("Arial", FontSize))
-    resolution_label.widget_type = "general"
-    # resolution_label.pack(side=LEFT)
-    resolution_label.pack_forget()
-    resolution_label.config(state=DISABLED)
-    resolution_dropdown = OptionMenu(file_type_frame,
-                                     resolution_dropdown_selected, *resolution_list, command=set_resolution)
-    resolution_dropdown.widget_type = "general"
-    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
-    resolution_dropdown.pack(side=LEFT)
-    # resolution_dropdown.config(state=DISABLED)
-    as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with "
-                                         "* are cropped, requiring lens adjustment")
-
-    # File format (JPG or PNG)
-    # Drop down to select file type
-    # Dropdown menu options
-    file_type_list = ["jpg", "png", "dng"]
-    file_type_dropdown_selected = tk.StringVar()
-    file_type_dropdown_selected.set(file_type_list[0])  # Set the initial value
-
-    # No label for now
-    file_type_label = Label(file_type_frame, text='Type:', font=("Arial", FontSize))
-    file_type_label.widget_type = "general"
-    # file_type_label.pack(side=LEFT)
-    file_type_label.pack_forget()
-    file_type_label.config(state=DISABLED)
-    file_type_dropdown = OptionMenu(file_type_frame,
-                                    file_type_dropdown_selected, *file_type_list, command=set_file_type)
-    file_type_dropdown.widget_type = "general"
-    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
-    file_type_dropdown.pack(side=LEFT)
-    # file_type_dropdown.config(state=DISABLED)
-    as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
-
     top_right_area_row += 1
 
     # Create frame to display number of scanned images, and frames per minute
