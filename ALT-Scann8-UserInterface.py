@@ -1597,7 +1597,9 @@ def register_frame():
     if frame_time - FPM_StartTime > 60:  # no calculations needed, frames in list are all in the last 60 seconds
         FPM_CalculatedValue = len(FPM_LastMinuteFrameTimes)
     elif frame_time - FPM_StartTime > 10:  # some  calculations needed if less than 60 sec
-        adjust_widget_status
+        FPM_CalculatedValue = int((len(FPM_LastMinuteFrameTimes) * 60) / (frame_time - FPM_StartTime))
+
+
 def adjust_hdr_bracket_auto():
     if not HdrCaptureActive:
         return
