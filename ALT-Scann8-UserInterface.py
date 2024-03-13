@@ -236,7 +236,7 @@ ColorCodedButtons = True
 WidgetsEnabledWhileScanning = True
 TempInFahrenheit = False
 CaptureResolution = '2028x1520'
-FilmType = 'jpg'
+FileType = 'jpg'
 # Other options (experimental, expert...)
 PreviewModuleValue = 1
 NegativeImage = False
@@ -256,6 +256,14 @@ FrameFineTuneValue = 50
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
+# HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
+# Finally set to 4-104
+HdrMinExp = 8
+HdrMaxExp = 104
+HdrBracketWidth = 50
+HdrBracketShift = 0
+FilmType = ''
+
 
 plotter_canvas = None
 plotter_width = 20
@@ -349,10 +357,6 @@ MergeMertens = None
 images_to_merge = []
 # 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
 dry_run_iterations = 4
-# HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
-# Finally set to 4-104
-hdr_lower_exp = 8
-hdr_higher_exp = 104
 hdr_best_exp = 0
 hdr_min_bracket_width = 4
 hdr_max_bracket_width = 400
@@ -416,8 +420,8 @@ SessionData = {
     "PTLevel": 80,
     "PTLevelAuto": True,
     "FrameStepsAuto": True,
-    "HdrMinExp": hdr_lower_exp,
-    "HdrMaxExp": hdr_higher_exp,
+    "HdrMinExp": HdrMinExp,
+    "HdrMaxExp": HdrMaxExp,
     "HdrBracketWidth": 50,
     "HdrBracketShift": 0,
     "HdrBracketAuto": True,
@@ -684,7 +688,7 @@ def settings_popup_dismiss():
 def settings_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
-    global CaptureResolution, FilmType
+    global CaptureResolution, FileType
 
     refresh_ui = False
     if ExpertMode != expert_mode.get():
@@ -738,9 +742,9 @@ def settings_popup_accept():
         send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
         logging.debug(f"Set max_inactivity_delay as {max_inactivity_delay}")
         PiCam2_change_resolution()
-    if FilmType != file_type_dropdown_selected.get():
-        FilmType = file_type_dropdown_selected.get()
-        SessionData["FilmType"] = FilmType
+    if FileType != file_type_dropdown_selected.get():
+        FileType = file_type_dropdown_selected.get()
+        SessionData["FileType"] = FileType
 
     if refresh_ui:
         create_main_window()
@@ -761,7 +765,7 @@ def settings_popup():
     global options_dlg
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
-    global CaptureResolution, FilmType
+    global CaptureResolution, FileType
     global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
@@ -887,7 +891,7 @@ def settings_popup():
     file_type_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
     file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
-    file_type_dropdown_selected.set(FilmType)  # Set the initial value
+    file_type_dropdown_selected.set(FileType)  # Set the initial value
     file_type_dropdown.grid(row=options_row, column=1, sticky="W")
     # file_type_dropdown.config(state=DISABLED)
     as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
@@ -1311,8 +1315,8 @@ def capture_save_thread(queue, event, id):
         if message == END_TOKEN:
             break
         # Invert image if button selected
-        is_dng = FilmType == 'dng'
-        is_jpg = FilmType == 'jpg'
+        is_dng = FileType == 'dng'
+        is_jpg = FileType == 'jpg'
         # Extract info from message
         type = message[0]
         if type == REQUEST_TOKEN:
@@ -1330,9 +1334,9 @@ def capture_save_thread(queue, event, id):
         if is_dng:
             # Saving DNG implies passing a request, not an image, therefore no additional checks (no negative allowed)
             if hdr_idx > 1:  # Hdr frame 1 has standard filename
-                request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType))
+                request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
             else:  # Non HDR
-                request.save_dng(FrameFilenamePattern % (frame_idx, FilmType))
+                request.save_dng(FrameFilenamePattern % (frame_idx, FileType))
             request.release()
             logging.debug("Thread %i saved request DNG image: %s ms", id,
                           str(round((time.time() - curtime) * 1000, 1)))
@@ -1341,9 +1345,9 @@ def capture_save_thread(queue, event, id):
             if not NegativeImage and type == REQUEST_TOKEN:
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     request.save('main',
-                                 HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType))
+                                 HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
                 else:  # Non HDR
-                    request.save('main', FrameFilenamePattern % (frame_idx, FilmType))
+                    request.save('main', FrameFilenamePattern % (frame_idx, FileType))
                 request.release()
                 logging.debug("Thread %i saved request image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -1351,9 +1355,9 @@ def capture_save_thread(queue, event, id):
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     logging.debug("Saving HDR frame n.%i", hdr_idx)
                     captured_image.save(
-                        HdrFrameFilenamePattern % (frame_idx, hdr_idx, FilmType), quality=95)
+                        HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType), quality=95)
                 else:
-                    captured_image.save(FrameFilenamePattern % (frame_idx, FilmType),
+                    captured_image.save(FrameFilenamePattern % (frame_idx, FileType),
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -1578,8 +1582,9 @@ def set_real_time_display():
 
 
 def set_s8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType
 
+    FilmType = "S8"
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
 
@@ -1605,8 +1610,9 @@ def set_s8():
 
 
 def set_r8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType
 
+    FilmType = "R8"
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
 
@@ -1678,7 +1684,7 @@ def adjust_merge_in_place():
 
 def adjust_hdr_bracket():
     global recalculate_hdr_exp_list
-    global hdr_best_exp
+    global hdr_best_exp, HdrMinExp
     global PreviousCurrentExposure
     global force_adjust_hdr_bracket
 
@@ -1703,12 +1709,13 @@ def adjust_hdr_bracket():
         force_adjust_hdr_bracket = False
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = aux_current_exposure
-        hdr_min_exp_value.set(max(hdr_best_exp - int(hdr_bracket_width_value.get() / 2), hdr_lower_exp))
-        hdr_max_exp_value.set(hdr_min_exp_value.get() + hdr_bracket_width_value.get())
-        SessionData["HdrMinExp"] = hdr_min_exp_value.get()
-        SessionData["HdrMaxExp"] = hdr_max_exp_value.get()
+        HdrMinExp = max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp)
+        hdr_min_exp_value.set(HdrMinExp)
+        hdr_max_exp_value.set(HdrMinExp + HdrBracketWidth)
+        SessionData["HdrMinExp"] = HdrMinExp
+        SessionData["HdrMaxExp"] = HdrMaxExp
         recalculate_hdr_exp_list = True
-        logging.debug(f"Adjusting bracket: {hdr_min_exp_value.get()}, {hdr_max_exp_value.get()}")
+        logging.debug(f"Adjusting bracket: {HdrMinExp}, {HdrMaxExp}")
 
 
 def capture_hdr(mode):
@@ -1740,10 +1747,10 @@ def capture_hdr(mode):
         work_list = hdr_rev_exp_list
         idx = hdr_num_exposures
         idx_inc = -1
-    is_dng = FilmType == 'dng'
-    is_png = FilmType == 'png'
+    is_dng = FileType == 'dng'
+    is_png = FileType == 'png'
     for exp in work_list:
-        exp = max(1, exp + hdr_bracket_shift_value.get())  # Apply bracket shift
+        exp = max(1, exp + HdrBracketShift)  # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp * 1000)})
@@ -1774,9 +1781,9 @@ def capture_hdr(mode):
                     capture_display_queue.put(queue_item)
                 curtime = time.time()
                 if idx > 1:  # Hdr frame 1 has standard filename
-                    request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, FilmType))
+                    request.save_dng(HdrFrameFilenamePattern % (CurrentFrame, idx, FileType))
                 else:  # Non HDR
-                    request.save_dng(FrameFilenamePattern % (CurrentFrame, FilmType))
+                    request.save_dng(FrameFilenamePattern % (CurrentFrame, FileType))
                 request.release()
                 logging.debug(f"Capture hdr, saved request image ({CurrentFrame}, {idx}: "
                               f"{round((time.time() - curtime) * 1000, 1)}")
@@ -1789,9 +1796,9 @@ def capture_hdr(mode):
                     draw_preview_image(captured_image, CurrentFrame, idx)
                     if idx > 1:  # Hdr frame 1 has standard filename
                         captured_image.save(
-                            HdrFrameFilenamePattern % (CurrentFrame, idx, FilmType))
+                            HdrFrameFilenamePattern % (CurrentFrame, idx, FileType))
                     else:
-                        captured_image.save(FrameFilenamePattern % (CurrentFrame, FilmType))
+                        captured_image.save(FrameFilenamePattern % (CurrentFrame, FileType))
                     logging.debug(f"Capture hdr, saved image ({CurrentFrame}, {idx}): "
                                   f"{round((time.time() - curtime) * 1000, 1)} ms")
                 else:  # send image to threads
@@ -1816,15 +1823,15 @@ def capture_hdr(mode):
             # Display preview using thread, not directly
             queue_item = tuple((IMAGE_TOKEN, img, CurrentFrame, 0))
             capture_display_queue.put(queue_item)
-        img.save(FrameFilenamePattern % (CurrentFrame, FilmType), quality=95)
+        img.save(FrameFilenamePattern % (CurrentFrame, FileType), quality=95)
 
 
 def capture_single(mode):
     global CurrentFrame
     global total_wait_time_save_image
 
-    is_dng = FilmType == 'dng'
-    is_png = FilmType == 'png'
+    is_dng = FileType == 'dng'
+    is_png = FileType == 'png'
     curtime = time.time()
     if not DisableThreads:
         if is_dng or is_png:  # Save as request only for DNG captures
@@ -1868,7 +1875,7 @@ def capture_single(mode):
                 captured_image = None
             draw_preview_image(captured_image, CurrentFrame, 0)
             if mode == 'normal' or mode == 'manual':  # Do not save in preview mode, only display
-                request.save_dng(FrameFilenamePattern % (CurrentFrame, FilmType))
+                request.save_dng(FrameFilenamePattern % (CurrentFrame, FileType))
                 logging.debug(f"Saving DNG frame ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
             request.release()
         else:
@@ -1876,7 +1883,7 @@ def capture_single(mode):
             if NegativeImage:
                 captured_image = reverse_image(captured_image)
             draw_preview_image(captured_image, CurrentFrame, 0)
-            captured_image.save(FrameFilenamePattern % (CurrentFrame, FilmType), quality=95)
+            captured_image.save(FrameFilenamePattern % (CurrentFrame, FileType), quality=95)
             logging.debug(
                 f"Saving image ({CurrentFrame}: {round((time.time() - curtime) * 1000, 1)}")
         aux = time.time() - curtime
@@ -2196,8 +2203,8 @@ def start_scan():
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
 
-        is_dng = FilmType == 'dng'
-        is_png = FilmType == 'png'
+        is_dng = FileType == 'dng'
+        is_png = FileType == 'png'
         if (is_dng or is_png) and NegativeImage:  # Incompatible choices, display error and quit
             tk.messagebox.showerror("Error!",
                                     "Cannot scan negative images to DNG or PNG files. "
@@ -2735,6 +2742,8 @@ def load_session_data():
     global MatchWaitMarginValue
     global StepsPerFrame, PtLevelValue, FrameFineTuneValue, FrameExtraStepsValue, ScanSpeedValue
     global StabilizationDelayValue
+    global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift
+
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2816,30 +2825,25 @@ def load_session_data():
                     else:
                         hdr_viewx4_active_checkbox.deselect()
                 if 'HdrMinExp' in SessionData:
-                    aux = int(SessionData["HdrMinExp"])
-                    hdr_min_exp_value.set(aux)
-                else:
-                    hdr_min_exp_value.set(hdr_lower_exp)
+                    HdrMinExp = int(SessionData["HdrMinExp"])
+                hdr_min_exp_value.set(HdrMinExp)
                 if 'HdrMaxExp' in SessionData:
-                    aux = int(SessionData["HdrMaxExp"])
-                    hdr_max_exp_value.set(aux)
-                else:
-                    hdr_max_exp_value.set(hdr_higher_exp)
+                    HdrMaxExp = int(SessionData["HdrMaxExp"])
+                hdr_max_exp_value.set(HdrMaxExp)
                 if 'HdrBracketAuto' in SessionData:
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
                 else:
-                    ###hdr_bracket_auto.set(hdr_higher_exp - hdr_lower_exp)
                     HdrBracketAuto = False
                 if 'HdrMergeInPlace' in SessionData:
                     HdrMergeInPlace = SessionData["HdrMergeInPlace"]
                     hdr_merge_in_place.set(HdrMergeInPlace)
                 if 'HdrBracketWidth' in SessionData:
-                    aux = int(SessionData["HdrBracketWidth"])
-                    hdr_bracket_width_value.set(aux)
+                    HdrBracketWidth = int(SessionData["HdrBracketWidth"])
+                    hdr_bracket_width_value.set(HdrBracketWidth)
                 if 'HdrBracketShift' in SessionData:
-                    aux = SessionData["HdrBracketShift"]
-                    hdr_bracket_shift_value.set(aux)
+                    HdrBracketShift = SessionData["HdrBracketShift"]
+                    hdr_bracket_shift_value.set(HdrBracketShift)
                 if 'PreviewModule' in SessionData:
                     aux = int(SessionData["PreviewModule"])
                     PreviewModuleValue = aux
@@ -3113,12 +3117,12 @@ def hdr_reinit():
         return
     if hdr_num_exposures == 3:
         hdr_exp_list.clear()
-        hdr_exp_list += [hdr_min_exp_value.get(), hdr_best_exp, hdr_max_exp_value.get()]
+        hdr_exp_list += [HdrMinExp, hdr_best_exp, HdrMaxExp]
     elif hdr_num_exposures == 5:
         hdr_exp_list.clear()
-        hdr_exp_list += [hdr_min_exp_value.get(),
-                         hdr_min_exp_value.get() + int((hdr_best_exp - hdr_min_exp_value.get()) / 2), hdr_best_exp,
-                         hdr_best_exp + int((hdr_max_exp_value.get() - hdr_best_exp) / 2), hdr_max_exp_value.get()]
+        hdr_exp_list += [HdrMinExp,
+                         HdrMinExp + int((hdr_best_exp - HdrMinExp) / 2), hdr_best_exp,
+                         hdr_best_exp + int((HdrMaxExp - hdr_best_exp) / 2), HdrMaxExp]
 
     hdr_exp_list.sort()
     logging.debug("hdr_exp_list=%s", hdr_exp_list)
@@ -3568,46 +3572,45 @@ def stabilization_delay_validation(new_value):
 
 
 def hdr_min_exp_selection():
-    global force_adjust_hdr_bracket, recalculate_hdr_exp_list
+    global force_adjust_hdr_bracket, recalculate_hdr_exp_list, HdrMinExp, HdrMaxExp, HdrBracketWidth
 
-    min_exp = value_normalize(hdr_min_exp_value, hdr_lower_exp, 999, 100)
-    bracket = hdr_bracket_width_value.get()
-    max_exp = min_exp + bracket  # New max based on new min
+    HdrMinExp = value_normalize(hdr_min_exp_value, 1, 999, 100)
+    max_exp = HdrMinExp + HdrBracketWidth  # New max based on new min
     if max_exp > 1000:
-        bracket -= max_exp - 1000  # Reduce bracket in max over the top
+        HdrBracketWidth -= max_exp - 1000  # Reduce bracket in max over the top
         max_exp = 1000
         force_adjust_hdr_bracket = True
-    hdr_min_exp_value.set(min_exp)
-    hdr_max_exp_value.set(max_exp)
-    hdr_bracket_width_value.set(bracket)
+    HdrMaxExp = max_exp
+    hdr_min_exp_value.set(HdrMinExp)
+    hdr_max_exp_value.set(HdrMaxExp)
+    hdr_bracket_width_value.set(HdrBracketWidth)
     recalculate_hdr_exp_list = True
-    SessionData["HdrMinExp"] = min_exp
-    SessionData["HdrMaxExp"] = max_exp
-    SessionData["HdrBracketWidth"] = bracket
+    SessionData["HdrMinExp"] = HdrMinExp
+    SessionData["HdrMaxExp"] = HdrMaxExp
+    SessionData["HdrBracketWidth"] = HdrBracketWidth
 
 
 def hdr_min_exp_validation(new_value):
-    return value_validation(new_value, hdr_min_exp_spinbox, hdr_lower_exp, 999, 100)
+    return value_validation(new_value, hdr_min_exp_spinbox, 1, 999, 100)
 
 
 def hdr_max_exp_selection():
-    global recalculate_hdr_exp_list
-    global force_adjust_hdr_bracket
+    global recalculate_hdr_exp_list, force_adjust_hdr_bracket, HdrMinExp, HdrMaxExp, HdrBracketWidth
 
-    max_exp = value_normalize(hdr_max_exp_value, 2, 1000, 200)
-    bracket = hdr_bracket_width_value.get()
-    min_exp = max_exp - bracket
-    if min_exp < hdr_lower_exp:
-        min_exp = hdr_lower_exp
-        bracket = max_exp - min_exp  # Reduce bracket in min below absolute min
+    HdrMaxExp = value_normalize(hdr_max_exp_value, 2, 1000, 200)
+    min_exp = HdrMaxExp - HdrBracketWidth
+    if min_exp < HdrMinExp:
+        min_exp = HdrMinExp
+        HdrBracketWidth = HdrMaxExp - min_exp  # Reduce bracket in min below absolute min
         force_adjust_hdr_bracket = True
-    hdr_min_exp_value.set(min_exp)
-    hdr_max_exp_value.set(max_exp)
-    hdr_bracket_width_value.set(bracket)
+    HdrMinExp = min_exp
+    hdr_min_exp_value.set(HdrMinExp)
+    hdr_max_exp_value.set(HdrMaxExp)
+    hdr_bracket_width_value.set(HdrBracketWidth)
     recalculate_hdr_exp_list = True
-    SessionData["HdrMinExp"] = min_exp
-    SessionData["HdrMaxExp"] = max_exp
-    SessionData["HdrBracketWidth"] = bracket
+    SessionData["HdrMinExp"] = HdrMinExp
+    SessionData["HdrMaxExp"] = HdrMaxExp
+    SessionData["HdrBracketWidth"] = HdrBracketWidth
 
 
 def hdr_max_exp_validation(new_value):
@@ -3615,20 +3618,17 @@ def hdr_max_exp_validation(new_value):
 
 
 def hdr_bracket_width_selection():
-    global force_adjust_hdr_bracket
+    global force_adjust_hdr_bracket, HdrMinExp
 
     aux_bracket = value_normalize(hdr_bracket_width_value, hdr_min_bracket_width, hdr_max_bracket_width, 200)
 
-    middle_exp = int((hdr_min_exp_value.get() + (hdr_max_exp_value.get() - hdr_min_exp_value.get())) / 2)
-    hdr_min_exp_value.set(int(middle_exp - (aux_bracket / 2)))
-    if hdr_min_exp_value.get() < hdr_lower_exp:
-        hdr_min_exp_value.set(hdr_lower_exp)
-        hdr_max_exp_value.set(hdr_min_exp_value.get() + aux_bracket)
-    else:
-        hdr_max_exp_value.set(int(middle_exp + (aux_bracket / 2)))
-    SessionData["HdrMinExp"] = hdr_min_exp_value.get()
-    SessionData["HdrMaxExp"] = hdr_max_exp_value.get()
-    SessionData["HdrBracketWidth"] = hdr_bracket_width_value.get()
+    middle_exp = int((HdrMinExp + (HdrMaxExp - HdrMinExp)) / 2)
+    HdrMinExp = int(middle_exp - (aux_bracket / 2))
+    hdr_min_exp_value.set(HdrMinExp)
+    hdr_max_exp_value.set(int(middle_exp + (aux_bracket / 2)))
+    SessionData["HdrMinExp"] = HdrMinExp
+    SessionData["HdrMaxExp"] = HdrMaxExp
+    SessionData["HdrBracketWidth"] = HdrBracketWidth
     force_adjust_hdr_bracket = True
 
 
@@ -3638,7 +3638,8 @@ def hdr_bracket_width_validation(new_value):
 
 
 def hdr_bracket_shift_selection():
-    value_normalize(hdr_bracket_shift_value, -100, 100, 0)
+    global HdrBracketShift
+    HdrBracketShift = value_normalize(hdr_bracket_shift_value, -100, 100, 0)
 
 
 def hdr_bracket_shift_validation(new_value):
@@ -4193,7 +4194,7 @@ def create_widgets():
     film_type_frame.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NSEW')
 
     # Radio buttons to select R8/S8. Required to select adequate pattern, and match position
-    film_type = tk.StringVar()
+    film_type = tk.StringVar(value=FilmType)
     film_type_S8_rb = tk.Radiobutton(film_type_frame, text="S8", variable=film_type, command=set_s8,
                                      value='S8', font=("Arial", FontSize), indicatoron=0, width=5, height=2,
                                      compound='left', relief="raised", borderwidth=3)
@@ -4694,10 +4695,10 @@ def create_widgets():
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_min_exp_label, True)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        hdr_min_exp_value = tk.IntVar(value=hdr_lower_exp)
+        hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
-                                             from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize - 1))
+                                             from_=1, to=999, increment=1, font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_min_exp_spinbox, True)
         hdr_min_exp_spinbox.widget_type = "hdr"
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
@@ -4710,7 +4711,7 @@ def create_widgets():
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_max_exp_label, True)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        hdr_max_exp_value = tk.IntVar(value=hdr_higher_exp)
+        hdr_max_exp_value = tk.IntVar(value=HdrMaxExp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8, from_=2, to=1000,
                                              readonlybackground='pale green', textvariable=hdr_max_exp_value,
                                              increment=1, font=("Arial", FontSize - 1))
@@ -4726,7 +4727,7 @@ def create_widgets():
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_bracket_width_label, True)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        hdr_bracket_width_value = tk.IntVar(value=50)
+        hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_width_selection, width=8,
                                                    textvariable=hdr_bracket_width_value, from_=hdr_min_bracket_width,
                                                    to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize - 1))
@@ -4743,7 +4744,7 @@ def create_widgets():
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_bracket_shift_label, True)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        hdr_bracket_shift_value = tk.IntVar(value=0)
+        hdr_bracket_shift_value = tk.IntVar(value=HdrBracketShift)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_shift_selection, width=8,
                                                    textvariable=hdr_bracket_shift_value, from_=-100, to=100,
                                                    increment=10, font=("Arial", FontSize - 1))
@@ -4914,6 +4915,11 @@ def create_widgets():
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
     win.geometry(f'{app_width}x{app_height - 20}')  # setting the size of the window
+    if FilmType == "R8":
+        set_r8()
+    elif FilmType == "S8":
+        set_s8()
+
 
 
 def get_controller_version():
