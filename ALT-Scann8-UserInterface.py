@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.27"
-__date__ = "2024-03-12"
-__version_highlight__ = "Keep arranging options"
+__version__ = "1.10.28"
+__date__ = "2024-03-13"
+__version_highlight__ = "Global coordination of widget disabled status"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -492,8 +492,10 @@ def set_auto_stop_enabled():
     if not SimulatedRun:
         send_arduino_command(CMD_SET_AUTO_STOP, auto_stop_enabled.get() and autostop_type.get() == 'No_film')
         logging.debug(f"Sent Auto Stop to Arduino: {auto_stop_enabled.get() and autostop_type.get() == 'No_film'}")
-    autostop_no_film_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
-    autostop_counter_zero_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
+    ###autostop_no_film_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
+    update_disabled_status(autostop_no_film_rb, not auto_stop_enabled.get())
+    ###autostop_counter_zero_rb.config(state=NORMAL if auto_stop_enabled.get() else DISABLED)
+    update_disabled_status(autostop_counter_zero_rb, not auto_stop_enabled.get())
     logging.debug(f"Set Auto Stop: {auto_stop_enabled.get()}, {autostop_type.get()}")
 
 
@@ -502,9 +504,11 @@ def set_focus_zoom():
     global FocusZoomActive
 
     if real_time_zoom.get():
-        real_time_display_checkbox.config(state=DISABLED)
+        ###real_time_display_checkbox.config(state=DISABLED)
+        update_disabled_status(real_time_display_checkbox, True)
     else:
-        real_time_display_checkbox.config(state=NORMAL)
+        ###real_time_display_checkbox.config(state=NORMAL)
+        update_disabled_status(real_time_display_checkbox, False)
 
     if not SimulatedRun and not CameraDisabled:
         if real_time_zoom.get():
@@ -518,12 +522,18 @@ def set_focus_zoom():
     FocusZoomActive = not FocusZoomActive
 
     # Enable disable buttons for focus move
-    focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-    focus_up_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-    focus_dn_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-    focus_rt_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-    focus_plus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
-    focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_lf_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_up_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_dn_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_rt_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_plus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    ###focus_minus_btn.config(state=NORMAL if FocusZoomActive else DISABLED)
+    update_disabled_status(focus_lf_btn, True)
+    update_disabled_status(focus_up_btn, True)
+    update_disabled_status(focus_dn_btn, True)
+    update_disabled_status(focus_rt_btn, True)
+    update_disabled_status(focus_plus_btn, True)
+    update_disabled_status(focus_minus_btn, True)
 
 
 def adjust_focus_zoom():
@@ -838,10 +848,8 @@ def settings_popup():
     resolution_list = camera_resolutions.get_list()
     resolution_dropdown_selected = tk.StringVar()
     resolution_label = Label(options_dlg, text='Resolution:', font=("Arial", FontSize))
-    resolution_label.widget_type = "general"
     resolution_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     resolution_dropdown = OptionMenu(options_dlg, resolution_dropdown_selected, *resolution_list)
-    resolution_dropdown.widget_type = "general"
     resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
     resolution_dropdown_selected.set(CaptureResolution)
     resolution_dropdown.grid(row=options_row, column=1, sticky="W")
@@ -857,10 +865,8 @@ def settings_popup():
 
     # No label for now
     file_type_label = Label(options_dlg, text='Type:', font=("Arial", FontSize))
-    file_type_label.widget_type = "general"
     file_type_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
-    file_type_dropdown.widget_type = "general"
     file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
     file_type_dropdown_selected.set(FilmType)  # Set the initial value
     file_type_dropdown.grid(row=options_row, column=1, sticky="W")
@@ -986,7 +992,8 @@ def set_auto_wb():
         wb_blue_value.set(manual_wb_blue_value)
         auto_wb_red_btn.config(text="WB Red:")
         auto_wb_blue_btn.config(text="WB Blue:")
-        auto_wb_wait_btn.config(state=DISABLED)
+        ###auto_wb_wait_btn.config(state=DISABLED)
+        update_disabled_status(auto_wb_wait_btn, True)
         if not SimulatedRun and not CameraDisabled:
             # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
             # Since we update values in the UI regularly, use those.
@@ -1005,9 +1012,12 @@ def auto_white_balance_change_pause_selection():
 def Manual_scan_activated_selection():
     global ManualScanEnabled
     ManualScanEnabled = Manual_scan_activated.get()
-    manual_scan_advance_fraction_5_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
-    manual_scan_advance_fraction_20_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
-    manual_scan_take_snap_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    ###manual_scan_advance_fraction_5_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    update_disabled_status(manual_scan_advance_fraction_5_btn, not ManualScanEnabled)
+    ###manual_scan_advance_fraction_20_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    update_disabled_status(manual_scan_advance_fraction_20_btn, not ManualScanEnabled)
+    ###manual_scan_take_snap_btn.config(state=NORMAL if ManualScanEnabled else DISABLED)
+    update_disabled_status(manual_scan_take_snap_btn, not ManualScanEnabled)
 
 
 def manual_scan_advance_frame_fraction(steps):
@@ -1426,17 +1436,28 @@ def disk_space_available():
 def hdr_set_controls():
     if not ExperimentalMode:
         return
-    hdr_viewx4_active_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_min_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_min_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_bracket_shift_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
-    hdr_merge_in_place_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_viewx4_active_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_min_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_min_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_max_exp_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_max_exp_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_bracket_width_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_bracket_shift_label.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_bracket_width_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_bracket_shift_spinbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_bracket_width_auto_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    ###hdr_merge_in_place_checkbox.config(state=NORMAL if HdrCaptureActive else DISABLED)
+    update_disabled_status(hdr_viewx4_active_checkbox, not HdrCaptureActive)
+    update_disabled_status(hdr_min_exp_label, not HdrCaptureActive)
+    update_disabled_status(hdr_min_exp_spinbox, not HdrCaptureActive)
+    update_disabled_status(hdr_max_exp_label, not HdrCaptureActive)
+    update_disabled_status(hdr_max_exp_spinbox, not HdrCaptureActive)
+    update_disabled_status(hdr_bracket_width_label, not HdrCaptureActive)
+    update_disabled_status(hdr_bracket_shift_label, not HdrCaptureActive)
+    update_disabled_status(hdr_bracket_width_spinbox, not HdrCaptureActive)
+    update_disabled_status(hdr_bracket_shift_spinbox, not HdrCaptureActive)
+    update_disabled_status(hdr_bracket_width_auto_checkbox, not HdrCaptureActive)
+    update_disabled_status(hdr_merge_in_place_checkbox, not HdrCaptureActive)
 
 
 def switch_hdr_capture():
@@ -1519,10 +1540,13 @@ def set_real_time_display():
             camera.switch_mode(capture_config)
 
     # Do not allow scan to start while PiCam2 preview is active
-    Start_btn.config(state=DISABLED if real_time_display.get() else NORMAL)
-    real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
+    ###Start_btn.config(state=DISABLED if real_time_display.get() else NORMAL)
+    update_disabled_status(Start_btn, real_time_display.get())
+    ###real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
+    update_disabled_status(real_time_zoom_checkbox, not real_time_display.get())
     real_time_zoom_checkbox.deselect()
-    real_time_display_checkbox.config(state=NORMAL)
+    ###real_time_display_checkbox.config(state=NORMAL)
+    update_disabled_status(real_time_display_checkbox, False)
 
 
 def set_s8():
@@ -2515,13 +2539,28 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         arduino_after = win.after(10, arduino_listen_loop)
 
 
+# Updates widget disabled counter (to have a consistent state when disabled from various sources)
+def update_disabled_status(widget, disabled):
+    if hasattr(widget, "disabled_counter"):
+        counter = widget.disabled_counter
+    else:
+        counter = 0
+    if disabled:
+        counter += 1
+    elif counter > 0:
+        counter -= 1
+    widget.config(state=DISABLED if counter > 0 else NORMAL)
+    widget.disabled_counter = counter
+
+
 # Handle widget status
 def adjust_widget_status(disabled, widget_list):
     for widget in widget_list:
         if isinstance(widget, tk.Spinbox):
             widget.config(state='readonly' if disabled else NORMAL)  # Used to be readonly instead of disabled
         elif isinstance(widget, tk.OptionMenu) or isinstance(widget, tk.Label) or isinstance(widget, tk.Checkbutton):
-            widget.config(state=DISABLED if disabled else NORMAL)
+            #widget.config(state=DISABLED if disabled else NORMAL)
+            update_disabled_status(widget, disabled)
         elif isinstance(widget, tk.Checkbutton):
             if disabled:
                 widget.select()
@@ -2557,13 +2596,16 @@ def adjust_widget_status_global(widget, except_button, active):
         elif hasattr(widget, "widget_type"):
             if widget.widget_type == "control" and not WidgetsEnabledWhileScanning:
                 if except_button != widget:
-                    widget.config(state=DISABLED if active else NORMAL)
+                    ###widget.config(state=DISABLED if active else NORMAL)
+                    update_disabled_status(widget, active)
             elif widget.widget_type == "hdr" and not WidgetsEnabledWhileScanning and hdr_capture_active:
                 if except_button != widget:
-                    widget.config(state=DISABLED if active else NORMAL)
+                    ###widget.config(state=DISABLED if active else NORMAL)
+                    update_disabled_status(widget, active)
             elif widget.widget_type == "general" or widget.widget_type == "experimental":
                 if except_button != widget:
-                    widget.config(state=DISABLED if active else NORMAL)
+                    ###widget.config(state=DISABLED if active else NORMAL)
+                    update_disabled_status(widget, active)
     """
     if except_button != real_time_zoom_checkbox:
         real_time_zoom_checkbox.config(state=NORMAL if real_time_display.get() else DISABLED)
@@ -2743,7 +2785,8 @@ def load_session_data():
                         if isinstance(aux, str):
                             aux = int(float(aux))
                         AE_enabled.set(False)
-                        auto_exposure_wait_btn.config(state=DISABLED)
+                        ###auto_exposure_wait_btn.config(state=DISABLED)
+                        update_disabled_status(auto_exposure_wait_btn, True)
                     if not SimulatedRun and not CameraDisabled:
                         camera.controls.ExposureTime = int(aux)
                         camera.set_controls({"AeEnable": AE_enabled.get()})
@@ -2754,7 +2797,8 @@ def load_session_data():
                     else:
                         aux = eval(SessionData["ExposureAdaptPause"])
                     auto_exposure_change_pause.set(aux)
-                    auto_exposure_wait_btn.config(state=NORMAL if exposure_value.get() == 0 else DISABLED)
+                    ###auto_exposure_wait_btn.config(state=NORMAL if exposure_value.get() == 0 else DISABLED)
+                    update_disabled_status(auto_exposure_wait_btn, exposure_value.get() != 0)
                 if 'CurrentAwbAuto' in SessionData:
                     if isinstance(SessionData["CurrentAwbAuto"], bool):
                         AWB_enabled.set(SessionData["CurrentAwbAuto"])
@@ -2762,7 +2806,8 @@ def load_session_data():
                         AWB_enabled.set(eval(SessionData["CurrentAwbAuto"]))
                     wb_blue_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AWB_enabled.get() else NORMAL)
-                    auto_wb_wait_btn.config(state=NORMAL if AWB_enabled.get() else DISABLED)
+                    ###auto_wb_wait_btn.config(state=NORMAL if AWB_enabled.get() else DISABLED)
+                    update_disabled_status(auto_wb_wait_btn, not AWB_enabled.get())
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"AwbEnable": AWB_enabled.get()})
                     adjust_widget_status(not AWB_enabled.get(), [auto_wb_wait_btn])
@@ -3820,8 +3865,8 @@ def create_widgets():
     real_time_zoom = tk.BooleanVar(value=False)
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
                                              variable=real_time_zoom, onvalue=True, offvalue=False,
-                                             font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False,
-                                             state=DISABLED)
+                                             font=("Arial", FontSize), command=set_focus_zoom, indicatoron=False)
+    update_disabled_status(real_time_zoom_checkbox, True)
     if ColorCodedButtons:
         real_time_display_checkbox.config(selectcolor="pale green")
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
@@ -3840,27 +3885,33 @@ def create_widgets():
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
     focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=set_focus_plus,
-                            activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                            activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_plus_btn, True)
     focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
     as_tooltips.add(focus_plus_btn, "Increase zoom level.")
     focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=set_focus_minus,
-                             activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                             activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_minus_btn, True)
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
     focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=set_focus_left,
-                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                          activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_lf_btn, True)
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
     focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=set_focus_up,
-                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                          activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_up_btn, True)
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
     focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=set_focus_down,
-                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                          activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_dn_btn, True)
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
     focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=set_focus_right,
-                          activebackground='#f0f0f0', state=DISABLED, font=("Arial", FontSize - 2))
+                          activebackground='#f0f0f0', font=("Arial", FontSize - 2))
+    update_disabled_status(focus_rt_btn, True)
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
     bottom_area_row += 1
@@ -3890,8 +3941,11 @@ def create_widgets():
                                               command=set_auto_stop_enabled)
     autostop_counter_zero_rb.pack(side=TOP, anchor=W, padx=(10, 0))
     as_tooltips.add(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
-    autostop_no_film_rb.config(state=DISABLED)
-    autostop_counter_zero_rb.config(state=DISABLED)
+    ###autostop_no_film_rb.config(state=DISABLED)
+    ###autostop_counter_zero_rb.config(state=DISABLED)
+    update_disabled_status(autostop_no_film_rb, True)
+    update_disabled_status(autostop_counter_zero_rb, True)
+
 
     bottom_area_row += 1
 
@@ -4143,9 +4197,10 @@ def create_widgets():
         exposure_spinbox.bind("<FocusOut>", lambda event: exposure_selection())
 
         auto_exposure_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
-        auto_exposure_wait_btn = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_exposure_change_pause,
+        auto_exposure_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_exposure_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                                 command=auto_exposure_change_pause_selection)
+        update_disabled_status(auto_exposure_wait_btn, True)
         auto_exposure_wait_btn.widget_type = "control"
         auto_exposure_wait_btn.grid(row=exp_wb_row, column=2, sticky=W)
         as_tooltips.add(auto_exposure_wait_btn, "When automatic exposure enabled, select to wait for it to stabilize "
@@ -4176,9 +4231,10 @@ def create_widgets():
         wb_red_spinbox.bind("<FocusOut>", lambda event: wb_red_selection())
 
         auto_white_balance_change_pause = tk.BooleanVar(value=False)
-        auto_wb_wait_btn = tk.Checkbutton(exp_wb_frame, state=DISABLED, variable=auto_white_balance_change_pause,
+        auto_wb_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_white_balance_change_pause,
                                           onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                           command=auto_white_balance_change_pause_selection)
+        update_disabled_status(auto_wb_wait_btn, True)
         auto_wb_wait_btn.widget_type = "control"
         auto_wb_wait_btn.grid(row=exp_wb_row, rowspan=2, column=2, sticky=W)
         as_tooltips.add(auto_wb_wait_btn, "When automatic white balance enabled, select to wait for it to stabilize "
@@ -4230,13 +4286,14 @@ def create_widgets():
         # Miscelaneous exposure controls from PiCamera2 - AeConstraintMode
         AeConstraintMode_dropdown_selected = tk.StringVar()
         AeConstraintMode_dropdown_selected.set("Normal")  # Set the initial value
-        AeConstraintMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize - 1),
-                                       state=DISABLED)
+        AeConstraintMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize - 1))
+        update_disabled_status(AeConstraintMode_label, True)
         AeConstraintMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeConstraintMode_dropdown = OptionMenu(exp_wb_frame, AeConstraintMode_dropdown_selected,
                                                *AeConstraintMode_dict.keys(), command=set_AeConstraintMode)
         AeConstraintMode_dropdown.widget_type = "control"
-        AeConstraintMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1), state=DISABLED)
+        AeConstraintMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
+        update_disabled_status(AeConstraintMode_dropdown, True)
         AeConstraintMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeConstraintMode_dropdown, "Sets the constraint mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4245,12 +4302,14 @@ def create_widgets():
         # camera.set_controls({"AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted})
         AeMeteringMode_dropdown_selected = tk.StringVar()
         AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
-        AeMeteringMode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1), state=DISABLED)
+        AeMeteringMode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1))
+        update_disabled_status(AeMeteringMode_label, True)
         AeMeteringMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeMeteringMode_dropdown = OptionMenu(exp_wb_frame, AeMeteringMode_dropdown_selected,
                                              *AeMeteringMode_dict.keys(), command=set_AeMeteringMode)
         AeMeteringMode_dropdown.widget_type = "control"
-        AeMeteringMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1), state=DISABLED)
+        AeMeteringMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
+        update_disabled_status(AeMeteringMode_dropdown, True)
         AeMeteringMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeMeteringMode_dropdown, "Sets the metering mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4259,13 +4318,14 @@ def create_widgets():
         # camera.set_controls({"AeExposureMode": controls.AeExposureModeEnum.Normal})  # Normal, Long, Short, Custom
         AeExposureMode_dropdown_selected = tk.StringVar()
         AeExposureMode_dropdown_selected.set("Normal")  # Set the initial value
-        AeExposureMode_label = Label(exp_wb_frame, text='AE Exposure mode:', font=("Arial", FontSize - 1),
-                                     state=DISABLED)
+        AeExposureMode_label = Label(exp_wb_frame, text='AE Exposure mode:', font=("Arial", FontSize - 1))
+        update_disabled_status(AeExposureMode_label, True)
         AeExposureMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeExposureMode_dropdown = OptionMenu(exp_wb_frame, AeExposureMode_dropdown_selected,
                                              *AeExposureMode_dict.keys(), command=set_AeExposureMode)
         AeExposureMode_dropdown.widget_type = "control"
-        AeExposureMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1), state=DISABLED)
+        AeExposureMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
+        update_disabled_status(AeExposureMode_dropdown, True)
         AeExposureMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeExposureMode_dropdown, "Sets the exposure mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4274,12 +4334,14 @@ def create_widgets():
         # camera.set_controls({"AwbMode": controls.AwbModeEnum.Normal})  # Normal, Long, Short, Custom
         AwbMode_dropdown_selected = tk.StringVar()
         AwbMode_dropdown_selected.set("Normal")  # Set the initial value
-        AwbMode_label = Label(exp_wb_frame, text='AWB mode:', font=("Arial", FontSize - 1), state=DISABLED)
+        AwbMode_label = Label(exp_wb_frame, text='AWB mode:', font=("Arial", FontSize - 1))
+        update_disabled_status(AwbMode_label, True)
         AwbMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AwbMode_dropdown = OptionMenu(exp_wb_frame, AwbMode_dropdown_selected,
                                       *AwbMode_dict.keys(), command=set_AwbMode)
         AwbMode_dropdown.widget_type = "control"
-        AwbMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1), state=DISABLED)
+        AwbMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
+        update_disabled_status(AwbMode_dropdown, True)
         AwbMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AwbMode_dropdown, "Sets the AWB mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4546,19 +4608,22 @@ def create_widgets():
         hdr_viewx4_active = tk.BooleanVar(value=HdrViewX4Active)
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, variable=hdr_viewx4_active,
                                                     onvalue=True, offvalue=False, command=switch_hdr_viewx4,
-                                                    font=("Arial", FontSize - 1), state=DISABLED)
+                                                    font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_viewx4_active_checkbox, True)
         hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, sticky=W)
         as_tooltips.add(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a "
                                                     "single frame (the one in the middle), all three frames will be "
                                                     "displayed sequentially.")
         hdr_row += 1
 
-        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1), state=DISABLED)
+        hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_min_exp_label, True)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=hdr_lower_exp)
-        hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8, state=DISABLED,
+        hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
                                              from_=hdr_lower_exp, to=999, increment=1, font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_min_exp_spinbox, True)
         hdr_min_exp_spinbox.widget_type = "hdr"
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
@@ -4567,12 +4632,14 @@ def create_widgets():
         hdr_min_exp_spinbox.bind("<FocusOut>", lambda event: hdr_min_exp_selection())
         hdr_row += 1
 
-        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1), state=DISABLED)
+        hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_max_exp_label, True)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=hdr_higher_exp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8, from_=2, to=1000,
                                              readonlybackground='pale green', textvariable=hdr_max_exp_value,
-                                             increment=1, font=("Arial", FontSize - 1), state=DISABLED)
+                                             increment=1, font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_max_exp_spinbox, True)
         hdr_max_exp_spinbox.widget_type = "hdr"
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
@@ -4581,14 +4648,14 @@ def create_widgets():
         hdr_max_exp_spinbox.bind("<FocusOut>", lambda event: hdr_max_exp_selection())
         hdr_row += 1
 
-        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1),
-                                           state=DISABLED)
+        hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_bracket_width_label, True)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=50)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_width_selection, width=8,
                                                    textvariable=hdr_bracket_width_value, from_=hdr_min_bracket_width,
-                                                   to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize - 1),
-                                                   state=DISABLED)
+                                                   to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_bracket_width_spinbox, True)
         hdr_bracket_width_spinbox.widget_type = "hdr"
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
@@ -4598,13 +4665,14 @@ def create_widgets():
         hdr_bracket_width_spinbox.bind("<FocusOut>", lambda event: hdr_bracket_width_selection())
         hdr_row += 1
 
-        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1),
-                                           state=DISABLED)
+        hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_bracket_shift_label, True)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_shift_value = tk.IntVar(value=0)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_shift_selection, width=8,
                                                    textvariable=hdr_bracket_shift_value, from_=-100, to=100,
-                                                   increment=10, font=("Arial", FontSize - 1), state=DISABLED)
+                                                   increment=10, font=("Arial", FontSize - 1))
+        update_disabled_status(hdr_bracket_shift_spinbox, True)
         hdr_bracket_shift_spinbox.widget_type = "hdr"
         hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
@@ -4680,18 +4748,21 @@ def create_widgets():
         Manual_scan_btn_frame.pack(side=TOP)
 
         # Manual scan buttons
-        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", height=1, state=DISABLED,
+        manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", height=1,
                                                     command=manual_scan_advance_frame_fraction_5,
                                                     font=("Arial", FontSize - 1))
+        update_disabled_status(manual_scan_advance_fraction_5_btn, True)
         manual_scan_advance_fraction_5_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
-        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", height=1, state=DISABLED,
+        manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", height=1,
                                                      command=manual_scan_advance_frame_fraction_20,
                                                      font=("Arial", FontSize - 1))
+        update_disabled_status(manual_scan_advance_fraction_20_btn, True)
         manual_scan_advance_fraction_20_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
         manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", height=1, command=manual_scan_take_snap,
-                                           state=DISABLED, font=("Arial", FontSize - 1))
+                                           font=("Arial", FontSize - 1))
+        update_disabled_status(manual_scan_take_snap_btn, True)
         manual_scan_take_snap_btn.pack(side=RIGHT, fill=Y)
         as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance "
                                                    "to next frame.")
