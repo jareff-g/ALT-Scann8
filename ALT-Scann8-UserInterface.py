@@ -249,6 +249,13 @@ AutoFrameStepsEnabled = True
 AutoPtLevelEnabled = True
 HdrBracketAuto = False
 HdrMergeInPlace = False
+MatchWaitMarginValue = 50
+StepsPerFrame = 250
+PtLevelValue = 200
+FrameFineTuneValue = 50
+FrameExtraStepsValue = 0
+ScanSpeedValue = 5
+StabilizationDelayValue = 100
 
 plotter_canvas = None
 plotter_width = 20
@@ -1088,9 +1095,10 @@ def rwnd_speed_up():
 
 
 def frame_extra_steps_selection():
-    aux = value_normalize(frame_extra_steps_value, -30, 30, 0)
-    SessionData["FrameExtraSteps"] = aux
-    send_arduino_command(CMD_SET_EXTRA_STEPS, aux)
+    global FrameExtraStepsValue
+    FrameExtraStepsValue = value_normalize(frame_extra_steps_value, -30, 30, 0)
+    SessionData["FrameExtraSteps"] = FrameExtraStepsValue
+    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
 
 
 def advance_movie(from_arduino=False):
@@ -1570,7 +1578,7 @@ def set_real_time_display():
 
 
 def set_s8():
-    global PreviewHeight, FilmHoleY_Top, FilmHoleY_Bottom
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue
 
     SessionData["FilmType"] = "S8"
     time.sleep(0.2)
@@ -1582,6 +1590,8 @@ def set_s8():
         SessionData["MinFrameSteps"] = MinFrameSteps
     if ExpertMode:
         pt_level_value.set(PTLevel)
+        PtLevelValue = PTLevel
+        StepsPerFrame = MinFrameSteps
         steps_per_frame_value.set(MinFrameSteps)
     # Size and position of hole markers
     FilmHoleY_Top = int(PreviewHeight / 2.6)
@@ -1595,8 +1605,7 @@ def set_s8():
 
 
 def set_r8():
-    global film_hole_frame_top, film_hole_frame_bottom
-    global PreviewHeight, FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue
 
     SessionData["FilmType"] = "R8"
     time.sleep(0.2)
@@ -1608,6 +1617,8 @@ def set_r8():
         SessionData["MinFrameSteps"] = MinFrameSteps
     if ExpertMode:
         pt_level_value.set(PTLevel)
+        PtLevelValue = PTLevel
+        StepsPerFrame = MinFrameSteps
         steps_per_frame_value.set(MinFrameSteps)
     # Size and position of hole markers
     FilmHoleY_Top = 6
@@ -1737,7 +1748,7 @@ def capture_hdr(mode):
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp * 1000)})
         else:
-            time.sleep(stabilization_delay_value.get() / 1000)  # Allow time to stabilize image only if no dry run
+            time.sleep(StabilizationDelayValue/1000)  # Allow time to stabilize image only if no dry run
         if perform_dry_run:
             for i in range(1, dry_run_iterations):  # Perform a few dummy captures to allow exposure stabilization
                 camera.capture_image("main")
@@ -1907,7 +1918,7 @@ def capture(mode):
                 # Finally changed to allow a percentage of the value used previously
                 # As we initialize this percentage to 50%, we start with double the original value
                 if abs(aux_current_exposure - PreviousCurrentExposure) > (
-                        match_wait_margin_value.get() * Tolerance_AE) / 100:
+                        MatchWaitMarginValue * Tolerance_AE) / 100:
                     if (wait_loop_count % 10 == 0):
                         logging.debug(
                             f"AE match: ({aux_current_exposure / 1000},Auto {PreviousCurrentExposure / 1000})")
@@ -1941,8 +1952,8 @@ def capture(mode):
             aux_gain_blue = camera_colour_gains[1]
             if auto_white_balance_change_pause.get():
                 # Same as for exposure, difference allowed is a percentage of the maximum value
-                if abs(aux_gain_red - PreviousGainRed) >= (match_wait_margin_value.get() * Tolerance_AWB / 100) or \
-                        abs(aux_gain_blue - PreviousGainBlue) >= (match_wait_margin_value.get() * Tolerance_AWB / 100):
+                if abs(aux_gain_red - PreviousGainRed) >= (MatchWaitMarginValue * Tolerance_AWB / 100) or \
+                        abs(aux_gain_blue - PreviousGainBlue) >= (MatchWaitMarginValue * Tolerance_AWB / 100):
                     if (wait_loop_count % 10 == 0):
                         aux_gains_str = "(" + str(round(aux_gain_red, 2)) + ", " + str(round(aux_gain_blue, 2)) + ")"
                         logging.debug("AWB Match: %s", aux_gains_str)
@@ -1977,7 +1988,7 @@ def capture(mode):
             camera.switch_mode_and_capture_file(capture_config, FrameFilenamePattern % CurrentFrame)
     else:
         time.sleep(
-            stabilization_delay_value.get() / 1000)  # Allow time to stabilize image, it can get too fast with PiCamera2
+            StabilizationDelayValue/1000)  # Allow time to stabilize image, it can get too fast with PiCamera2
         if mode == 'still':
             captured_image = camera.capture_image("main")
             captured_image.save(StillFrameFilenamePattern % (CurrentFrame, CurrentStill))
@@ -2482,6 +2493,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global Controller_Id
     global ScanStopRequested
     global arduino_after
+    global StepsPerFrame
 
     if not SimulatedRun:
         try:
@@ -2533,8 +2545,10 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_REPORT_AUTO_LEVELS:  # Get auto levels from Arduino, to be displayed in UI, if auto on
         if ExpertMode:
             if (AutoPtLevelEnabled):
+                PtLevelValue = ArduinoParam1
                 pt_level_value.set(ArduinoParam1)
             if (AutoFrameStepsEnabled):
+                StepsPerFrame = ArduinoParam2
                 steps_per_frame_value.set(ArduinoParam2)
     elif ArduinoTrigger == RSP_REWIND_ENDED:  # Rewind ended, we can re-enable buttons
         RewindEndOutstanding = True
@@ -2718,6 +2732,9 @@ def load_session_data():
     global AutoExpEnabled, AutoWbEnabled
     global AutoFrameStepsEnabled, AutoPtLevelEnabled
     global HdrBracketAuto
+    global MatchWaitMarginValue
+    global StepsPerFrame, PtLevelValue, FrameFineTuneValue, FrameExtraStepsValue, ScanSpeedValue
+    global StabilizationDelayValue
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2727,15 +2744,17 @@ def load_session_data():
             logging.debug("SessionData loaded from disk:")
             if ExpertMode:
                 if 'MatchWaitMargin' in SessionData:
-                    aux = int(SessionData["MatchWaitMargin"])
-                    match_wait_margin_value.set(aux)
+                    MatchWaitMarginValue = SessionData["MatchWaitMargin"]
                 else:
-                    match_wait_margin_value.set(50)
+                    MatchWaitMarginValue = 50
+                aux = int(MatchWaitMarginValue)
+                match_wait_margin_value.set(aux)
                 if 'CaptureStabilizationDelay' in SessionData:
                     aux = float(SessionData["CaptureStabilizationDelay"])
-                    stabilization_delay_value.set(round(aux * 1000))
+                    StabilizationDelayValue = round(aux * 1000)
                 else:
-                    stabilization_delay_value.set(100)
+                    StabilizationDelayValue = 100
+                stabilization_delay_value.set(StabilizationDelayValue)
             if 'CurrentDir' in SessionData:
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
@@ -2908,6 +2927,7 @@ def load_session_data():
                 # Recover frame alignment values
                 if 'MinFrameSteps' in SessionData:
                     MinFrameSteps = int(SessionData["MinFrameSteps"])
+                    StepsPerFrame = MinFrameSteps
                     steps_per_frame_value.set(MinFrameSteps)
                     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
                 if 'FrameStepsAuto' in SessionData:
@@ -2917,20 +2937,20 @@ def load_session_data():
                     if AutoFrameStepsEnabled:
                         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
                     else:
-                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, steps_per_frame_value.get())
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, StepsPerFrame)
                 if 'MinFrameStepsS8' in SessionData:
                     MinFrameStepsS8 = SessionData["MinFrameStepsS8"]
                 if 'MinFrameStepsR8' in SessionData:
                     MinFrameStepsR8 = SessionData["MinFrameStepsR8"]
                 if 'FrameFineTune' in SessionData:
-                    aux = SessionData["FrameFineTune"]
-                    frame_fine_tune_value.set(aux)
-                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, aux)
+                    FrameFineTuneValue = SessionData["FrameFineTune"]
+                    frame_fine_tune_value.set(FrameFineTuneValue)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
                 if 'FrameExtraSteps' in SessionData:
-                    aux = SessionData["FrameExtraSteps"]
-                    aux = min(aux, 20)
-                    frame_extra_steps_value.set(aux)
-                    send_arduino_command(CMD_SET_EXTRA_STEPS, aux)
+                    FrameExtraStepsValue = SessionData["FrameExtraSteps"]
+                    FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
+                    frame_extra_steps_value.set(FrameExtraStepsValue)
+                    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
                 if 'PTLevelAuto' in SessionData:
                     AutoPtLevelEnabled = SessionData["PTLevelAuto"]
                     auto_pt_level_enabled.set(AutoPtLevelEnabled)
@@ -2938,10 +2958,11 @@ def load_session_data():
                     if AutoPtLevelEnabled:
                         send_arduino_command(CMD_SET_PT_LEVEL, 0)
                     else:
-                        send_arduino_command(CMD_SET_PT_LEVEL, pt_level_value.get())
+                        send_arduino_command(CMD_SET_PT_LEVEL, PtLevelValue)
                 if 'PTLevel' in SessionData:
                     PTLevel = int(SessionData["PTLevel"])
                     pt_level_value.set(PTLevel)
+                    PtLevelValue = PTLevel
                     if not AutoPtLevelEnabled:
                         send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
                 if 'PTLevelS8' in SessionData:
@@ -2949,9 +2970,9 @@ def load_session_data():
                 if 'PTLevelR8' in SessionData:
                     PTLevelR8 = SessionData["PTLevelR8"]
                 if 'ScanSpeed' in SessionData:
-                    aux = int(SessionData["ScanSpeed"])
-                    scan_speed_value.set(aux)
-                    send_arduino_command(CMD_SET_SCAN_SPEED, aux)
+                    ScanSpeedValue = int(SessionData["ScanSpeed"])
+                    scan_speed_value.set(ScanSpeedValue)
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
                 if 'Brightness' in SessionData:
                     aux = SessionData["Brightness"]
                     brightness_value.set(aux)
@@ -3006,12 +3027,12 @@ def reinit_controller():
     if AutoPtLevelEnabled:
         send_arduino_command(CMD_SET_PT_LEVEL, 0)
     else:
-        send_arduino_command(CMD_SET_PT_LEVEL, pt_level_value.get())
+        send_arduino_command(CMD_SET_PT_LEVEL, PtLevelValue)
 
     if AutoFrameStepsEnabled:
         send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
     else:
-        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, steps_per_frame_value.get())
+        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, StepsPerFrame)
 
     if 'FilmType' in SessionData:
         if SessionData["FilmType"] == "R8":
@@ -3019,9 +3040,9 @@ def reinit_controller():
         else:
             send_arduino_command(CMD_SET_SUPER_8)
 
-    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, frame_fine_tune_value.get())
-    send_arduino_command(CMD_SET_EXTRA_STEPS, frame_extra_steps_value.get())
-    send_arduino_command(CMD_SET_SCAN_SPEED, scan_speed_value.get())
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
 
 
 def PiCam2_change_resolution():
@@ -3417,8 +3438,10 @@ def wb_blue_validation(new_value):
 
 
 def match_wait_margin_selection():
-    aux = value_normalize(match_wait_margin_value, 5, 100, 50)
-    SessionData["MatchWaitMargin"] = aux
+    global MatchWaitMarginValue
+
+    MatchWaitMarginValue = value_normalize(match_wait_margin_value, 5, 100, 50)
+    SessionData["MatchWaitMargin"] = MatchWaitMarginValue
 
 
 def match_wait_margin_validation(new_value):
@@ -3455,13 +3478,15 @@ def steps_per_frame_auto():
     adjust_widget_status(AutoFrameStepsEnabled, [steps_per_frame_spinbox])
     steps_per_frame_btn.config(text="Steps/Frame AUTO:" if AutoFrameStepsEnabled else "Steps/Frame:")
     SessionData["FrameStepsAuto"] = AutoFrameStepsEnabled
-    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if AutoFrameStepsEnabled else steps_per_frame_value.get())
+    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if AutoFrameStepsEnabled else StepsPerFrame)
 
 
 def steps_per_frame_selection():
+    global StepsPerFrame
     if AutoFrameStepsEnabled:
         return
     MinFrameSteps = value_normalize(steps_per_frame_value, 100, 600, 250)
+    StepsPerFrame = MinFrameSteps
     SessionData["MinFrameSteps"] = MinFrameSteps
     SessionData["MinFrameSteps" + SessionData["FilmType"]] = MinFrameSteps
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
@@ -3477,13 +3502,15 @@ def set_auto_pt_level():
     adjust_widget_status(AutoPtLevelEnabled, [pt_level_spinbox])
     pt_level_btn.config(text="PT Level AUTO:" if AutoPtLevelEnabled else "PT Level:")
     SessionData["PTLevelAuto"] = AutoPtLevelEnabled
-    send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else pt_level_value.get())
+    send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else PtLevelValue)
 
 
 def pt_level_selection():
+    global PtLevelValue
     if AutoPtLevelEnabled:
         return
     PTLevel = value_normalize(pt_level_value, 20, 900, 500)
+    PtLevelValue = PTLevel
     SessionData["PTLevel"] = PTLevel
     SessionData["PTLevel" + SessionData["FilmType"]] = PTLevel
     send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
@@ -3494,10 +3521,11 @@ def pt_level_validation(new_value):
 
 
 def frame_fine_tune_selection():
-    aux = value_normalize(frame_fine_tune_value, 5, 95, 25)
-    SessionData["FrameFineTune"] = aux
-    SessionData["FrameFineTune" + SessionData["FilmType"]] = aux
-    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, aux)
+    global FrameFineTuneValue
+    FrameFineTuneValue = value_normalize(frame_fine_tune_value, 5, 95, 25)
+    SessionData["FrameFineTune"] = FrameFineTuneValue
+    SessionData["FrameFineTune" + SessionData["FilmType"]] = FrameFineTuneValue
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
 
 
 def fine_tune_validation(new_value):
@@ -3509,9 +3537,10 @@ def extra_steps_validation(new_value):
 
 
 def scan_speed_selection():
-    aux = value_normalize(scan_speed_value, 1, 10, 5)
-    SessionData["ScanSpeed"] = aux
-    send_arduino_command(CMD_SET_SCAN_SPEED, aux)
+    global ScanSpeedValue
+    ScanSpeedValue = value_normalize(scan_speed_value, 1, 10, 5)
+    SessionData["ScanSpeed"] = ScanSpeedValue
+    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
 
 
 def scan_speed_validation(new_value):
@@ -3527,10 +3556,11 @@ def preview_module_validation(new_value):
     return value_validation(new_value, preview_module_spinbox, 1, 50, 1)
 
 
+
 def stabilization_delay_selection():
-    aux = value_normalize(stabilization_delay_value, 0, 1000, 150)
-    aux = aux / 1000
-    SessionData["CaptureStabilizationDelay"] = aux
+    global StabilizationDelayValue
+    StabilizationDelayValue = value_normalize(stabilization_delay_value, 0, 1000, 150)
+    SessionData["CaptureStabilizationDelay"] = StabilizationDelayValue
 
 
 def stabilization_delay_validation(new_value):
@@ -4314,7 +4344,7 @@ def create_widgets():
         match_wait_margin_label = tk.Label(exp_wb_frame, text='Match margin (%):', font=("Arial", FontSize - 1))
         match_wait_margin_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
-        match_wait_margin_value = tk.IntVar(value=50)  # Default value, overriden by configuration
+        match_wait_margin_value = tk.IntVar(value=MatchWaitMarginValue)  # Default value, overriden by configuration
         match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=8,
                                                    readonlybackground='pale green', from_=5, to=100, increment=5,
                                                    textvariable=match_wait_margin_value, font=("Arial", FontSize - 1))
@@ -4521,7 +4551,7 @@ def create_widgets():
         steps_per_frame_btn.grid(row=frame_align_row, column=0, sticky="EW")
         as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
-        steps_per_frame_value = tk.IntVar(value=250)  # Default to be overridden by configuration
+        steps_per_frame_value = tk.IntVar(value=StepsPerFrame)  # Default to be overridden by configuration
         steps_per_frame_spinbox = DynamicSpinbox(frame_alignment_frame, command=steps_per_frame_selection, width=4,
                                                  textvariable=steps_per_frame_value, from_=100, to=600,
                                                  font=("Arial", FontSize - 1))
@@ -4547,7 +4577,7 @@ def create_widgets():
         pt_level_btn.grid(row=frame_align_row, column=0, sticky="EW")
         as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
-        pt_level_value = tk.IntVar(value=200)  # To be overridden by config
+        pt_level_value = tk.IntVar(value=PtLevelValue)  # To be overridden by config
         pt_level_spinbox = DynamicSpinbox(frame_alignment_frame, command=pt_level_selection, width=4,
                                           textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize - 1))
         pt_level_spinbox.widget_type = "control"
@@ -4565,7 +4595,7 @@ def create_widgets():
         frame_fine_tune_label = tk.Label(frame_alignment_frame, text='Fine tune:', font=("Arial", FontSize - 1))
         frame_fine_tune_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
-        frame_fine_tune_value = tk.IntVar(value=50)  # To be overridden by config
+        frame_fine_tune_value = tk.IntVar(value=FrameFineTuneValue)  # To be overridden by config
         frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_fine_tune_selection, width=4,
                                                  readonlybackground='pale green', textvariable=frame_fine_tune_value,
                                                  from_=5, to=95, increment=5, font=("Arial", FontSize - 1))
@@ -4582,7 +4612,7 @@ def create_widgets():
         frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1))
         frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
-        frame_extra_steps_value = tk.IntVar(value=0)  # To be overridden by config
+        frame_extra_steps_value = tk.IntVar(value=FrameExtraStepsValue)  # To be overridden by config
         frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=frame_extra_steps_selection, width=4,
                                                    readonlybackground='pale green', from_=-30, to=30,
                                                    textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1))
@@ -4603,7 +4633,7 @@ def create_widgets():
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame, text='Scan Speed:', font=("Arial", FontSize - 1))
         scan_speed_label.grid(row=0, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        scan_speed_value = tk.IntVar(value=5)  # Default value, overriden by configuration
+        scan_speed_value = tk.IntVar(value=ScanSpeedValue)  # Default value, overriden by configuration
         scan_speed_spinbox = DynamicSpinbox(speed_quality_frame, command=scan_speed_selection, width=4,
                                             textvariable=scan_speed_value, from_=1, to=10, font=("Arial", FontSize - 1))
         scan_speed_spinbox.widget_type = "control"
@@ -4619,7 +4649,7 @@ def create_widgets():
         stabilization_delay_label = tk.Label(speed_quality_frame, text='Stabilization\ndelay (ms):',
                                              font=("Arial", FontSize - 1))
         stabilization_delay_label.grid(row=1, column=0, padx=x_pad, pady=y_pad, sticky=E)
-        stabilization_delay_value = tk.IntVar(value=100)  # default value, overriden by configuration
+        stabilization_delay_value = tk.IntVar(value=StabilizationDelayValue)  # default value, overriden by configuration
         stabilization_delay_spinbox = DynamicSpinbox(speed_quality_frame, command=stabilization_delay_selection,
                                                      width=4, textvariable=stabilization_delay_value, from_=0, to=1000,
                                                      increment=10, font=("Arial", FontSize - 1))
