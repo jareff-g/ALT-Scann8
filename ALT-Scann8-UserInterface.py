@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.28"
-__date__ = "2024-03-13"
-__version_highlight__ = "Global coordination of widget disabled status"
+__version__ = "1.10.29"
+__date__ = "2024-03-14"
+__version_highlight__ = "Correct adjustment oh HDR parameters in UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -358,8 +358,6 @@ images_to_merge = []
 # 4 iterations seem to be enough for exposure to catch up (started with 9, 4 gives same results, 3 is not enough)
 dry_run_iterations = 4
 hdr_best_exp = 0
-hdr_min_bracket_width = 4
-hdr_max_bracket_width = 400
 hdr_num_exposures = 3  # Changed from 4 exposures to 3, probably an odd number is better (and 3 faster than 4)
 hdr_step_value = 1
 hdr_exp_list = []
@@ -369,6 +367,11 @@ recalculate_hdr_exp_list = False
 force_adjust_hdr_bracket = False
 hdr_auto_bracket_frames = 8  # Every n frames, bracket is recalculated
 hdr_view_4_image = None
+# HDR Constants
+HDR_MIN_EXP = 1
+HDR_MAX_EXP = 1000
+HDR_MIN_BRACKET = 4
+HDR_MAX_BRACKET = HDR_MAX_EXP - HDR_MIN_EXP
 
 # *** Simulated sensor modes to ellaborate resolution list
 camera_resolutions = None
@@ -3574,12 +3577,16 @@ def stabilization_delay_validation(new_value):
 def hdr_min_exp_selection():
     global force_adjust_hdr_bracket, recalculate_hdr_exp_list, HdrMinExp, HdrMaxExp, HdrBracketWidth
 
-    HdrMinExp = value_normalize(hdr_min_exp_value, 1, 999, 100)
-    max_exp = HdrMinExp + HdrBracketWidth  # New max based on new min
-    if max_exp > 1000:
-        HdrBracketWidth -= max_exp - 1000  # Reduce bracket in max over the top
-        max_exp = 1000
-        force_adjust_hdr_bracket = True
+    min_exp = value_normalize(hdr_min_exp_value, HDR_MIN_EXP, HDR_MAX_EXP-1, 100)
+    max_exp = min_exp + HdrBracketWidth  # New max based on new min
+    if max_exp > HDR_MAX_EXP:
+        max_exp = HDR_MAX_EXP
+        if HdrBracketWidth > HDR_MIN_BRACKET:
+            HdrMinExp = min_exp
+            HdrBracketWidth = max_exp - HdrMinExp  # Reduce bracket in max over the top
+            force_adjust_hdr_bracket = True
+    else:
+        HdrMinExp = min_exp
     HdrMaxExp = max_exp
     hdr_min_exp_value.set(HdrMinExp)
     hdr_max_exp_value.set(HdrMaxExp)
@@ -3597,12 +3604,16 @@ def hdr_min_exp_validation(new_value):
 def hdr_max_exp_selection():
     global recalculate_hdr_exp_list, force_adjust_hdr_bracket, HdrMinExp, HdrMaxExp, HdrBracketWidth
 
-    HdrMaxExp = value_normalize(hdr_max_exp_value, 2, 1000, 200)
-    min_exp = HdrMaxExp - HdrBracketWidth
-    if min_exp < HdrMinExp:
-        min_exp = HdrMinExp
-        HdrBracketWidth = HdrMaxExp - min_exp  # Reduce bracket in min below absolute min
-        force_adjust_hdr_bracket = True
+    max_exp = value_normalize(hdr_max_exp_value, HDR_MIN_EXP+1, HDR_MAX_EXP, 200)
+    min_exp = max_exp - HdrBracketWidth
+    if min_exp < HDR_MIN_EXP:
+        min_exp = HDR_MIN_EXP
+        if HdrBracketWidth > HDR_MIN_BRACKET:
+            HdrMaxExp = max_exp
+            HdrBracketWidth = HdrMaxExp - min_exp  # Reduce bracket in min below absolute min
+            force_adjust_hdr_bracket = True
+    else:
+        HdrMaxExp = max_exp
     HdrMinExp = min_exp
     hdr_min_exp_value.set(HdrMinExp)
     hdr_max_exp_value.set(HdrMaxExp)
@@ -3618,14 +3629,27 @@ def hdr_max_exp_validation(new_value):
 
 
 def hdr_bracket_width_selection():
-    global force_adjust_hdr_bracket, HdrMinExp
+    global force_adjust_hdr_bracket, HdrMinExp, HdrMaxExp, HdrBracketWidth
 
-    aux_bracket = value_normalize(hdr_bracket_width_value, hdr_min_bracket_width, hdr_max_bracket_width, 200)
+    aux = value_normalize(hdr_bracket_width_value, HDR_MIN_BRACKET, HDR_MAX_BRACKET, 200)
+    if aux < HDR_MIN_BRACKET:
+        return
+    else:
+        HdrBracketWidth = aux
 
-    middle_exp = int((HdrMinExp + (HdrMaxExp - HdrMinExp)) / 2)
-    HdrMinExp = int(middle_exp - (aux_bracket / 2))
+    middle_exp = int(HdrMinExp + (HdrMaxExp - HdrMinExp)/2)
+    print(f"middle_exp: {middle_exp}")
+    print(f"HdrBracketWidth: {HdrBracketWidth}")
+    HdrMinExp = max(HDR_MIN_EXP, int(middle_exp - (HdrBracketWidth / 2)))
     hdr_min_exp_value.set(HdrMinExp)
-    hdr_max_exp_value.set(int(middle_exp + (aux_bracket / 2)))
+    HdrMaxExp = HdrMinExp + HdrBracketWidth
+    if HdrMaxExp < HDR_MAX_EXP and HdrBracketWidth % 2 == 0:
+        HdrMinExp += 1
+        HdrMaxExp += 1
+    print(f"HdrMinExp: {HdrMinExp}")
+    print(f"HdrMaxExp: {HdrMaxExp}")
+    hdr_min_exp_value.set(HdrMinExp)
+    hdr_max_exp_value.set(HdrMaxExp)
     SessionData["HdrMinExp"] = HdrMinExp
     SessionData["HdrMaxExp"] = HdrMaxExp
     SessionData["HdrBracketWidth"] = HdrBracketWidth
@@ -3633,8 +3657,7 @@ def hdr_bracket_width_selection():
 
 
 def hdr_bracket_width_validation(new_value):
-    return value_validation(new_value, hdr_bracket_width_spinbox, hdr_min_bracket_width, hdr_max_bracket_width,
-                            100)
+    return value_validation(new_value, hdr_bracket_width_spinbox, HDR_MIN_BRACKET, HDR_MAX_BRACKET,100)
 
 
 def hdr_bracket_shift_selection():
@@ -4698,7 +4721,7 @@ def create_widgets():
         hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
-                                             from_=1, to=999, increment=1, font=("Arial", FontSize - 1))
+                                             from_=HDR_MIN_EXP, to=HDR_MAX_EXP, increment=1, font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_min_exp_spinbox, True)
         hdr_min_exp_spinbox.widget_type = "hdr"
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
@@ -4729,8 +4752,8 @@ def create_widgets():
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_width_selection, width=8,
-                                                   textvariable=hdr_bracket_width_value, from_=hdr_min_bracket_width,
-                                                   to=hdr_max_bracket_width, increment=1, font=("Arial", FontSize - 1))
+                                                   textvariable=hdr_bracket_width_value, from_=HDR_MIN_BRACKET,
+                                                   to=HDR_MAX_BRACKET, increment=1, font=("Arial", FontSize - 1))
         init_widget_disabled_status(hdr_bracket_width_spinbox, True)
         hdr_bracket_width_spinbox.widget_type = "hdr"
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
