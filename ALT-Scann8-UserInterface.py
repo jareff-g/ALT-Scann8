@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.32"
+__version__ = "1.10.33"
 __date__ = "2024-03-14"
 __version_highlight__ = "Final fixes for widget enable/disable functions"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -35,6 +35,7 @@ import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
+import tkinter.font as tkFont
 
 from PIL import ImageTk, Image
 
@@ -91,8 +92,8 @@ FocusZoomPosY = 0.35
 FocusZoomFactorX = 0.2
 FocusZoomFactorY = 0.2
 FreeWheelActive = False
-BaseDir = '/home/juan/Vídeos'  # dirplats in original code from Torulf
-CurrentDir = BaseDir
+BaseFolder = os.environ['HOME']
+CurrentDir = BaseFolder
 FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
@@ -524,7 +525,7 @@ def set_auto_stop_enabled():
 # Enable/Disable camera zoom to facilitate focus
 def set_focus_zoom():
     global RealTimeZoom
-    RealTimeZoon = real_time_zoom.get()
+    RealTimeZoom = real_time_zoom.get()
     if RealTimeZoom:
         widget_enable(real_time_display_checkbox, False)
     else:
@@ -631,20 +632,20 @@ def set_focus_minus():
 
 
 def set_new_folder():
-    global CurrentDir, CurrentFrame
+    global BaseFolder, CurrentDir, CurrentFrame
 
     requested_dir = ""
     success = False
 
     while requested_dir == "" or requested_dir is None:
         requested_dir = tk.simpledialog.askstring(title="Enter new folder name",
-                                                  prompt=f"Enter new folder name (to be created under {CurrentDir}):")
+                                                  prompt=f"Enter new folder name (to be created under {BaseFolder}):")
         if requested_dir is None:
             return
         if requested_dir == "":
             tk.messagebox.showerror("Error!", "Please specify a name for the folder to be created.")
 
-    newly_created_dir = os.path.join(CurrentDir, requested_dir)
+    newly_created_dir = os.path.join(BaseFolder, requested_dir)
 
     if not os.path.isdir(newly_created_dir):
         try:
@@ -765,7 +766,7 @@ def settings_popup():
     options_row = 0
 
     options_dlg = tk.Toplevel(win)
-    options_dlg.title("ALT-Scann8 options")
+    options_dlg.title("Settings ALT-Scann8")
     # options_dlg.geometry(f"300x100")
     options_dlg.rowconfigure(0, weight=1)
     options_dlg.columnconfigure(0, weight=1)
@@ -802,24 +803,6 @@ def settings_popup():
     as_tooltips.add(disable_tooltips_btn, "Disable tooltips")
     options_row += 1
 
-    # Font Size
-    font_size_label = tk.Label(options_dlg, text="Main UI font size", font=("Arial", FontSize-1))
-    font_size_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
-    font_size_int = tk.IntVar(value=12)
-    font_size_int.set(FontSize)
-    font_size_spinbox = DynamicSpinbox(options_dlg, command=exposure_selection, width=2, from_=6, to=20,
-                                      textvariable=font_size_int, increment=1, font=("Arial", FontSize - 1))
-    font_size_spinbox.grid(row=options_row, column=1, sticky='W')
-    options_row += 1
-
-    # Display scrollbars
-    ui_scrollbars = tk.BooleanVar(value=UIScrollbars)
-    ui_scrollbars_btn = tk.Checkbutton(options_dlg, variable=ui_scrollbars, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Display scrollbars")
-    ui_scrollbars_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions")
-    options_row += 1
-
     # Widgets enabled while scanning
     widgets_enabled_while_scanning = tk.BooleanVar(value=WidgetsEnabledWhileScanning)
     widgets_enabled_while_scanning_btn = tk.Checkbutton(options_dlg, variable=widgets_enabled_while_scanning,
@@ -827,19 +810,6 @@ def settings_popup():
                                                         text="Keep widgets enabled")
     widgets_enabled_while_scanning_btn.grid(row=options_row, column=0, sticky="W")
     as_tooltips.add(widgets_enabled_while_scanning_btn, "Keep widgets enabled while scanning")
-    options_row += 1
-
-    # Dropdown menu options
-    debug_level_list = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-    debug_level_selected = tk.StringVar()
-    debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
-    debug_level_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
-    debug_level_dropdown = OptionMenu(options_dlg,
-                                     debug_level_selected, *debug_level_list)
-    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
-    debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
-    debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
-    as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
     options_row += 1
 
     # Color coded buttons
@@ -857,6 +827,24 @@ def settings_popup():
     as_tooltips.add(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
     options_row += 1
 
+    # Display scrollbars
+    ui_scrollbars = tk.BooleanVar(value=UIScrollbars)
+    ui_scrollbars_btn = tk.Checkbutton(options_dlg, variable=ui_scrollbars, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Display scrollbars")
+    ui_scrollbars_btn.grid(row=options_row, column=0, sticky="W")
+    as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions")
+    options_row += 1
+
+    # Font Size
+    font_size_label = tk.Label(options_dlg, text="Main UI font size", font=("Arial", FontSize-1))
+    font_size_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
+    font_size_int = tk.IntVar(value=12)
+    font_size_int.set(FontSize)
+    font_size_spinbox = DynamicSpinbox(options_dlg, command=exposure_selection, width=2, from_=6, to=20,
+                                      textvariable=font_size_int, increment=1, font=("Arial", FontSize - 2))
+    font_size_spinbox.grid(row=options_row, column=1, sticky='W')
+    options_row += 1
+
     # Capture resolution Dropdown
     # Drop down to select capture resolution
     # Dropdown menu options
@@ -865,7 +853,7 @@ def settings_popup():
     resolution_label = Label(options_dlg, text='Resolution:', font=("Arial", FontSize))
     resolution_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     resolution_dropdown = OptionMenu(options_dlg, resolution_dropdown_selected, *resolution_list)
-    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     resolution_dropdown_selected.set(CaptureResolution)
     resolution_dropdown.grid(row=options_row, column=1, sticky="W")
     as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with "
@@ -878,15 +866,38 @@ def settings_popup():
     file_type_list = ["jpg", "png", "dng"]
     file_type_dropdown_selected = tk.StringVar()
 
-    # No label for now
+    # Target file type
     file_type_label = Label(options_dlg, text='Type:', font=("Arial", FontSize))
     file_type_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
     file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
-    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize))
+    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     file_type_dropdown_selected.set(FileType)  # Set the initial value
     file_type_dropdown.grid(row=options_row, column=1, sticky="W")
     # file_type_dropdown.config(state=DISABLED)
     as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
+
+    options_row += 1
+
+    # Base ALT-Scann8 folder
+    base_folder_label = Label(options_dlg, text='Base folder:', font=("Arial", FontSize))
+    base_folder_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
+    base_folder_btn = Button(options_dlg, text='Select', command=set_base_folder,
+                                 activebackground='#f0f0f0', font=("Arial", FontSize-2))
+    base_folder_btn.grid(row=options_row, column=1, sticky="W")
+    as_tooltips.add(base_folder_btn, "Select existing folder as base folder for ALT-Scann8.")
+
+    options_row += 1
+
+    # Debug dropdown menu options
+    debug_level_list = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+    debug_level_selected = tk.StringVar()
+    debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
+    debug_level_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
+    debug_level_dropdown = OptionMenu(options_dlg, debug_level_selected, *debug_level_list)
+    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
+    debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
+    debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
+    as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
 
     options_row += 1
 
@@ -932,6 +943,13 @@ def get_last_frame_popup(last_frame):
     last_frame_dlg.grab_set()  # ensure all input goes to our window
     last_frame_dlg.wait_window()  # block until window is destroyed
     return last_frame_int.get()
+
+
+def set_base_folder():
+    global BaseFolder
+
+    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann¡8 folder")
+    SessionData["BaseFolder"] = str(BaseFolder)
 
 
 def set_existing_folder():
@@ -991,7 +1009,7 @@ def set_auto_wb():
         return
 
     AutoWbEnabled = AWB_enabled.get()
-    SessionData["CurrentAwbAuto"] = AutoWbEnabled
+    SessionData["AutoWbEnabled"] = AutoWbEnabled
 
     if AutoWbEnabled:
         manual_wb_red_value = wb_red_value.get()
@@ -1549,7 +1567,6 @@ def set_real_time_display():
     widget_enable(Start_btn, not RealTimeDisplay)
     widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
     real_time_zoom_checkbox.deselect()
-    widget_enable(real_time_display_checkbox, True)
 
 
 def set_s8():
@@ -2000,7 +2017,7 @@ def start_scan_simulated():
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
-        if BaseDir == CurrentDir:
+        if BaseFolder == CurrentDir:
             tk.messagebox.showerror("Error!",
                                     "Please specify a folder where to retrieve captured images for "
                                     "scan simulation.")
@@ -2164,7 +2181,7 @@ def start_scan():
     if ScanOngoing:
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
-        if BaseDir == CurrentDir or not os.path.isdir(CurrentDir):
+        if BaseFolder == CurrentDir or not os.path.isdir(CurrentDir):
             tk.messagebox.showerror("Error!", "Please specify a folder where to store the "
                                               "captured images.")
             return
@@ -2588,18 +2605,25 @@ def init_widget_enable(widget, enabled):
 
 
 # Handle widget status
-def widget_list_enable(enabled, widget_list):
+def widget_list_enable_aux(enabled, widget_list, init):
     for widget in widget_list:
         if isinstance(widget, tk.Spinbox):
             widget.config(state=NORMAL if enabled else 'readonly')  # Used to be readonly instead of disabled
         elif isinstance(widget, tk.OptionMenu) or isinstance(widget, tk.Label) or isinstance(widget, tk.Checkbutton):
             #widget.config(state=DISABLED if disabled else NORMAL)
-            widget_enable(widget, enabled)
+            update_enabled_status(widget, enabled, init)
         elif isinstance(widget, tk.Checkbutton):
             if enabled:
                 widget.deselect()
             else:
                 widget.select()
+
+
+def widget_list_enable(enabled, widget_list):
+    widget_list_enable_aux(enabled, widget_list, False)
+
+def init_widget_list_enable(enabled, widget_list):
+    widget_list_enable_aux(enabled, widget_list, True)
 
 
 def custom_spinboxes_kbd_lock(widget):
@@ -2809,20 +2833,16 @@ def load_session_data():
                     PreviewModuleValue = aux
                     preview_module_value.set(aux)
             if ExpertMode:
+                if 'AutoExpEnabled' in SessionData:
+                    AutoExpEnabled = SessionData["AutoExpEnabled"]
+                    AE_enabled.set(AutoExpEnabled)
+                    exposure_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeEnable": AutoExpEnabled})
                 if 'CurrentExposure' in SessionData:
                     aux = SessionData["CurrentExposure"]
-                    init_widget_enable(auto_exposure_wait_btn, True)
-                    if isinstance(aux, str) and (aux == "Auto" or aux == "0") or isinstance(aux, int) and aux == 0:
-                        aux = 0
-                        AutoExpEnabled = True
-                        AE_enabled.set(AutoExpEnabled)
-                        set_auto_exposure()
-                        widget_enable(auto_exposure_wait_btn, True)
-                    else:
-                        if isinstance(aux, str):
-                            aux = int(float(aux))
-                        AutoExpEnabled = False
-                        AE_enabled.set(AutoExpEnabled)
+                    if isinstance(aux, str):
+                        aux = int(float(aux))
                     if not SimulatedRun and not CameraDisabled:
                         camera.controls.ExposureTime = int(aux)
                         camera.set_controls({"AeEnable": AutoExpEnabled})
@@ -2833,22 +2853,21 @@ def load_session_data():
                     else:
                         aux = eval(SessionData["ExposureAdaptPause"])
                     auto_exposure_change_pause.set(aux)
-                if 'CurrentAwbAuto' in SessionData:
-                    if isinstance(SessionData["CurrentAwbAuto"], bool):
-                        AutoWbEnabled = SessionData["CurrentAwbAuto"]
+                if 'CurrentAwbAuto' in SessionData:     # Delete legacy name
+                    SessionData['AutoWbEnabled'] = SessionData['CurrentAwbAuto']
+                    del SessionData['CurrentAwbAuto']
+                if 'AutoWbEnabled' in SessionData:
+                    if isinstance(SessionData["AutoWbEnabled"], bool):
+                        AutoWbEnabled = SessionData["AutoWbEnabled"]
                     else:
-                        AutoWbEnabled = eval(SessionData["CurrentAwbAuto"])
-                    init_widget_enable(auto_wb_wait_btn, True)
+                        AutoWbEnabled = eval(SessionData["AutoWbEnabled"])
                     AWB_enabled.set(AutoWbEnabled)
                     wb_blue_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
-                    if AutoWbEnabled:
-                        widget_enable(auto_wb_wait_btn, True)
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"AwbEnable": AutoWbEnabled})
-                    widget_list_enable(not AutoWbEnabled, [wb_red_spinbox, wb_blue_spinbox])
                 if 'AwbPause' in SessionData:
-                    if isinstance(SessionData["CurrentAwbAuto"], bool):
+                    if isinstance(SessionData["AutoWbEnabled"], bool):
                         aux = SessionData["AwbPause"]
                     else:
                         aux = eval(SessionData["AwbPause"])
@@ -2967,14 +2986,15 @@ def load_session_data():
 
     # Update widget state whether or not config loaded (to honor app default values)
     if ExpertMode:
-        widget_list_enable(not AutoExpEnabled, [exposure_spinbox])
-        widget_list_enable(AutoExpEnabled, [auto_exposure_wait_btn,
+        init_widget_list_enable(not AutoExpEnabled, [exposure_spinbox])
+        init_widget_list_enable(AutoExpEnabled, [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown])
-        widget_list_enable(AutoWbEnabled, [auto_wb_wait_btn, AwbMode_label, AwbMode_dropdown])
-        widget_list_enable(not AutoPtLevelEnabled, [pt_level_spinbox])
-        widget_list_enable(not AutoFrameStepsEnabled, [steps_per_frame_spinbox])
+        init_widget_list_enable(not AutoWbEnabled, [wb_red_spinbox, wb_blue_spinbox])
+        init_widget_list_enable(AutoWbEnabled, [auto_wb_wait_btn, AwbMode_label, AwbMode_dropdown])
+        init_widget_list_enable(not AutoPtLevelEnabled, [pt_level_spinbox])
+        init_widget_list_enable(not AutoFrameStepsEnabled, [steps_per_frame_spinbox])
         if not AutoWbEnabled and not(SimulatedRun or CameraDisabled):
             camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
             camera.set_controls({"AwbEnable": False})
@@ -3210,18 +3230,8 @@ def tscann8_init():
     else:
         logging.info("Running on Raspberry Pi")
 
-    # Try to determine Video folder of user logged in
-    homefolder = os.environ['HOME']
-    if os.path.isdir(os.path.join(homefolder, 'Videos')):
-        BaseDir = os.path.join(homefolder, 'Videos')
-    elif os.path.isdir(os.path.join(homefolder, 'Vídeos')):
-        BaseDir = os.path.join(homefolder, 'Vídeos')
-    elif os.path.isdir(os.path.join(homefolder, 'Video')):
-        BaseDir = os.path.join(homefolder, 'Video')
-    else:
-        BaseDir = homefolder
-    CurrentDir = BaseDir
-    logging.debug("BaseDir=%s", BaseDir)
+    CurrentDir = BaseFolder
+    logging.debug("BaseFolder=%s", BaseFolder)
 
     if not SimulatedRun:
         i2c = smbus.SMBus(1)
@@ -3333,10 +3343,10 @@ def set_auto_exposure():
     if not SimulatedRun and not CameraDisabled:
         # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
         # Since we update values in the UI regularly, use those.
-        camera.set_controls({"AeEnable": True if aux == 0 else False})
+        camera.set_controls({"AeEnable": AutoExpEnabled})
         camera.set_controls({"ExposureTime": aux})
 
-    SessionData["CurrentExposure"] = aux
+    SessionData["AutoExpEnabled"] = AutoExpEnabled
 
 
 def auto_exposure_change_pause_selection():
@@ -4253,7 +4263,7 @@ def create_widgets():
         auto_exposure_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_exposure_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                                 command=auto_exposure_change_pause_selection)
-        init_widget_enable(auto_exposure_wait_btn, False)
+        init_widget_enable(auto_exposure_wait_btn, AutoExpEnabled)
         auto_exposure_wait_btn.widget_type = "control"
         auto_exposure_wait_btn.grid(row=exp_wb_row, column=2, sticky=W)
         as_tooltips.add(auto_exposure_wait_btn, "When automatic exposure enabled, select to wait for it to stabilize "
@@ -4287,7 +4297,7 @@ def create_widgets():
         auto_wb_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_white_balance_change_pause,
                                           onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                           command=auto_white_balance_change_pause_selection)
-        init_widget_enable(auto_wb_wait_btn, False)
+        init_widget_enable(auto_wb_wait_btn, AutoWbEnabled)
         auto_wb_wait_btn.widget_type = "control"
         auto_wb_wait_btn.grid(row=exp_wb_row, rowspan=2, column=2, sticky=W)
         as_tooltips.add(auto_wb_wait_btn, "When automatic white balance enabled, select to wait for it to stabilize "
@@ -4340,13 +4350,13 @@ def create_widgets():
         AeConstraintMode_dropdown_selected = tk.StringVar()
         AeConstraintMode_dropdown_selected.set("Normal")  # Set the initial value
         AeConstraintMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize - 1))
-        init_widget_enable(AeConstraintMode_label, False)
+        init_widget_enable(AeConstraintMode_label, AutoExpEnabled)
         AeConstraintMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeConstraintMode_dropdown = OptionMenu(exp_wb_frame, AeConstraintMode_dropdown_selected,
                                                *AeConstraintMode_dict.keys(), command=set_AeConstraintMode)
         AeConstraintMode_dropdown.widget_type = "control"
         AeConstraintMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
-        init_widget_enable(AeConstraintMode_dropdown, False)
+        init_widget_enable(AeConstraintMode_dropdown, AutoExpEnabled)
         AeConstraintMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeConstraintMode_dropdown, "Sets the constraint mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4356,13 +4366,13 @@ def create_widgets():
         AeMeteringMode_dropdown_selected = tk.StringVar()
         AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
         AeMeteringMode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1))
-        init_widget_enable(AeMeteringMode_label, False)
+        init_widget_enable(AeMeteringMode_label, AutoExpEnabled)
         AeMeteringMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeMeteringMode_dropdown = OptionMenu(exp_wb_frame, AeMeteringMode_dropdown_selected,
                                              *AeMeteringMode_dict.keys(), command=set_AeMeteringMode)
         AeMeteringMode_dropdown.widget_type = "control"
         AeMeteringMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
-        init_widget_enable(AeMeteringMode_dropdown, False)
+        init_widget_enable(AeMeteringMode_dropdown, AutoExpEnabled)
         AeMeteringMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeMeteringMode_dropdown, "Sets the metering mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4372,13 +4382,13 @@ def create_widgets():
         AeExposureMode_dropdown_selected = tk.StringVar()
         AeExposureMode_dropdown_selected.set("Normal")  # Set the initial value
         AeExposureMode_label = Label(exp_wb_frame, text='AE Exposure mode:', font=("Arial", FontSize - 1))
-        init_widget_enable(AeExposureMode_label, False)
+        init_widget_enable(AeExposureMode_label, AutoExpEnabled)
         AeExposureMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AeExposureMode_dropdown = OptionMenu(exp_wb_frame, AeExposureMode_dropdown_selected,
                                              *AeExposureMode_dict.keys(), command=set_AeExposureMode)
         AeExposureMode_dropdown.widget_type = "control"
         AeExposureMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
-        init_widget_enable(AeExposureMode_dropdown, False)
+        init_widget_enable(AeExposureMode_dropdown, AutoExpEnabled)
         AeExposureMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AeExposureMode_dropdown, "Sets the exposure mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4388,13 +4398,13 @@ def create_widgets():
         AwbMode_dropdown_selected = tk.StringVar()
         AwbMode_dropdown_selected.set("Normal")  # Set the initial value
         AwbMode_label = Label(exp_wb_frame, text='AWB mode:', font=("Arial", FontSize - 1))
-        init_widget_enable(AwbMode_label, False)
+        init_widget_enable(AwbMode_label, AutoWbEnabled)
         AwbMode_label.grid(row=exp_wb_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         AwbMode_dropdown = OptionMenu(exp_wb_frame, AwbMode_dropdown_selected,
                                       *AwbMode_dict.keys(), command=set_AwbMode)
         AwbMode_dropdown.widget_type = "control"
         AwbMode_dropdown.config(takefocus=1, font=("Arial", FontSize - 1))
-        init_widget_enable(AwbMode_dropdown, False)
+        init_widget_enable(AwbMode_dropdown, AutoWbEnabled)
         AwbMode_dropdown.grid(row=exp_wb_row, columnspan=2, column=1, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(AwbMode_dropdown, "Sets the AWB mode of the AEC/AGC algorithm.")
         exp_wb_row += 1
@@ -4662,7 +4672,7 @@ def create_widgets():
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, variable=hdr_viewx4_active,
                                                     onvalue=True, offvalue=False, command=switch_hdr_viewx4,
                                                     font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_viewx4_active_checkbox, False)
+        init_widget_enable(hdr_viewx4_active_checkbox, hdr_capture_active)
         hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, sticky=W)
         as_tooltips.add(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a "
                                                     "single frame (the one in the middle), all three frames will be "
@@ -4670,13 +4680,13 @@ def create_widgets():
         hdr_row += 1
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_min_exp_label, False)
+        init_widget_enable(hdr_min_exp_label, hdr_capture_active)
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
                                              from_=HDR_MIN_EXP, to=HDR_MAX_EXP, increment=1, font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_min_exp_spinbox, False)
+        init_widget_enable(hdr_min_exp_spinbox, hdr_capture_active)
         hdr_min_exp_spinbox.widget_type = "hdr"
         hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
@@ -4686,13 +4696,13 @@ def create_widgets():
         hdr_row += 1
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_max_exp_label, False)
+        init_widget_enable(hdr_max_exp_label, hdr_capture_active)
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=HdrMaxExp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8, from_=2, to=1000,
                                              readonlybackground='pale green', textvariable=hdr_max_exp_value,
                                              increment=1, font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_max_exp_spinbox, False)
+        init_widget_enable(hdr_max_exp_spinbox, hdr_capture_active)
         hdr_max_exp_spinbox.widget_type = "hdr"
         hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
@@ -4702,13 +4712,13 @@ def create_widgets():
         hdr_row += 1
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_bracket_width_label, False)
+        init_widget_enable(hdr_bracket_width_label, hdr_capture_active)
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_width_selection, width=8,
                                                    textvariable=hdr_bracket_width_value, from_=HDR_MIN_BRACKET,
                                                    to=HDR_MAX_BRACKET, increment=1, font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_bracket_width_spinbox, False)
+        init_widget_enable(hdr_bracket_width_spinbox, hdr_capture_active)
         hdr_bracket_width_spinbox.widget_type = "hdr"
         hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
@@ -4720,13 +4730,13 @@ def create_widgets():
         hdr_row += 1
 
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_bracket_shift_label, False)
+        init_widget_enable(hdr_bracket_shift_label, hdr_capture_active)
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_shift_value = tk.IntVar(value=HdrBracketShift)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_shift_selection, width=8,
                                                    textvariable=hdr_bracket_shift_value, from_=-100, to=100,
                                                    increment=10, font=("Arial", FontSize - 1))
-        init_widget_enable(hdr_bracket_shift_spinbox, False)
+        init_widget_enable(hdr_bracket_shift_spinbox, hdr_capture_active)
         hdr_bracket_shift_spinbox.widget_type = "hdr"
         hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
@@ -4805,18 +4815,18 @@ def create_widgets():
         manual_scan_advance_fraction_5_btn = Button(Manual_scan_btn_frame, text="+5", height=1,
                                                     command=manual_scan_advance_frame_fraction_5,
                                                     font=("Arial", FontSize - 1))
-        init_widget_enable(manual_scan_advance_fraction_5_btn, False)
+        init_widget_enable(manual_scan_advance_fraction_5_btn, Manual_scan_activated)
         manual_scan_advance_fraction_5_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
         manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", height=1,
                                                      command=manual_scan_advance_frame_fraction_20,
                                                      font=("Arial", FontSize - 1))
-        init_widget_enable(manual_scan_advance_fraction_20_btn, False)
+        init_widget_enable(manual_scan_advance_fraction_20_btn, Manual_scan_activated)
         manual_scan_advance_fraction_20_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
         manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", height=1, command=manual_scan_take_snap,
                                            font=("Arial", FontSize - 1))
-        init_widget_enable(manual_scan_take_snap_btn, False)
+        init_widget_enable(manual_scan_take_snap_btn, Manual_scan_activated)
         manual_scan_take_snap_btn.pack(side=RIGHT, fill=Y)
         as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance "
                                                    "to next frame.")
@@ -4864,12 +4874,12 @@ def create_widgets():
         experimental_row += 1
 
     if ExpertMode:
-        widget_list_enable(not AutoExpEnabled, [exposure_spinbox])
-        widget_list_enable(AutoExpEnabled, [auto_exposure_wait_btn,
+        init_widget_list_enable(not AutoExpEnabled, [exposure_spinbox])
+        init_widget_list_enable(AutoExpEnabled, [auto_exposure_wait_btn,
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown])
-        widget_list_enable(AutoWbEnabled, [AwbMode_label, AwbMode_dropdown])
+        init_widget_list_enable(AutoWbEnabled, [AwbMode_label, AwbMode_dropdown, auto_wb_wait_btn])
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
