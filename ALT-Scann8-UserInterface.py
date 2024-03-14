@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.29"
+__version__ = "1.10.30"
 __date__ = "2024-03-14"
-__version_highlight__ = "Correct adjustment oh HDR parameters in UI"
+__version_highlight__ = "Adjust font sizes (scanned frames, frames to go)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -4177,7 +4177,7 @@ def create_widgets():
 
     Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
     Scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str,
-                                        font=("Arial", FontSize + 6))
+                                        font=("Arial", FontSize + 3))
     Scanned_Images_number_label.pack(side=TOP)
     as_tooltips.add(Scanned_Images_number_label, "Number of film frames scanned so far.")
 
@@ -4185,13 +4185,13 @@ def create_widgets():
     scanned_images_fpm_frame.pack(side=TOP)
     Scanned_Images_time_str = tk.StringVar(value="Film time:")
     Scanned_Images_time_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_time_str,
-                                      font=("Arial", FontSize - 4))
+                                      font=("Arial", FontSize - 2))
     Scanned_Images_time_label.pack(side=BOTTOM)
     as_tooltips.add(Scanned_Images_time_label, "Film time in min:sec")
 
     Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Min:")
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str,
-                                     font=("Arial", FontSize - 4))
+                                     font=("Arial", FontSize - 2))
     scanned_images_fpm_label.pack(side=LEFT)
     as_tooltips.add(scanned_images_fpm_label, "Scan speed in frames per minute.")
 
@@ -4209,7 +4209,7 @@ def create_widgets():
     as_tooltips.add(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of "
                                         "remaining time to finish.")
     time_to_go_str = tk.StringVar(value='')
-    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize - 4))
+    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize - 2))
     time_to_go_time.pack(side=TOP)
 
     # Create frame to select S8/R8 film
@@ -4887,6 +4887,7 @@ def create_widgets():
         # Emergency exit (exit without saving)
         emergency_exit_btn = Button(experimental_miscellaneous_frame, text="Emergency Exit", command=app_emergency_exit,
                           activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1))
+        emergency_exit_btn.widget_type = "experimental"
         emergency_exit_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
         as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
         experimental_row += 1
