@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.30"
+__version__ = "1.10.31"
 __date__ = "2024-03-14"
-__version_highlight__ = "Adjust font sizes (scanned frames, frames to go)"
+__version_highlight__ = "Fix match wait checkboxes enabled/disabled"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1009,7 +1009,7 @@ def set_auto_wb():
         manual_wb_blue_value = wb_blue_value.get()
         auto_wb_red_btn.config(text="AWB Red:")
         auto_wb_blue_btn.config(text="AWB Blue:")
-        auto_wb_wait_btn.config(state=NORMAL)
+        ###auto_wb_wait_btn.config(state=NORMAL)
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AwbEnable": True})
     else:
@@ -1020,16 +1020,15 @@ def set_auto_wb():
         auto_wb_red_btn.config(text="WB Red:")
         auto_wb_blue_btn.config(text="WB Blue:")
         ###auto_wb_wait_btn.config(state=DISABLED)
-        disable_widget(auto_wb_wait_btn, True)
+        ###disable_widget(auto_wb_wait_btn, True)
         if not SimulatedRun and not CameraDisabled:
             # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
             # Since we update values in the UI regularly, use those.
             camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
             camera.set_controls({"AwbEnable": False})
             camera.set_controls({"ColourGains": camera_colour_gains})
-    adjust_widget_status(not AutoWbEnabled, [auto_wb_wait_btn])
     adjust_widget_status(AutoWbEnabled, [wb_red_spinbox, wb_blue_spinbox])
-    adjust_widget_status(not AutoWbEnabled, [AwbMode_label, AwbMode_dropdown])
+    adjust_widget_status(not AutoWbEnabled, [AwbMode_label, AwbMode_dropdown, auto_wb_wait_btn])
 
 
 def auto_white_balance_change_pause_selection():
@@ -2594,8 +2593,11 @@ def update_disabled_status(widget, disabled, init):
         counter = widget.disabled_counter
     else:
         counter = 0
-    if init and disabled:
-        counter = 1
+    if init:
+        if disabled:
+            counter = 1
+        else:
+            counter = 0
     elif disabled:
         counter += 1
     elif counter > 0:
@@ -2854,19 +2856,18 @@ def load_session_data():
             if ExpertMode:
                 if 'CurrentExposure' in SessionData:
                     aux = SessionData["CurrentExposure"]
+                    init_widget_disabled_status(auto_exposure_wait_btn, False)
                     if isinstance(aux, str) and (aux == "Auto" or aux == "0") or isinstance(aux, int) and aux == 0:
                         aux = 0
                         AutoExpEnabled = True
                         AE_enabled.set(AutoExpEnabled)
                         set_auto_exposure()
-                        auto_exposure_wait_btn.config(state=NORMAL)
+                        disable_widget(auto_exposure_wait_btn, False)
                     else:
                         if isinstance(aux, str):
                             aux = int(float(aux))
                         AutoExpEnabled = False
                         AE_enabled.set(AutoExpEnabled)
-                        ###auto_exposure_wait_btn.config(state=DISABLED)
-                        init_widget_disabled_status(auto_exposure_wait_btn, True)
                     if not SimulatedRun and not CameraDisabled:
                         camera.controls.ExposureTime = int(aux)
                         camera.set_controls({"AeEnable": AutoExpEnabled})
@@ -2877,21 +2878,20 @@ def load_session_data():
                     else:
                         aux = eval(SessionData["ExposureAdaptPause"])
                     auto_exposure_change_pause.set(aux)
-                    ###auto_exposure_wait_btn.config(state=NORMAL if exposure_value.get() == 0 else DISABLED)
-                    disable_widget(auto_exposure_wait_btn, exposure_value.get() != 0)
                 if 'CurrentAwbAuto' in SessionData:
                     if isinstance(SessionData["CurrentAwbAuto"], bool):
                         AutoWbEnabled = SessionData["CurrentAwbAuto"]
                     else:
                         AutoWbEnabled = eval(SessionData["CurrentAwbAuto"])
+                    init_widget_disabled_status(auto_wb_wait_btn, False)
                     AWB_enabled.set(AutoWbEnabled)
                     wb_blue_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
                     wb_red_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
                     ###auto_wb_wait_btn.config(state=NORMAL if AutoWbEnabled else DISABLED)
-                    init_widget_disabled_status(auto_wb_wait_btn, not AutoWbEnabled)
+                    if AutoWbEnabled:
+                        disable_widget(auto_wb_wait_btn, False)
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"AwbEnable": AutoWbEnabled})
-                    adjust_widget_status(not AutoWbEnabled, [auto_wb_wait_btn])
                     adjust_widget_status(AutoWbEnabled, [wb_red_spinbox, wb_blue_spinbox])
                 if 'AwbPause' in SessionData:
                     if isinstance(SessionData["CurrentAwbAuto"], bool):
@@ -3018,7 +3018,7 @@ def load_session_data():
                                                     AeConstraintMode_label, AeConstraintMode_dropdown,
                                                     AeMeteringMode_label, AeMeteringMode_dropdown,
                                                     AeExposureMode_label, AeExposureMode_dropdown])
-        adjust_widget_status(not AutoWbEnabled, [AwbMode_label, AwbMode_dropdown])
+        adjust_widget_status(not AutoWbEnabled, [auto_wb_wait_btn, AwbMode_label, AwbMode_dropdown])
         adjust_widget_status(AutoPtLevelEnabled, [pt_level_spinbox])
         adjust_widget_status(AutoFrameStepsEnabled, [steps_per_frame_spinbox])
         if not AutoWbEnabled and not(SimulatedRun or CameraDisabled):
@@ -3387,6 +3387,7 @@ def set_auto_exposure():
 
 def auto_exposure_change_pause_selection():
     SessionData["ExposureAdaptPause"] = auto_exposure_change_pause.get()
+
 
 
 def exposure_selection():
