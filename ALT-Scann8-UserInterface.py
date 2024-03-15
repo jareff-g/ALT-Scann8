@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.33"
-__date__ = "2024-03-14"
-__version_highlight__ = "Final fixes for widget enable/disable functions"
+__version__ = "1.10.35"
+__date__ = "2024-03-15"
+__version_highlight__ = "Display FPS instead of FPM + few fixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -817,7 +817,7 @@ def settings_popup():
     color_coded_buttons_btn = tk.Checkbutton(options_dlg, variable=color_coded_buttons, text="Color coded buttons",
                                              onvalue=True, offvalue=False, font=("Arial", FontSize - 1))
     color_coded_buttons_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(widgets_enabled_while_scanning_btn, "Use colors to highlight button status")
+    as_tooltips.add(color_coded_buttons_btn, "Use colors to highlight button status")
     options_row += 1
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
@@ -832,12 +832,13 @@ def settings_popup():
     ui_scrollbars_btn = tk.Checkbutton(options_dlg, variable=ui_scrollbars, onvalue=True, offvalue=False,
                                        font=("Arial", FontSize - 1), text="Display scrollbars")
     ui_scrollbars_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions")
+    as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions)")
     options_row += 1
 
     # Font Size
     font_size_label = tk.Label(options_dlg, text="Main UI font size", font=("Arial", FontSize-1))
     font_size_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
+    as_tooltips.add(font_size_label, "Base font size used in main window")
     font_size_int = tk.IntVar(value=12)
     font_size_int.set(FontSize)
     font_size_spinbox = DynamicSpinbox(options_dlg, command=exposure_selection, width=2, from_=6, to=20,
@@ -856,7 +857,7 @@ def settings_popup():
     resolution_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     resolution_dropdown_selected.set(CaptureResolution)
     resolution_dropdown.grid(row=options_row, column=1, sticky="W")
-    as_tooltips.add(resolution_dropdown, "Select the resolution to use when capturing the frames. Modes flagged with "
+    as_tooltips.add(resolution_label, "Select the resolution to use when capturing the frames. Modes flagged with "
                                          "* are cropped, requiring lens adjustment")
     options_row += 1
 
@@ -874,7 +875,7 @@ def settings_popup():
     file_type_dropdown_selected.set(FileType)  # Set the initial value
     file_type_dropdown.grid(row=options_row, column=1, sticky="W")
     # file_type_dropdown.config(state=DISABLED)
-    as_tooltips.add(file_type_dropdown, "Select format to safe film frames (JPG or PNG)")
+    as_tooltips.add(file_type_label, "Select format to safe film frames (JPG or PNG)")
 
     options_row += 1
 
@@ -884,7 +885,7 @@ def settings_popup():
     base_folder_btn = Button(options_dlg, text='Select', command=set_base_folder,
                                  activebackground='#f0f0f0', font=("Arial", FontSize-2))
     base_folder_btn.grid(row=options_row, column=1, sticky="W")
-    as_tooltips.add(base_folder_btn, "Select existing folder as base folder for ALT-Scann8.")
+    as_tooltips.add(base_folder_label, "Select existing folder as base folder for ALT-Scann8.")
 
     options_row += 1
 
@@ -897,7 +898,7 @@ def settings_popup():
     debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
     debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
-    as_tooltips.add(debug_level_dropdown, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
+    as_tooltips.add(debug_level_label, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
 
     options_row += 1
 
@@ -1506,9 +1507,7 @@ def switch_hdr_capture():
         widget_list_enable(not HdrBracketAuto, [hdr_min_exp_spinbox, hdr_max_exp_spinbox])
     else:  # If disabling HDR, need to set standard exposure as set in UI
         max_inactivity_delay = int(max_inactivity_delay / 2)
-        if AutoExpEnabled:  # Automatic mode
-            CurrentExposure = 0
-        else:
+        if not AutoExpEnabled:  # Automatic mode
             if not SimulatedRun and not CameraDisabled:
                 # Since we are in auto exposure mode, retrieve current value to start from there
                 metadata = camera.capture_metadata()
@@ -1517,6 +1516,7 @@ def switch_hdr_capture():
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AeEnable": True if CurrentExposure == 0 else False})
+            camera.set_controls({"AeEnable": AutoExpEnabled})
         SessionData["CurrentExposure"] = CurrentExposure
         exposure_value.set(CurrentExposure)
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
@@ -1632,7 +1632,7 @@ def register_frame():
     # Get current time
     frame_time = time.time()
     # Determine if we should start new count (last capture older than 5 seconds)
-    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 30:
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 5:
         FPM_StartTime = frame_time
         FPM_LastMinuteFrameTimes.clear()
         FPM_CalculatedValue = -1
@@ -2140,10 +2140,10 @@ def capture_loop_simulated():
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
         if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
             aux_str = ''.join([char * int(min(5, scan_period_frames)) for char in '.'])
-            Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
+            Scanned_Images_Fpm_str.set(f"Frames/Sec: {aux_str}")
         else:
             FramesPerMinute = FPM_CalculatedValue
-            Scanned_Images_Fpm_str.set(f"Frames/Min: {FramesPerMinute}")
+            Scanned_Images_Fpm_str.set(f"Frames/Sec: {FPM_CalculatedValue / 60:.2f}")
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(100, capture_loop_simulated)
@@ -2335,10 +2335,10 @@ def capture_loop():
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
                 aux_str = ''.join([char * int(min(5, scan_period_frames)) for char in '.'])
-                Scanned_Images_Fpm_str.set(f"Frames/Min: {aux_str}")
+                Scanned_Images_Fpm_str.set(f"Frames/Sec: {aux_str}")
             else:
                 FramesPerMinute = FPM_CalculatedValue
-                Scanned_Images_Fpm_str.set(f"Frames/Min: {FPM_CalculatedValue}")
+                Scanned_Images_Fpm_str.set(f"Frames/Sec: {FPM_CalculatedValue/60:.2f}")
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
                 if ScanOngoing:
@@ -2676,7 +2676,7 @@ def load_persisted_data_from_disk():
 
 
 def load_config_data():
-    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit
 
     for item in SessionData:
@@ -2707,6 +2707,8 @@ def load_config_data():
                 TempInFahrenheit = SessionData["TempInFahrenheit"]
             else:
                 TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
+        if 'BaseFolder' in SessionData:
+            BaseFolder = SessionData["BaseFolder"]
 
 
 def load_session_data():
@@ -4117,7 +4119,7 @@ def create_widgets():
     folder_frame.bind("<Configure>", update_target_dir_wraplength)
 
     folder_frame_target_dir = Label(folder_frame, text=CurrentDir, wraplength=150, height=3,
-                                    font=("Arial", FontSize - 3))
+                                    font=("Arial", FontSize - 2))
     folder_frame_target_dir.pack(side=TOP)
 
     folder_frame_buttons = Frame(folder_frame, bd=2)
@@ -4153,7 +4155,7 @@ def create_widgets():
     Scanned_Images_time_label.pack(side=BOTTOM)
     as_tooltips.add(Scanned_Images_time_label, "Film time in min:sec")
 
-    Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Min:")
+    Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Sec:")
     scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str,
                                      font=("Arial", FontSize - 2))
     scanned_images_fpm_label.pack(side=LEFT)
@@ -4413,7 +4415,6 @@ def create_widgets():
         # Frame to add brightness/contrast controls
         brightness_frame = LabelFrame(expert_frame, text="Brightness/Contrast", font=("Arial", FontSize - 1))
         brightness_frame.grid(row=0, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
-        brightness_row = 0
         brightness_row = 0
 
         # brightness
@@ -4681,6 +4682,7 @@ def create_widgets():
 
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1))
         init_widget_enable(hdr_min_exp_label, hdr_capture_active)
+        hdr_min_exp_label.widget_type = "hdr"
         hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_min_exp_selection, width=8,
@@ -4697,6 +4699,7 @@ def create_widgets():
 
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1))
         init_widget_enable(hdr_max_exp_label, hdr_capture_active)
+        hdr_max_exp_label.widget_type = "hdr"
         hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=HdrMaxExp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=hdr_max_exp_selection, width=8, from_=2, to=1000,
@@ -4713,6 +4716,7 @@ def create_widgets():
 
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1))
         init_widget_enable(hdr_bracket_width_label, hdr_capture_active)
+        hdr_bracket_width_label.widget_type = "hdr"
         hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_width_selection, width=8,
@@ -4731,6 +4735,7 @@ def create_widgets():
 
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1))
         init_widget_enable(hdr_bracket_shift_label, hdr_capture_active)
+        hdr_bracket_shift_label.widget_type = "hdr"
         hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_shift_value = tk.IntVar(value=HdrBracketShift)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=hdr_bracket_shift_selection, width=8,
@@ -4816,17 +4821,20 @@ def create_widgets():
                                                     command=manual_scan_advance_frame_fraction_5,
                                                     font=("Arial", FontSize - 1))
         init_widget_enable(manual_scan_advance_fraction_5_btn, Manual_scan_activated)
+        manual_scan_advance_fraction_5_btn.widget_type = "experimental"
         manual_scan_advance_fraction_5_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_5_btn, "Advance film by 5 motor steps.")
         manual_scan_advance_fraction_20_btn = Button(Manual_scan_btn_frame, text="+20", height=1,
                                                      command=manual_scan_advance_frame_fraction_20,
                                                      font=("Arial", FontSize - 1))
         init_widget_enable(manual_scan_advance_fraction_20_btn, Manual_scan_activated)
+        manual_scan_advance_fraction_20_btn.widget_type = "experimental"
         manual_scan_advance_fraction_20_btn.pack(side=LEFT, fill=Y)
         as_tooltips.add(manual_scan_advance_fraction_20_btn, "Advance film by 20 motor steps.")
         manual_scan_take_snap_btn = Button(Manual_scan_btn_frame, text="Snap", height=1, command=manual_scan_take_snap,
                                            font=("Arial", FontSize - 1))
         init_widget_enable(manual_scan_take_snap_btn, Manual_scan_activated)
+        manual_scan_take_snap_btn.widget_type = "experimental"
         manual_scan_take_snap_btn.pack(side=RIGHT, fill=Y)
         as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance "
                                                    "to next frame.")
@@ -4969,7 +4977,7 @@ def main(argv):
             print("  -d             Disable camera (for development purposes)")
             print("  -n             Disable Tooltips")
             print("  -t             Disable multi-threading")
-            print("  -f             Set default font size for UI (11 by default)")
+            print("  -f <size>      Set user interface font size (11 by default)")
             print("  -b             Add scrollbars to UI (in case it does not fit)")
             print("  -w             Keep control widgets enabled while scanning")
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
