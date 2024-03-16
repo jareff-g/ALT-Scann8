@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.39"
+__version__ = "1.10.40"
 __date__ = "2024-03-16"
 __version_highlight__ = "Final fixes to global enable/disable widget functions"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -526,11 +526,12 @@ def set_free_mode():
 
 def set_auto_stop_enabled():
     global AutoStopEnabled
-    AutoStopEnabled = auto_stop_enabled.get()
+    if AutoStopEnabled != auto_stop_enabled.get():
+        AutoStopEnabled = auto_stop_enabled.get()
+        widget_list_enable([id_AutoStopEnabled])
     if not SimulatedRun:
         send_arduino_command(CMD_SET_AUTO_STOP, AutoStopEnabled and autostop_type.get() == 'No_film')
         logging.debug(f"Sent Auto Stop to Arduino: {AutoStopEnabled and autostop_type.get() == 'No_film'}")
-    widget_list_enable([id_AutoStopEnabled])
     logging.debug(f"Set Auto Stop: {AutoStopEnabled}, {autostop_type.get()}")
 
 
@@ -3786,7 +3787,7 @@ def create_widgets():
     global plotter_width, plotter_height
     global app_width, app_height
     global options_btn
-    global match_wait_margin_label, match_wait_margin_spinbox
+    global match_wait_margin_spinbox
 
     # Global value for separations between widgets
     y_pad = 2
@@ -4222,17 +4223,13 @@ def create_widgets():
         auto_exp_wb_change_pause = tk.BooleanVar(value=ExposureWbAdaptPause)  # Default value, to be overriden by configuration
         auto_exp_wb_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_exp_wb_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
-                                                command=auto_exp_wb_change_pause_selection)
+                                                text='Match margin (%):', command=auto_exp_wb_change_pause_selection)
         widget_enable(auto_exp_wb_wait_btn, True)
         widget_enable(auto_exp_wb_wait_btn, AutoExpEnabled and AutoWbEnabled)
         auto_exp_wb_wait_btn.widget_type = "control"
-        auto_exp_wb_wait_btn.grid(row=exp_wb_row, column=0, sticky=W)
+        auto_exp_wb_wait_btn.grid(row=exp_wb_row, column=0, columnspan=2, sticky=W)
         as_tooltips.add(auto_exp_wb_wait_btn, "When automatic exposure/WB enabled, select this checkbox to wait for "
                                               "them to stabilize before capturing frame.")
-
-        match_wait_margin_label = tk.Label(exp_wb_frame, text='Match margin (%):', font=("Arial", FontSize - 1))
-        match_wait_margin_label.widget_type = "control"
-        match_wait_margin_label.grid(row=exp_wb_row, column=1, padx=x_pad, pady=y_pad, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=MatchWaitMarginValue)  # Default value, overriden by configuration
         match_wait_margin_spinbox = DynamicSpinbox(exp_wb_frame, command=match_wait_margin_selection, width=4,
