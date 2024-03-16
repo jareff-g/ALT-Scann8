@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.38"
+__version__ = "1.10.39"
 __date__ = "2024-03-16"
 __version_highlight__ = "Final fixes to global enable/disable widget functions"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -2594,7 +2594,7 @@ def widget_list_enable(category_list):
                                 [pt_level_spinbox]],
         id_AutoFrameStepsEnabled: [[],
                                    [steps_per_frame_spinbox]],
-        id_ExposureWbAdaptPause: [[match_wait_margin_label, match_wait_margin_spinbox],
+        id_ExposureWbAdaptPause: [[match_wait_margin_spinbox],
                                   []]
     }
 
@@ -2876,6 +2876,15 @@ def load_session_data():
                     widget_list_enable([id_AutoWbEnabled])
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"AwbEnable": AutoWbEnabled})
+                # Set initial value of auto_exp_wb_wait_btn, as it depends of two variables
+                if not AutoExpEnabled and not AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = 1
+                elif AutoExpEnabled != AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = 0
+                elif AutoExpEnabled and AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = -1
+                widget_enable(auto_exp_wb_wait_btn, True)
+                widget_enable(auto_exp_wb_wait_btn, False)
                 if 'GainRed' in SessionData:
                     aux = float(SessionData["GainRed"])
                     wb_red_value.set(round(aux, 1))
