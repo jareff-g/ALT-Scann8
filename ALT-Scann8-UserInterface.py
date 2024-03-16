@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.37"
+__version__ = "1.10.38"
 __date__ = "2024-03-16"
 __version_highlight__ = "Final fixes to global enable/disable widget functions"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -256,6 +256,7 @@ FrameFineTuneValue = 50
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
+ExposureWbAdaptPause = False
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
 # Finally set to 4-104
 HdrMinExp = 8
@@ -275,6 +276,7 @@ id_AutoExpEnabled = 7
 id_ManualScanEnabled = 8
 id_AutoPtLevelEnabled = 9
 id_AutoFrameStepsEnabled = 10
+id_ExposureWbAdaptPause = 11
 
 plotter_canvas = None
 plotter_width = 20
@@ -1870,13 +1872,13 @@ def capture(mode):
     # Wait for auto exposure to adapt only if allowed (and if not using HDR)
     # If AE disabled, only enter as per preview_module to refresh values
     if AutoExpEnabled and not HdrCaptureActive and (
-            auto_exp_wb_change_pause.get() or CurrentFrame % PreviewModuleValue == 0):
+            ExposureWbAdaptPause or CurrentFrame % PreviewModuleValue == 0):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
             metadata = camera.capture_metadata()
             aux_current_exposure = metadata["ExposureTime"]
-            if auto_exp_wb_change_pause.get():
+            if ExposureWbAdaptPause:
                 # With PiCamera2, exposure was changing too often, so level changed from 1000 to 2000, then to 4000
                 # Finally changed to allow a percentage of the value used previously
                 # As we initialize this percentage to 50%, we start with double the original value
@@ -1905,7 +1907,7 @@ def capture(mode):
 
     # Wait for auto white balance to adapt only if allowed
     # If AWB disabled, only enter as per preview_module to refresh values
-    if AutoWbEnabled and (auto_exp_wb_change_pause.get() or CurrentFrame % PreviewModuleValue == 0):
+    if AutoWbEnabled and (ExposureWbAdaptPause or CurrentFrame % PreviewModuleValue == 0):
         curtime = time.time()
         wait_loop_count = 0
         while True:  # In case of exposure change, give time for the camera to adapt
@@ -1913,7 +1915,7 @@ def capture(mode):
             camera_colour_gains = metadata["ColourGains"]
             aux_gain_red = camera_colour_gains[0]
             aux_gain_blue = camera_colour_gains[1]
-            if auto_exp_wb_change_pause.get():
+            if ExposureWbAdaptPause:
                 # Same as for exposure, difference allowed is a percentage of the maximum value
                 if abs(aux_gain_red - PreviousGainRed) >= (MatchWaitMarginValue * Tolerance_AWB / 100) or \
                         abs(aux_gain_blue - PreviousGainBlue) >= (MatchWaitMarginValue * Tolerance_AWB / 100):
@@ -2544,15 +2546,15 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
 
 # Updates widget disabled counter (to have a consistent state when disabled from various sources)
-def widget_enable(widget, enabled):
+def widget_enable(widget, enabled, inc=1):
     if hasattr(widget, "disabled_counter"):
         counter = widget.disabled_counter
     else:
         counter = 1 if enabled else 0     # If attribute dos not exist, initialize to 1 or 0
     if enabled:
-        counter -= 1
+        counter -= inc
     else:
-        counter += 1
+        counter += inc
     widget.config(state=DISABLED if counter > 0 else NORMAL)
     widget.disabled_counter = counter
     print(f"Widget {widget.winfo_name()}, {counter}")
@@ -2591,7 +2593,9 @@ def widget_list_enable(category_list):
         id_AutoPtLevelEnabled: [[],
                                 [pt_level_spinbox]],
         id_AutoFrameStepsEnabled: [[],
-                                   [steps_per_frame_spinbox]]
+                                   [steps_per_frame_spinbox]],
+        id_ExposureWbAdaptPause: [[match_wait_margin_label, match_wait_margin_spinbox],
+                                  []]
     }
 
     for category in category_list:
@@ -2615,6 +2619,8 @@ def widget_list_enable(category_list):
             state = AutoPtLevelEnabled
         elif category == id_AutoFrameStepsEnabled:
             state = AutoFrameStepsEnabled
+        elif category == id_ExposureWbAdaptPause:
+            state = ExposureWbAdaptPause
         items = dependent_widget_dict[category]
         for widget in items[0]:
             widget_enable(widget, state)
@@ -2650,13 +2656,13 @@ def except_widget_global_enable_aux(except_button, enabled, widget):
         elif hasattr(widget, "widget_type"):
             if widget.widget_type == "control" and not WidgetsEnabledWhileScanning:
                 if except_button != widget:
-                    widget_enable(widget, enabled)
+                    widget_enable(widget, enabled, 5)
             elif widget.widget_type == "hdr" and not WidgetsEnabledWhileScanning and hdr_capture_active:
                 if except_button != widget:
-                    widget_enable(widget, enabled)
+                    widget_enable(widget, enabled, 5)
             elif widget.widget_type == "general" or widget.widget_type == "experimental":
                 if except_button != widget:
-                    widget_enable(widget, enabled)
+                    widget_enable(widget, enabled, 5)
 
 def load_persisted_data_from_disk():
     global SessionData
@@ -2724,7 +2730,7 @@ def load_session_data():
     global StepsPerFrame, PtLevelValue, FrameFineTuneValue, FrameExtraStepsValue, ScanSpeedValue
     global StabilizationDelayValue
     global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift
-
+    global ExposureWbAdaptPause
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2848,9 +2854,9 @@ def load_session_data():
                         camera.set_controls({"AeEnable": AutoExpEnabled})
                     exposure_value.set(aux / 1000)
                 if 'ExposureWbAdaptPause' in SessionData:
-                    aux = SessionData["ExposureWbAdaptPause"]
-                    auto_exp_wb_change_pause.set(aux)
-                    if aux:
+                    ExposureWbAdaptPause = SessionData["ExposureWbAdaptPause"]
+                    auto_exp_wb_change_pause.set(ExposureWbAdaptPause)
+                    if ExposureWbAdaptPause:
                         auto_exp_wb_wait_btn.select()
                     else:
                         auto_exp_wb_wait_btn.deselect()
@@ -3327,7 +3333,10 @@ def set_auto_exposure():
 
 
 def auto_exp_wb_change_pause_selection():
-    SessionData["ExposureWbAdaptPause"] = auto_exp_wb_change_pause.get()
+    global ExposureWbAdaptPause
+    ExposureWbAdaptPause = auto_exp_wb_change_pause.get()
+    SessionData["ExposureWbAdaptPause"] = ExposureWbAdaptPause
+    widget_list_enable([id_ExposureWbAdaptPause])
 
 
 def exposure_selection():
@@ -3768,6 +3777,7 @@ def create_widgets():
     global plotter_width, plotter_height
     global app_width, app_height
     global options_btn
+    global match_wait_margin_label, match_wait_margin_spinbox
 
     # Global value for separations between widgets
     y_pad = 2
@@ -4200,7 +4210,7 @@ def create_widgets():
         exp_wb_row = 0
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
-        auto_exp_wb_change_pause = tk.BooleanVar(value=True)  # Default value, to be overriden by configuration
+        auto_exp_wb_change_pause = tk.BooleanVar(value=ExposureWbAdaptPause)  # Default value, to be overriden by configuration
         auto_exp_wb_wait_btn = tk.Checkbutton(exp_wb_frame, variable=auto_exp_wb_change_pause,
                                                 onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                                 command=auto_exp_wb_change_pause_selection)
@@ -4212,6 +4222,7 @@ def create_widgets():
                                               "them to stabilize before capturing frame.")
 
         match_wait_margin_label = tk.Label(exp_wb_frame, text='Match margin (%):', font=("Arial", FontSize - 1))
+        match_wait_margin_label.widget_type = "control"
         match_wait_margin_label.grid(row=exp_wb_row, column=1, padx=x_pad, pady=y_pad, sticky=E)
 
         match_wait_margin_value = tk.IntVar(value=MatchWaitMarginValue)  # Default value, overriden by configuration
@@ -4258,6 +4269,7 @@ def create_widgets():
         AeConstraintMode_dropdown_selected.set("Normal")  # Set the initial value
         AeConstraintMode_label = Label(exp_wb_frame, text='AE Const. mode:', font=("Arial", FontSize - 1))
         widget_enable(AeConstraintMode_label, AutoExpEnabled)
+        AeConstraintMode_label.widget_type = "control"
         AeConstraintMode_label.grid(row=exp_wb_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         AeConstraintMode_dropdown = OptionMenu(exp_wb_frame, AeConstraintMode_dropdown_selected,
                                                *AeConstraintMode_dict.keys(), command=set_AeConstraintMode)
@@ -4274,6 +4286,7 @@ def create_widgets():
         AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
         AeMeteringMode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1))
         widget_enable(AeMeteringMode_label, AutoExpEnabled)
+        AeMeteringMode_label.widget_type = "control"
         AeMeteringMode_label.grid(row=exp_wb_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         AeMeteringMode_dropdown = OptionMenu(exp_wb_frame, AeMeteringMode_dropdown_selected,
                                              *AeMeteringMode_dict.keys(), command=set_AeMeteringMode)
@@ -4290,6 +4303,7 @@ def create_widgets():
         AeExposureMode_dropdown_selected.set("Normal")  # Set the initial value
         AeExposureMode_label = Label(exp_wb_frame, text='AE Exposure mode:', font=("Arial", FontSize - 1))
         widget_enable(AeExposureMode_label, AutoExpEnabled)
+        AeExposureMode_label.widget_type = "control"
         AeExposureMode_label.grid(row=exp_wb_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         AeExposureMode_dropdown = OptionMenu(exp_wb_frame, AeExposureMode_dropdown_selected,
                                              *AeExposureMode_dict.keys(), command=set_AeExposureMode)
@@ -4355,6 +4369,7 @@ def create_widgets():
         AwbMode_dropdown_selected.set("Normal")  # Set the initial value
         AwbMode_label = Label(exp_wb_frame, text='AWB mode:', font=("Arial", FontSize - 1))
         widget_enable(AwbMode_label, AutoWbEnabled)
+        AwbMode_label.widget_type = "control"
         AwbMode_label.grid(row=exp_wb_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         AwbMode_dropdown = OptionMenu(exp_wb_frame, AwbMode_dropdown_selected,
                                       *AwbMode_dict.keys(), command=set_AwbMode)
