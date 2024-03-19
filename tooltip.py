@@ -116,3 +116,7 @@ class Tooltips():
     def disable(self):
         Tooltips.DisableTooltips = True
 
+
+    def enable(self):
+        Tooltips.DisableTooltips = False
+

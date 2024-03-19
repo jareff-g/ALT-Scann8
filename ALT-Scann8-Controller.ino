@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.11"
-#define  __date__       "2024-02-14"
-#define  __version_highlight__  "Fix - Automatic frame steps broken"
+#define __version__     "1.0.20"
+#define  __date__       "2024-03-19"
+#define  __version_highlight__  "Fix - Film in film gate function was broket while implementing neutral default"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -854,6 +854,7 @@ boolean FilmInFilmgate() {
     UVLedOn = true;
     delay(200);  // Give time to FT to stabilize
 
+    SetReelsAsNeutral(HIGH, LOW, HIGH);   // Lock reel B
 
     // MinFrameSteps used here as a reference, just to skip two frames in worst case
     // Anyhow this funcion is used only for protection in rewind/ff, no film expected to be in filmgate
@@ -865,10 +866,12 @@ boolean FilmInFilmgate() {
         if (SignalLevel < mini) mini = SignalLevel;
     }
     digitalWrite(MotorB_Stepper, LOW);
+    SetReelsAsNeutral(HIGH, HIGH, HIGH);   // Return Reel B to neutral
+
     analogWrite(11, 0); // Turn off UV LED
     UVLedOn = false;
 
-    if (abs(maxi-mini) > 0.5*(MaxPT-MinPT))
+    if (abs(maxi-mini) > 0.33*(MaxPT-MinPT))   
         retvalue = true;
 
     return(retvalue);
