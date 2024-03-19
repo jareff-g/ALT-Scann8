@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.43"
-__date__ = "2024-03-18"
-__version_highlight__ = "Give meaningful names to all widgets/frames"
+__version__ = "1.10.44"
+__date__ = "2024-03-19"
+__version_highlight__ = "Fix Rwnd/FF protection + other fixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -287,6 +287,7 @@ MaxPT = 100
 MinPT = 800
 Tolerance_AE = 8000
 Tolerance_AWB = 1
+manual_exposure_value = 50
 manual_wb_red_value = 2.2
 manual_wb_blue_value = 2.2
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
@@ -754,9 +755,12 @@ def cmd_settings_popup_accept():
 
     if refresh_ui:
         create_main_window()
-        widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_RealTimeDisplay, id_RealTimeZoom, id_AutoStopEnabled,
-                            id_AutoWbEnabled, id_AutoExpEnabled, id_ManualScanEnabled, id_AutoPtLevelEnabled,
-                            id_AutoFrameStepsEnabled, id_ExposureWbAdaptPause])
+        widget_list_enable([id_RealTimeDisplay, id_RealTimeZoom, id_AutoStopEnabled])
+        if ExpertMode:
+            widget_list_enable([id_AutoWbEnabled, id_AutoExpEnabled, id_AutoPtLevelEnabled, id_AutoFrameStepsEnabled,
+                                id_ExposureWbAdaptPause])
+        if ExperimentalMode:
+            widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -1025,26 +1029,26 @@ def cmd_set_auto_wb():
     AutoWbEnabled = AWB_enabled.get()
     SessionData["AutoWbEnabled"] = AutoWbEnabled
     widget_list_enable([id_AutoWbEnabled])
+    wb_blue_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
+    wb_red_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
 
     if AutoWbEnabled:
         manual_wb_red_value = wb_red_value.get()
         manual_wb_blue_value = wb_blue_value.get()
         auto_wb_red_btn.config(text="AWB Red:")
         auto_wb_blue_btn.config(text="AWB Blue:")
-        if not SimulatedRun and not CameraDisabled:
-            camera.set_controls({"AwbEnable": True})
     else:
-        SessionData["GainRed"] = wb_red_value.get()
-        SessionData["GainBlue"] = wb_blue_value.get()
+        SessionData["GainRed"] = manual_wb_red_value
+        SessionData["GainBlue"] = manual_wb_blue_value
         wb_red_value.set(manual_wb_red_value)
         wb_blue_value.set(manual_wb_blue_value)
         auto_wb_red_btn.config(text="WB Red:")
         auto_wb_blue_btn.config(text="WB Blue:")
-        if not SimulatedRun and not CameraDisabled:
-            # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
-            # Since we update values in the UI regularly, use those.
+
+    if not SimulatedRun and not CameraDisabled:
+        camera.set_controls({"AwbEnable": AutoWbEnabled})
+        if not AutoWbEnabled:
             camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
-            camera.set_controls({"AwbEnable": False})
             camera.set_controls({"ColourGains": camera_colour_gains})
 
 
@@ -1166,10 +1170,10 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        Rewind_btn.config(text='Stop\n<<', bg='red', fg='white',
+        rewind_btn.config(text='Stop\n<<', bg='red', fg='white',
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
-        except_widget_global_enable(Rewind_btn, not RewindMovieActive)
+        except_widget_global_enable(rewind_btn, not RewindMovieActive)
         # Invoke rewind_loop to continue processing until error or end event
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
@@ -1188,10 +1192,10 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        Rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
+        rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
-        except_widget_global_enable(Rewind_btn, not RewindMovieActive)
+        except_widget_global_enable(rewind_btn, not RewindMovieActive)
 
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
@@ -1487,7 +1491,6 @@ def cmd_switch_hdr_capture():
                 # Since we are in auto exposure mode, retrieve current value to start from there
                 metadata = camera.capture_metadata()
                 CurrentExposure = metadata["ExposureTime"]
-                camera.set_controls({"AeEnable": True if CurrentExposure == 0 else False})
                 camera.set_controls({"AeEnable": AutoExpEnabled})
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
@@ -1663,7 +1666,7 @@ def adjust_hdr_bracket():
         # Since we are in auto exposure mode, retrieve current value to start from there
         metadata = camera.capture_metadata()
         aux_current_exposure = int(metadata["ExposureTime"] / 1000)
-        camera.set_controls({"AeEnable": False})
+        camera.set_controls({"AeEnable": AutoExpEnabled})
 
     # Adjust only if auto exposure changes
     if aux_current_exposure != PreviousCurrentExposure or force_adjust_hdr_bracket:
@@ -2196,7 +2199,9 @@ def start_scan():
         session_frames = 0
 
         # Send command to Arduino to start scan (as applicable, Arduino keeps its own status)
-        if not SimulatedRun:
+        if not SimulatedRun and not CameraDisabled:
+            camera.set_controls({"AeEnable": AutoExpEnabled})
+            camera.set_controls({"AwbEnable": AutoWbEnabled})
             send_arduino_command(CMD_START_SCAN)
 
         # Invoke capture_loop a first time when scan starts
@@ -2566,9 +2571,11 @@ def widget_update(cmd, widget, enabled, inc):
         if hasattr(widget, "disabled_counter"):
             counter = widget.disabled_counter
             widget.config(state=DISABLED if counter > 0 else NORMAL)
+    """ # Debug enable/disable widgets
     print(f"Widget {cmd}, {enabled}, {widget.winfo_name()}")
     if hasattr(widget, "disabled_counter"):
         print(f"   *** counter {counter}")
+    """
 
 
 # Updates widget disabled counter (to have a consistent state when disabled from various sources)
@@ -2584,7 +2591,6 @@ def widget_refresh(widget):
 # Enable/diable/refresh widgets in predefined list of dependent widgets
 def widget_list_update(cmd, category_list):
     global dependent_widget_dict
-    print(f"***************** widget list update {cmd} {category_list} *********************")
 
     # Dependent widget lists (in a dictionary)
     # Key is an id of the boolean var used to determine widget status
@@ -2592,35 +2598,41 @@ def widget_list_update(cmd, category_list):
     # First list contains the widgets to enable when boolean key is true
     # Second list contains the widgets to enable when boolean key is false
     dependent_widget_dict = {
-        id_HdrCaptureActive: [[hdr_viewx4_active_checkbox, hdr_min_exp_label, hdr_min_exp_spinbox, hdr_max_exp_label,
-                               hdr_max_exp_spinbox, hdr_bracket_width_label, hdr_bracket_width_spinbox,
-                               hdr_bracket_shift_label, hdr_bracket_shift_spinbox, hdr_bracket_width_auto_checkbox,
-                               hdr_merge_in_place_checkbox],
-                              []],
-        id_HdrBracketAuto: [[],
-                            [hdr_max_exp_spinbox, hdr_min_exp_spinbox, hdr_max_exp_label, hdr_min_exp_label]],
         id_RealTimeDisplay: [[real_time_zoom_checkbox],
                              []],
         id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
                           []],
         id_AutoStopEnabled: [[autostop_no_film_rb, autostop_counter_zero_rb],
                              []],
-        id_AutoWbEnabled: [[awb_mode_label,AwbMode_dropdown,auto_exp_wb_wait_btn],
-                           [wb_red_spinbox,wb_blue_spinbox]],
-        id_AutoExpEnabled: [[ae_constraint_mode_label, AeConstraintMode_dropdown, ae_metering_mode_label,
-                             AeMeteringMode_dropdown, ae_exposure_mode_label, AeExposureMode_dropdown,
-                             auto_exp_wb_wait_btn],
-                            [exposure_spinbox]],
-        id_ManualScanEnabled: [[manual_scan_advance_fraction_5_btn, manual_scan_advance_fraction_20_btn,
-                                manual_scan_take_snap_btn],
-                               []],
-        id_AutoPtLevelEnabled: [[],
-                                [pt_level_spinbox]],
-        id_AutoFrameStepsEnabled: [[],
-                                   [steps_per_frame_spinbox]],
-        id_ExposureWbAdaptPause: [[match_wait_margin_spinbox],
-                                  []]
     }
+    if ExpertMode:
+        dependent_widget_dict[id_AutoExpEnabled] = [[ae_constraint_mode_label, AeConstraintMode_dropdown,
+                                                     ae_metering_mode_label, AeMeteringMode_dropdown,
+                                                     ae_exposure_mode_label, AeExposureMode_dropdown,
+                                                     auto_exp_wb_wait_btn],
+                                                    [exposure_spinbox]]
+        dependent_widget_dict[id_AutoWbEnabled] = [[awb_mode_label,AwbMode_dropdown,auto_exp_wb_wait_btn],
+                                                   [wb_red_spinbox,wb_blue_spinbox]]
+        dependent_widget_dict[id_AutoPtLevelEnabled] = [[],
+                                                        [pt_level_spinbox]]
+        dependent_widget_dict[id_AutoFrameStepsEnabled] = [[],
+                                                           [steps_per_frame_spinbox]]
+        dependent_widget_dict[id_ExposureWbAdaptPause] = [[match_wait_margin_spinbox],
+                                                          []]
+    if ExperimentalMode:
+        dependent_widget_dict[id_HdrCaptureActive] = [[hdr_viewx4_active_checkbox, hdr_min_exp_label,
+                                                       hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox,
+                                                       hdr_bracket_width_label, hdr_bracket_width_spinbox,
+                                                       hdr_bracket_shift_label, hdr_bracket_shift_spinbox,
+                                                       hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox],
+                                                      []]
+        dependent_widget_dict[id_HdrBracketAuto] = [[],
+                                                    [hdr_max_exp_spinbox, hdr_min_exp_spinbox, hdr_max_exp_label,
+                                                     hdr_min_exp_label]]
+        dependent_widget_dict[id_ManualScanEnabled] = [[manual_scan_advance_fraction_5_btn,
+                                                        manual_scan_advance_fraction_20_btn,manual_scan_take_snap_btn],
+                                                       []]
+
 
     for category in category_list:
         if category == id_HdrCaptureActive:
@@ -2656,7 +2668,6 @@ def widget_list_update(cmd, category_list):
                 widget_refresh(widget)
             for widget in items[1]:
                 widget_refresh(widget)
-    print(f"***************** END widget list update {cmd} {category_list} *********************")
 
 # Enable/disale list of widgets
 def widget_list_enable(category_list):
@@ -2761,6 +2772,7 @@ def load_session_data():
     global HdrViewX4Active
     global max_inactivity_delay
     global manual_wb_red_value, manual_wb_blue_value
+    global manual_exposure_value
     global PreviewModuleValue
     global NegativeImage
     global AutoExpEnabled, AutoWbEnabled
@@ -2771,8 +2783,8 @@ def load_session_data():
     global StabilizationDelayValue
     global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift
     global ExposureWbAdaptPause
+    global FileType
 
-    print("***************** load session data *********************")
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
                                          message='ALT-Scann 8 was interrupted during the last session.\
@@ -2813,7 +2825,7 @@ def load_session_data():
                 elif SessionData["FilmType"] == "S8":
                     cmd_set_s8()
             if 'FileType' in SessionData:
-                file_type_dropdown_selected.set(SessionData["FileType"])
+                FileType = SessionData["FileType"]
             if 'CaptureResolution' in SessionData:
                 valid_resolution_list = camera_resolutions.get_list()
                 selected_resolution = SessionData["CaptureResolution"]
@@ -2864,7 +2876,7 @@ def load_session_data():
                     HdrBracketAuto = SessionData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
                     if HdrBracketAuto:
-                        widget_list_refresh([id_HdrBracketAuto])
+                        widget_list_enable([id_HdrBracketAuto])
                 if 'HdrMergeInPlace' in SessionData:
                     HdrMergeInPlace = SessionData["HdrMergeInPlace"]
                     hdr_merge_in_place.set(HdrMergeInPlace)
@@ -2880,20 +2892,16 @@ def load_session_data():
                     preview_module_value.set(aux)
             if ExpertMode:
                 if 'AutoExpEnabled' in SessionData:
-                    if AutoExpEnabled != SessionData["AutoExpEnabled"]:
-                        AutoExpEnabled = SessionData["AutoExpEnabled"]
+                    AutoExpEnabled = SessionData["AutoExpEnabled"]
                     AE_enabled.set(AutoExpEnabled)
-                    exposure_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
-                    widget_list_enable([id_AutoExpEnabled])
-                    if not SimulatedRun and not CameraDisabled:
-                        camera.set_controls({"AeEnable": AutoExpEnabled})
+                    cmd_set_auto_exposure()
                 if 'CurrentExposure' in SessionData:
                     aux = SessionData["CurrentExposure"]
                     if isinstance(aux, str):
                         aux = int(float(aux))
+                    manual_exposure_value = aux
                     if not SimulatedRun and not CameraDisabled:
-                        camera.controls.ExposureTime = int(aux)
-                        camera.set_controls({"AeEnable": AutoExpEnabled})
+                        camera.set_controls({"ExposureTime": int(aux)})
                     exposure_value.set(aux / 1000)
                 if 'ExposureWbAdaptPause' in SessionData:
                     ExposureWbAdaptPause = SessionData["ExposureWbAdaptPause"]
@@ -2910,14 +2918,9 @@ def load_session_data():
                         aux = SessionData["AutoWbEnabled"]
                     else:
                         aux = eval(SessionData["AutoWbEnabled"])
-                    if AutoWbEnabled != aux:
-                        AutoWbEnabled = aux
+                    AutoWbEnabled = aux
                     AWB_enabled.set(AutoWbEnabled)
-                    wb_blue_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
-                    wb_red_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
-                    widget_list_refresh([id_AutoWbEnabled])
-                    if not SimulatedRun and not CameraDisabled:
-                        camera.set_controls({"AwbEnable": AutoWbEnabled})
+                    cmd_set_auto_wb()
                 # Set initial value of auto_exp_wb_wait_btn, as it depends of two variables
                 if not AutoExpEnabled and not AutoWbEnabled:
                     auto_exp_wb_wait_btn.disabled_counter = 1
@@ -3039,7 +3042,6 @@ def load_session_data():
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"Sharpness": aux})
         widget_list_enable([id_ManualScanEnabled])
-    print("***************** END load session data *********************")
 
 
 def reinit_controller():
@@ -3380,19 +3382,28 @@ def value_validation(new_value, widget, min, max, default, is_double=False):
 
 
 def cmd_set_auto_exposure():
-    global AutoExpEnabled
+    global AutoExpEnabled, manual_exposure_value
 
     AutoExpEnabled = AE_enabled.get()
-    aux = 0 if AutoExpEnabled else int(exposure_value.get() * 1000)
-    auto_exposure_btn.config(text="Auto Exp:" if AutoExpEnabled else "Exposure:")
+    SessionData["AutoExpEnabled"] = AutoExpEnabled
     widget_list_enable([id_AutoExpEnabled])
+    exposure_spinbox.config(state='readonly' if AutoExpEnabled else NORMAL)
+
+    if AutoExpEnabled:
+        manual_exposure_value = int(exposure_value.get() * 1000)
+        auto_exposure_btn.config(text="Auto Exp:")
+        aux = manual_exposure_value
+    else:
+        SessionData["CurrentExposure"] = manual_exposure_value
+        exposure_value.set(int(manual_exposure_value/1000))
+        auto_exposure_btn.config(text="Exposure:")
+        aux = 0
+
     if not SimulatedRun and not CameraDisabled:
-        # Do not retrieve current gain values from Camera (capture_metadata) to prevent conflicts
-        # Since we update values in the UI regularly, use those.
         camera.set_controls({"AeEnable": AutoExpEnabled})
         camera.set_controls({"ExposureTime": aux})
-
-    SessionData["AutoExpEnabled"] = AutoExpEnabled
+        if not AutoExpEnabled:
+            camera.set_controls({"ExposureTime": manual_exposure_value})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
@@ -3403,6 +3414,7 @@ def cmd_auto_exp_wb_change_pause_selection():
 
 
 def cmd_exposure_selection():
+    global manual_exposure_value
     if AutoExpEnabled:  # Do not allow spinbox changes when in auto mode (should not happen as spinbox is readonly)
         return
     aux = value_normalize(exposure_value, camera_resolutions.get_min_exp() / 1000,
@@ -3411,7 +3423,9 @@ def cmd_exposure_selection():
     aux = aux * 1000
     if aux <= 0:
         aux = camera_resolutions.get_min_exp()  # Minimum exposure is 1µs, zero means automatic
-    SessionData["CurrentExposure"] = aux
+    else:
+        manual_exposure_value = aux
+        SessionData["CurrentExposure"] = manual_exposure_value
 
     if not SimulatedRun and not CameraDisabled:
         camera.controls.ExposureTime = int(aux)  # maybe will not work, check pag 26 of picamera2 specs
@@ -3769,7 +3783,7 @@ def destroy_widgets(container):
 def create_widgets():
     global AdvanceMovie_btn
     global negative_image_checkbox, negative_image
-    global fast_forward_btn
+    global fast_forward_btn, rewind_btn
     global free_btn
     global rpi_temp_value_label
     global start_btn
@@ -3838,7 +3852,6 @@ def create_widgets():
     global options_btn
     global match_wait_margin_spinbox
 
-    print("***************** Create widgets *********************")
     # Global value for separations between widgets
     y_pad = 2
     x_pad = 2
@@ -3863,8 +3876,8 @@ def create_widgets():
                                   yscrollcommand=scrolled_canvas_scrollbar_v.set)
 
         # Create a frame inside the canvas to hold the content
-        scrolled_frame = tk.Frame(scrolled_canvas)
-        scrolled_canvas.create_window((0, 0), window=scrolled_frame, anchor="nw", name='scrollable_canvas')
+        scrolled_frame = tk.Frame(scrolled_canvas, name='scrollable_canvas')
+        scrolled_canvas.create_window((0, 0), window=scrolled_frame, anchor="nw")
 
         # Bind the frame to the canvas so it resizes properly
         scrolled_frame.bind("<Configure>", on_configure_scrolled_canvas)
@@ -3986,7 +3999,7 @@ def create_widgets():
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
                                              variable=real_time_zoom, onvalue=True, offvalue=False,
                                              font=("Arial", FontSize), command=cmd_set_focus_zoom, indicatoron=False,
-                                             name='real_time_zoom_checkbox')
+                                             state='disabled', name='real_time_zoom_checkbox')
     if ColorCodedButtons:
         real_time_zoom_checkbox.config(selectcolor="pale green")
     real_time_zoom_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
@@ -4005,27 +4018,27 @@ def create_widgets():
     Focus_btn_grid_frame.pack(padx=x_pad, pady=y_pad)
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=cmd_set_focus_plus,
+    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=cmd_set_focus_plus, state='disabled',
                             activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_plus_btn')
     focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
     as_tooltips.add(focus_plus_btn, "Increase zoom level.")
-    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=cmd_set_focus_minus,
+    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=cmd_set_focus_minus, state='disabled',
                              activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_minus_btn')
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=cmd_set_focus_left,
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=cmd_set_focus_left, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_lf_btn')
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=cmd_set_focus_up,
+    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=cmd_set_focus_up, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_up_btn')
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=cmd_set_focus_down,
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=cmd_set_focus_down, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_dn_btn')
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=cmd_set_focus_right,
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=cmd_set_focus_right, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_rt_btn')
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
@@ -4986,7 +4999,6 @@ def create_widgets():
         cmd_set_r8()
     elif FilmType == "S8":
         cmd_set_s8()
-    print("***************** END Create widgets *********************")
 
 
 
