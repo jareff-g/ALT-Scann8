@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.44"
+__version__ = "1.10.45"
 __date__ = "2024-03-19"
 __version_highlight__ = "Fix Rwnd/FF protection + other fixes"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -287,7 +287,7 @@ MaxPT = 100
 MinPT = 800
 Tolerance_AE = 8000
 Tolerance_AWB = 1
-manual_exposure_value = 50
+manual_exposure_value = 55
 manual_wb_red_value = 2.2
 manual_wb_blue_value = 2.2
 PreviousCurrentExposure = 0  # Used to spot changes in exposure, and cause a delay to allow camera to adapt
@@ -1495,7 +1495,7 @@ def cmd_switch_hdr_capture():
             else:
                 CurrentExposure = 3500  # Arbitrary Value for Simulated run
             SessionData["CurrentExposure"] = CurrentExposure
-            exposure_value.set(CurrentExposure)
+            exposure_value.set(CurrentExposure/1000)
     send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
     logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
 
@@ -3394,7 +3394,6 @@ def cmd_set_auto_exposure():
         auto_exposure_btn.config(text="Auto Exp:")
         aux = manual_exposure_value
     else:
-        SessionData["CurrentExposure"] = manual_exposure_value
         exposure_value.set(int(manual_exposure_value/1000))
         auto_exposure_btn.config(text="Exposure:")
         aux = 0
