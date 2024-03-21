@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.46"
+__version__ = "1.10.47"
 __date__ = "2024-03-21"
-__version_highlight__ = "Bugfixes + automatic mode (exp, wb, steps, PT level) when expert mode disabled"
+__version_highlight__ = "Bugfix - Issue in simulated mode"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2137,7 +2137,7 @@ def capture_loop_simulated():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         # Update number of captured frames
-        Scanned_Images_number_str(CurrentFrame)
+        Scanned_Images_number.set(CurrentFrame)
         # Update film time
         fps = 18 if SessionData["FilmType"] == "S8" else 16
         film_time = f"{(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
@@ -3898,7 +3898,7 @@ def create_widgets():
     global retreat_movie_btn, manual_scan_checkbox
     global file_type_dropdown, file_type_dropdown_selected
     global resolution_dropdown
-    global Scanned_Images_number, scanned_Images_time_value, scanned_Images_fps_value
+    global Scanned_Images_number, scanned_Images_time_value, scanned_Images_fps_value, scanned_images_number_label
     global resolution_label, file_type_label
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
@@ -4275,10 +4275,10 @@ def create_widgets():
     scanned_Images_label.grid(row=0, column=0, sticky="W")
 
     Scanned_Images_number = tk.IntVar(value=CurrentFrame)
-    scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number, width=5,
-                                        font=("Arial", FontSize-2), name='scanned_Images_number_label')
-    scanned_Images_number_label.grid(row=0, column=1, sticky="E")
-    as_tooltips.add(scanned_Images_number_label, "Number of film frames scanned so far.")
+    scanned_images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number, width=5,
+                                        font=("Arial", FontSize-2), name='scanned_images_number_label')
+    scanned_images_number_label.grid(row=0, column=1, sticky="E")
+    as_tooltips.add(scanned_images_number_label, "Number of film frames scanned so far.")
 
     scanned_images_fps_label = Label(scanned_images_frame, text="Frames/Sec:", font=("Arial", FontSize-2),
                                  name='scanned_images_fps_label')
