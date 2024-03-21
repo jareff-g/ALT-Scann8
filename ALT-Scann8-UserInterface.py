@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.45"
-__date__ = "2024-03-19"
-__version_highlight__ = "Fix bug saving manual exposure"
+__version__ = "1.10.46"
+__date__ = "2024-03-21"
+__version_highlight__ = "Bugfixes + automatic mode (exp, wb, steps, PT level) when expert mode disabled"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -132,6 +132,7 @@ max_inactivity_delay = reference_inactivity_delay
 # Minimum number of steps per frame, to be passed to Arduino
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
+CapstanDiameter = 14.3
 # Phototransistor reported level when hole is detected
 PTLevelS8 = 80
 PTLevelR8 = 120
@@ -183,6 +184,7 @@ simulated_images_in_list = 0
 CMD_VERSION_ID = 1
 CMD_GET_CNT_STATUS = 2
 CMD_RESET_CONTROLLER = 3
+CMD_ADJUST_MIN_FRAME_STEPS = 4
 CMD_START_SCAN = 10
 CMD_TERMINATE = 11
 CMD_GET_NEXT_FRAME = 12
@@ -227,6 +229,7 @@ RSP_FILM_FORWARD_ENDED = 89
 ExpertMode = True
 ExperimentalMode = True
 PlotterMode = True
+SimplifiedMode = False
 UIScrollbars = False
 FontSize = 0
 LoggingMode = "INFO"
@@ -252,7 +255,7 @@ HdrMergeInPlace = False
 MatchWaitMarginValue = 50
 StepsPerFrame = 250
 PtLevelValue = 200
-FrameFineTuneValue = 50
+FrameFineTuneValue = 20
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
@@ -435,8 +438,8 @@ SessionData = {
     "PTLevelS8": 80,
     "PTLevelR8": 200,
     "PTLevel": 80,
-    "PTLevelAuto": True,
-    "FrameStepsAuto": True,
+    "AutoPtLevelEnabled": True,
+    "AutoFrameStepsEnabled": True,
     "HdrMinExp": HdrMinExp,
     "HdrMaxExp": HdrMaxExp,
     "HdrBracketWidth": 50,
@@ -682,7 +685,7 @@ def cmd_set_new_folder():
 
     if success:
         folder_frame_target_dir.config(text=CurrentDir)
-        Scanned_Images_number_str.set(str(CurrentFrame))
+        Scanned_Images_number.set(CurrentFrame)
         SessionData["CurrentDir"] = str(CurrentDir)
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
@@ -693,23 +696,45 @@ def cmd_settings_popup_dismiss():
 
 
 def cmd_settings_popup_accept():
-    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
-    global CaptureResolution, FileType
+    global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
+    global FrameFineTuneValue, ScanSpeedValue, CapstanDiameter
 
     refresh_ui = False
-    if ExpertMode != expert_mode.get():
+    if SimplifiedMode != simplified_mode.get():
         refresh_ui = True
-        ExpertMode = expert_mode.get()
-        SessionData["ExpertMode"] = ExpertMode
-    if ExperimentalMode != experimental_mode.get():
-        refresh_ui = True
-        ExperimentalMode = experimental_mode.get()
-        SessionData["ExperimentalMode"] = ExperimentalMode
-    if PlotterMode != plotter_mode.get():
-        refresh_ui = True
-        PlotterMode = plotter_mode.get()
-        SessionData["PlotterMode"] = PlotterMode
+        SimplifiedMode = simplified_mode.get()
+        SessionData["SimplifiedMode"] = SimplifiedMode
+        # If no expert mode, set automated settings
+        if SimplifiedMode:
+            ExpertMode = False
+            ExperimentalMode = False
+            PlotterMode = False
+            AutoExpEnabled = True
+            AutoWbEnabled = True
+            AutoFrameStepsEnabled = True
+            AutoPtLevelEnabled = True
+            FrameFineTuneValue = 20
+            ScanSpeedValue = 5
+        else:
+            ExpertMode = SessionData['ExpertMode'] = True
+            ExperimentalMode = SessionData['ExperimentalMode'] = True
+            PlotterMode = SessionData['PlotterMode'] = True
+            AutoExpEnabled = SessionData['AutoExpEnabled']
+            AutoWbEnabled = SessionData['AutoWbEnabled']
+            AutoFrameStepsEnabled = SessionData['AutoFrameStepsEnabled']  # FrameStepsAuto
+            AutoPtLevelEnabled = SessionData['AutoPtLevelEnabled']  # PTLevelAuto
+            FrameFineTuneValue = SessionData["FrameFineTune"]
+            ScanSpeedValue = SessionData["ScanSpeed"]
+        if not SimulatedRun and not CameraDisabled:
+            camera.set_controls({"AeEnable": AutoExpEnabled})
+            camera.set_controls({"AwbEnable": AutoWbEnabled})
+            send_arduino_command(CMD_SET_PT_LEVEL, 0)
+            send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+            send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+            send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
+            send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
     if UIScrollbars != ui_scrollbars.get():
         refresh_ui = True
         UIScrollbars = ui_scrollbars.get()
@@ -724,6 +749,10 @@ def cmd_settings_popup_accept():
         refresh_ui = True
         FontSize = font_size_int.get()
         SessionData["FontSize"] = FontSize
+    if CapstanDiameter != capstan_diameter_float.get():
+        CapstanDiameter = capstan_diameter_float.get()
+        SessionData["CapstanDiameter"] = CapstanDiameter
+        send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
         LogLevel = getattr(logging, LoggingMode.upper(), None)
@@ -776,9 +805,10 @@ def cmd_settings_popup():
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global expert_mode, experimental_mode, plotter_mode, ui_scrollbars, font_size_int, disable_tooltips
+    global simplified_mode, ui_scrollbars, font_size_int, disable_tooltips, capstan_diameter_float
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
+    global base_folder_btn
 
     options_row = 0
 
@@ -789,34 +819,18 @@ def cmd_settings_popup():
     options_dlg.columnconfigure(0, weight=1)
 
     # Expert Mode
-    expert_mode = tk.BooleanVar(value=ExpertMode)
-    expert_mode_btn = tk.Checkbutton(options_dlg, variable=expert_mode, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Expert mode")
-    expert_mode_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(expert_mode_btn, "Enable expert mode")
-    options_row += 1
-
-    # Experimental Mode
-    experimental_mode = tk.BooleanVar(value=ExperimentalMode)
-    experimental_mode_btn = tk.Checkbutton(options_dlg, variable=experimental_mode, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Experimental mode")
-    experimental_mode_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(experimental_mode_btn, "Enable experimental mode")
-    options_row += 1
-
-    # Plotter Mode
-    plotter_mode = tk.BooleanVar(value=PlotterMode)
-    plotter_mode_btn = tk.Checkbutton(options_dlg, variable=plotter_mode, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Plotter window")
-    plotter_mode_btn.grid(row=options_row, column=0, sticky="W")
-    as_tooltips.add(plotter_mode_btn, "Display Plotter window")
+    simplified_mode = tk.BooleanVar(value=SimplifiedMode)
+    simplified_mode_btn = tk.Checkbutton(options_dlg, variable=simplified_mode, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Simplified UI")
+    simplified_mode_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
+    as_tooltips.add(simplified_mode_btn, "Enable simplified UI")
     options_row += 1
 
     # Disable tootilps
     disable_tooltips = tk.BooleanVar(value=DisableToolTips)
     disable_tooltips_btn = tk.Checkbutton(options_dlg, variable=disable_tooltips, onvalue=True, offvalue=False,
                                        font=("Arial", FontSize - 1), text="Disable tooltips")
-    disable_tooltips_btn.grid(row=options_row, column=0, sticky="W")
+    disable_tooltips_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(disable_tooltips_btn, "Disable tooltips")
     options_row += 1
 
@@ -825,7 +839,7 @@ def cmd_settings_popup():
     widgets_enabled_while_scanning_btn = tk.Checkbutton(options_dlg, variable=widgets_enabled_while_scanning,
                                                         onvalue=True, offvalue=False, font=("Arial", FontSize - 1),
                                                         text="Keep widgets enabled")
-    widgets_enabled_while_scanning_btn.grid(row=options_row, column=0, sticky="W")
+    widgets_enabled_while_scanning_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(widgets_enabled_while_scanning_btn, "Keep widgets enabled while scanning")
     options_row += 1
 
@@ -833,14 +847,14 @@ def cmd_settings_popup():
     color_coded_buttons = tk.BooleanVar(value=ColorCodedButtons)
     color_coded_buttons_btn = tk.Checkbutton(options_dlg, variable=color_coded_buttons, text="Color coded buttons",
                                              onvalue=True, offvalue=False, font=("Arial", FontSize - 1))
-    color_coded_buttons_btn.grid(row=options_row, column=0, sticky="W")
+    color_coded_buttons_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(color_coded_buttons_btn, "Use colors to highlight button status")
     options_row += 1
 
     temp_in_fahrenheit = tk.BooleanVar(value=TempInFahrenheit)
     temp_in_fahrenheit_checkbox = tk.Checkbutton(options_dlg, variable=temp_in_fahrenheit, text='Fahrenheit',
                                                  onvalue=True, offvalue=False, font=("Arial", FontSize - 1))
-    temp_in_fahrenheit_checkbox.grid(row=options_row, column=0, sticky="W")
+    temp_in_fahrenheit_checkbox.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(temp_in_fahrenheit_checkbox, "Display Raspberry Pi Temperature in Fahrenheit.")
     options_row += 1
 
@@ -848,19 +862,31 @@ def cmd_settings_popup():
     ui_scrollbars = tk.BooleanVar(value=UIScrollbars)
     ui_scrollbars_btn = tk.Checkbutton(options_dlg, variable=ui_scrollbars, onvalue=True, offvalue=False,
                                        font=("Arial", FontSize - 1), text="Display scrollbars")
-    ui_scrollbars_btn.grid(row=options_row, column=0, sticky="W")
+    ui_scrollbars_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions)")
     options_row += 1
 
     # Font Size
     font_size_label = tk.Label(options_dlg, text="Main UI font size", font=("Arial", FontSize-1))
-    font_size_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
+    font_size_label.grid(row=options_row, column=0, columnspan=1, sticky='W', padx=2*FontSize)
     as_tooltips.add(font_size_label, "Base font size used in main window")
     font_size_int = tk.IntVar(value=12)
     font_size_int.set(FontSize)
     font_size_spinbox = DynamicSpinbox(options_dlg, command=cmd_exposure_selection, width=2, from_=6, to=20,
                                       textvariable=font_size_int, increment=1, font=("Arial", FontSize - 2))
     font_size_spinbox.grid(row=options_row, column=1, sticky='W')
+    options_row += 1
+
+    # Capstan diameter
+    capstan_diameter_label = tk.Label(options_dlg, text="Capstan diameter", font=("Arial", FontSize-1))
+    capstan_diameter_label.grid(row=options_row, column=0, columnspan=1, sticky='W', padx=2*FontSize)
+    as_tooltips.add(capstan_diameter_label, "Base font size used in main window")
+    capstan_diameter_float = tk.DoubleVar(value=CapstanDiameter)
+    capstan_diameter_spinbox = DynamicSpinbox(options_dlg, command=cmd_exposure_selection, width=4, from_=8, to=30,
+                                      textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 2))
+    capstan_diameter_spinbox.grid(row=options_row, column=1, sticky='W')
+    capstan_diameter_mm_label = tk.Label(options_dlg, text="mm", font=("Arial", FontSize-1))
+    capstan_diameter_mm_label.grid(row=options_row, column=1,sticky='E', padx=2*FontSize)
     options_row += 1
 
     # Capture resolution Dropdown
@@ -873,7 +899,7 @@ def cmd_settings_popup():
     resolution_dropdown = OptionMenu(options_dlg, resolution_dropdown_selected, *resolution_list)
     resolution_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     resolution_dropdown_selected.set(CaptureResolution)
-    resolution_dropdown.grid(row=options_row, column=1, sticky="W")
+    resolution_dropdown.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(resolution_label, "Select the resolution to use when capturing the frames. Modes flagged with "
                                          "* are cropped, requiring lens adjustment")
     options_row += 1
@@ -890,7 +916,7 @@ def cmd_settings_popup():
     file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
     file_type_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     file_type_dropdown_selected.set(FileType)  # Set the initial value
-    file_type_dropdown.grid(row=options_row, column=1, sticky="W")
+    file_type_dropdown.grid(row=options_row, column=1, sticky='W')
     # file_type_dropdown.config(state=DISABLED)
     as_tooltips.add(file_type_label, "Select format to safe film frames (JPG or PNG)")
 
@@ -899,9 +925,9 @@ def cmd_settings_popup():
     # Base ALT-Scann8 folder
     base_folder_label = Label(options_dlg, text='Base folder:', font=("Arial", FontSize))
     base_folder_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
-    base_folder_btn = Button(options_dlg, text='Select', command=set_base_folder,
+    base_folder_btn = Button(options_dlg, text=BaseFolder, command=set_base_folder,
                                  activebackground='#f0f0f0', font=("Arial", FontSize-2))
-    base_folder_btn.grid(row=options_row, column=1, sticky="W")
+    base_folder_btn.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(base_folder_label, "Select existing folder as base folder for ALT-Scann8.")
 
     options_row += 1
@@ -910,21 +936,21 @@ def cmd_settings_popup():
     debug_level_list = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     debug_level_selected = tk.StringVar()
     debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
-    debug_level_label.grid(row=options_row, column=0, sticky="W", padx=2*FontSize)
+    debug_level_label.grid(row=options_row, column=0, sticky='W', padx=2*FontSize)
     debug_level_dropdown = OptionMenu(options_dlg, debug_level_selected, *debug_level_list)
     debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
     debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
-    debug_level_dropdown.grid(row=options_row, column=1, sticky="W")
+    debug_level_dropdown.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(debug_level_label, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
 
     options_row += 1
 
     options_cancel_btn = tk.Button(options_dlg, text="Cancel", command=cmd_settings_popup_dismiss, width=8,
                                    font=("Arial", FontSize))
-    options_cancel_btn.grid(row=options_row, column=0, padx=10, pady=5, sticky='w')
+    options_cancel_btn.grid(row=options_row, column=0, padx=10, pady=5, sticky='W')
     options_ok_btn = tk.Button(options_dlg, text="OK", command=cmd_settings_popup_accept, width=8,
                                font=("Arial", FontSize))
-    options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='e')
+    options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='E')
 
     options_dlg.protocol("WM_DELETE_WINDOW", cmd_settings_popup_dismiss)  # intercept close button
     options_dlg.transient(win)  # dialog window is related to main
@@ -965,9 +991,11 @@ def get_last_frame_popup(last_frame):
 
 def set_base_folder():
     global BaseFolder
-
-    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann¡8 folder")
+    options_dlg.withdraw()  # Hide the root window
+    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", paretn=None)
     SessionData["BaseFolder"] = str(BaseFolder)
+    options_dlg.deiconify()
+    base_folder_btn.config(text=BaseFolder)
 
 
 def cmd_set_existing_folder():
@@ -1013,7 +1041,7 @@ def cmd_set_existing_folder():
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
 
-        Scanned_Images_number_str.set(str(current_frame_str))
+        Scanned_Images_number.set(current_frame_str)
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         folder_frame_target_dir.config(text=CurrentDir)
@@ -1830,7 +1858,7 @@ def capture_single(mode):
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
-            Scanned_Images_number_str.set(str(CurrentFrame))
+            Scanned_Images_number.set(CurrentFrame)
     else:
         if is_dng or is_png:
             request = camera.capture_request(capture_config)
@@ -1857,7 +1885,7 @@ def capture_single(mode):
         if mode == 'manual':  # In manual mode, increase CurrentFrame
             CurrentFrame += 1
             # Update number of captured frames
-            Scanned_Images_number_str.set(str(CurrentFrame))
+            Scanned_Images_number.set(CurrentFrame)
 
 
 # 4 possible modes:
@@ -1904,7 +1932,8 @@ def capture(mode):
             else:
                 break
         if wait_loop_count >= 0:
-            exposure_value.set(aux_current_exposure / 1000)
+            if ExpertMode:
+                exposure_value.set(aux_current_exposure / 1000)
             aux = time.time() - curtime
             total_wait_time_autoexp += aux
             time_autoexp.add_value(aux)
@@ -2100,7 +2129,7 @@ def capture_loop_simulated():
                 SessionData["FramesToGo"] = FramesToGo
                 if FramesPerMinute != 0:
                     minutes_pending = FramesToGo // FramesPerMinute
-                    time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
+                    frames_to_go_time_str.set(f"{(minutes_pending // 60):02}h {(minutes_pending % 60):02}m")
 
         CurrentFrame += 1
         session_frames += 1
@@ -2108,19 +2137,19 @@ def capture_loop_simulated():
         SessionData["CurrentFrame"] = str(CurrentFrame)
 
         # Update number of captured frames
-        Scanned_Images_number_str.set(str(CurrentFrame))
+        Scanned_Images_number_str(CurrentFrame)
         # Update film time
         fps = 18 if SessionData["FilmType"] == "S8" else 16
-        film_time = f"Film time: {(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
-        Scanned_Images_time_str.set(film_time)
+        film_time = f"{(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
+        scanned_Images_time_value.set(film_time)
         # Update Frames per Minute
         scan_period_frames = CurrentFrame - CurrentScanStartFrame
         if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
             aux_str = ''.join([char * int(min(5, scan_period_frames)) for char in '.'])
-            Scanned_Images_Fpm_str.set(f"Frames/Sec: {aux_str}")
+            scanned_Images_fps_value.set(aux_str)
         else:
             FramesPerMinute = FPM_CalculatedValue
-            Scanned_Images_Fpm_str.set(f"Frames/Sec: {FPM_CalculatedValue / 60:.2f}")
+            scanned_Images_fps_value.set(f"{FPM_CalculatedValue / 60:.2f}")
 
         # Invoke capture_loop one more time, as long as scan is ongoing
         win.after(100, capture_loop_simulated)
@@ -2273,7 +2302,7 @@ def capture_loop():
                     SessionData["FramesToGo"] = FramesToGo
                     if FramesPerMinute != 0:
                         minutes_pending = FramesToGo // FramesPerMinute
-                        time_to_go_str.set(f"Time to go: {(minutes_pending // 60):02} h, {(minutes_pending % 60):02} m")
+                        frames_to_go_time_str.set(f"{(minutes_pending // 60):02}h {(minutes_pending % 60):02}m")
                 else:
                     ScanStopRequested = True  # Stop in next capture loop
                     SessionData["FramesToGo"] = -1
@@ -2305,19 +2334,19 @@ def capture_loop():
             #     json.dump(SessionData, f)
 
             # Update number of captured frames
-            Scanned_Images_number_str.set(str(CurrentFrame))
+            Scanned_Images_number.set(CurrentFrame)
             # Update film time
             fps = 18 if SessionData["FilmType"] == "S8" else 16
-            film_time = f"Film time: {(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
-            Scanned_Images_time_str.set(film_time)
+            film_time = f"{(CurrentFrame // fps) // 60:02}:{(CurrentFrame // fps) % 60:02}"
+            scanned_Images_time_value.set(film_time)
             # Update Frames per Minute
             scan_period_frames = CurrentFrame - CurrentScanStartFrame
             if FPM_CalculatedValue == -1:  # FPM not calculated yet, display some indication
                 aux_str = ''.join([char * int(min(5, scan_period_frames)) for char in '.'])
-                Scanned_Images_Fpm_str.set(f"Frames/Sec: {aux_str}")
+                scanned_Images_fps_value.set(aux_str)
             else:
                 FramesPerMinute = FPM_CalculatedValue
-                Scanned_Images_Fpm_str.set(f"Frames/Sec: {FPM_CalculatedValue/60:.2f}")
+                scanned_Images_fps_value.set(f"{FPM_CalculatedValue / 60:.2f}")
             if session_frames % 50 == 0 and not disk_space_available():  # Only every 50 frames (500MB buffer exist)
                 logging.error("No disk space available, stopping scan process.")
                 if ScanOngoing:
@@ -2469,7 +2498,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global Controller_Id
     global ScanStopRequested
     global arduino_after
-    global StepsPerFrame
+    global PtLevelValue, StepsPerFrame
 
     if not SimulatedRun:
         try:
@@ -2571,7 +2600,7 @@ def widget_update(cmd, widget, enabled, inc):
         if hasattr(widget, "disabled_counter"):
             counter = widget.disabled_counter
             widget.config(state=DISABLED if counter > 0 else NORMAL)
-    """ # Debug enable/disable widgets
+    """# Debug enable/disable widgets
     print(f"Widget {cmd}, {enabled}, {widget.winfo_name()}")
     if hasattr(widget, "disabled_counter"):
         print(f"   *** counter {counter}")
@@ -2633,41 +2662,41 @@ def widget_list_update(cmd, category_list):
                                                         manual_scan_advance_fraction_20_btn,manual_scan_take_snap_btn],
                                                        []]
 
-
     for category in category_list:
-        if category == id_HdrCaptureActive:
-            state = HdrCaptureActive
-        elif category == id_HdrBracketAuto:
-            state = HdrBracketAuto
-        elif category == id_RealTimeDisplay:
-            state = RealTimeDisplay
-        elif category == id_RealTimeZoom:
-            state = RealTimeZoom
-        elif category == id_AutoStopEnabled:
-            state = AutoStopEnabled
-        elif category == id_AutoWbEnabled:
-            state = AutoWbEnabled
-        elif category == id_AutoExpEnabled:
-            state = AutoExpEnabled
-        elif category == id_ManualScanEnabled:
-            state = ManualScanEnabled
-        elif category == id_AutoPtLevelEnabled:
-            state = AutoPtLevelEnabled
-        elif category == id_AutoFrameStepsEnabled:
-            state = AutoFrameStepsEnabled
-        elif category == id_ExposureWbAdaptPause:
-            state = ExposureWbAdaptPause
-        items = dependent_widget_dict[category]
-        if cmd == 'enable':
-            for widget in items[0]:
-                widget_enable(widget, state)
-            for widget in items[1]:
-                widget_enable(widget, not state)
-        elif cmd == 'refresh':
-            for widget in items[0]:
-                widget_refresh(widget)
-            for widget in items[1]:
-                widget_refresh(widget)
+        if category in dependent_widget_dict:
+            if category == id_HdrCaptureActive:
+                state = HdrCaptureActive
+            elif category == id_HdrBracketAuto:
+                state = HdrBracketAuto
+            elif category == id_RealTimeDisplay:
+                state = RealTimeDisplay
+            elif category == id_RealTimeZoom:
+                state = RealTimeZoom
+            elif category == id_AutoStopEnabled:
+                state = AutoStopEnabled
+            elif category == id_AutoWbEnabled:
+                state = AutoWbEnabled
+            elif category == id_AutoExpEnabled:
+                state = AutoExpEnabled
+            elif category == id_ManualScanEnabled:
+                state = ManualScanEnabled
+            elif category == id_AutoPtLevelEnabled:
+                state = AutoPtLevelEnabled
+            elif category == id_AutoFrameStepsEnabled:
+                state = AutoFrameStepsEnabled
+            elif category == id_ExposureWbAdaptPause:
+                state = ExposureWbAdaptPause
+            items = dependent_widget_dict[category]
+            if cmd == 'enable':
+                for widget in items[0]:
+                    widget_enable(widget, state)
+                for widget in items[1]:
+                    widget_enable(widget, not state)
+            elif cmd == 'refresh':
+                for widget in items[0]:
+                    widget_refresh(widget)
+                for widget in items[1]:
+                    widget_refresh(widget)
 
 # Enable/disale list of widgets
 def widget_list_enable(category_list):
@@ -2728,19 +2757,26 @@ def load_persisted_data_from_disk():
 
 
 def load_config_data():
-    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
-    global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit
+    global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
+    global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
 
     for item in SessionData:
         logging.debug("%s=%s", item, str(SessionData[item]))
     if PersistedDataLoaded:
         logging.debug("SessionData loaded from disk:")
-        if 'ExpertMode' in SessionData:
-            ExpertMode = SessionData["ExpertMode"]
-        if 'ExperimentalMode' in SessionData:
-            ExperimentalMode = SessionData["ExperimentalMode"]
-        if 'PlotterMode' in SessionData:
-            PlotterMode = SessionData["PlotterMode"]
+        if 'SimplifiedMode' in SessionData:
+            SimplifiedMode = SessionData["SimplifiedMode"]
+        if SimplifiedMode:
+            ExpertMode = False
+            ExperimentalMode = False
+            PlotterMode = False
+        else:
+            if 'ExpertMode' in SessionData:
+                ExpertMode = SessionData["ExpertMode"]
+            if 'ExperimentalMode' in SessionData:
+                ExperimentalMode = SessionData["ExperimentalMode"]
+            if 'PlotterMode' in SessionData:
+                PlotterMode = SessionData["PlotterMode"]
         if 'UIScrollbars' in SessionData:
             UIScrollbars = SessionData["UIScrollbars"]
         if 'DisableToolTips' in SessionData:
@@ -2761,6 +2797,10 @@ def load_config_data():
                 TempInFahrenheit = eval(SessionData["TempInFahrenheit"])
         if 'BaseFolder' in SessionData:
             BaseFolder = SessionData["BaseFolder"]
+        if 'LogLevel' in SessionData:
+            LogLevel = SessionData["LogLevel"]
+            logging.getLogger().setLevel(LogLevel)
+
 
 
 def load_session_data():
@@ -2783,7 +2823,7 @@ def load_session_data():
     global StabilizationDelayValue
     global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift
     global ExposureWbAdaptPause
-    global FileType
+    global FileType, CapstanDiameter
 
     if PersistedDataLoaded:
         confirm = tk.messagebox.askyesno(title='Persisted session data exist',
@@ -2791,20 +2831,6 @@ def load_session_data():
                                          \r\nDo you want to continue from where it was stopped?')
         if confirm:
             logging.debug("SessionData loaded from disk:")
-            if ExpertMode:
-                if 'MatchWaitMargin' in SessionData:
-                    MatchWaitMarginValue = SessionData["MatchWaitMargin"]
-                else:
-                    MatchWaitMarginValue = 50
-                aux = int(MatchWaitMarginValue)
-                match_wait_margin_value.set(aux)
-                widget_list_enable([id_ExposureWbAdaptPause])
-                if 'CaptureStabilizationDelay' in SessionData:
-                    aux = float(SessionData["CaptureStabilizationDelay"])
-                    StabilizationDelayValue = round(aux)
-                else:
-                    StabilizationDelayValue = 100
-                stabilization_delay_value.set(StabilizationDelayValue)
             if 'CurrentDir' in SessionData:
                 CurrentDir = SessionData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
@@ -2812,8 +2838,10 @@ def load_session_data():
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CurrentFrame' in SessionData:
-                CurrentFrame = int(SessionData["CurrentFrame"])
-                Scanned_Images_number_str.set(SessionData["CurrentFrame"])
+                if isinstance(SessionData["CurrentFrame"], str):
+                    SessionData["CurrentFrame"] = int(SessionData["CurrentFrame"])
+                CurrentFrame = SessionData["CurrentFrame"]
+                Scanned_Images_number.set(SessionData["CurrentFrame"])
             if 'FramesToGo' in SessionData:
                 if SessionData["FramesToGo"] != -1:
                     FramesToGo = int(SessionData["FramesToGo"])
@@ -2824,6 +2852,9 @@ def load_session_data():
                     cmd_set_r8()
                 elif SessionData["FilmType"] == "S8":
                     cmd_set_s8()
+            if 'CapstanDiameter' in SessionData:
+                CapstanDiameter = SessionData["CapstanDiameter"]
+                send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter * 10))
             if 'FileType' in SessionData:
                 FileType = SessionData["FileType"]
             if 'CaptureResolution' in SessionData:
@@ -2851,6 +2882,7 @@ def load_session_data():
             if 'AutoStopActive' in SessionData:
                 auto_stop_enabled.set(SessionData["AutoStopActive"])
                 cmd_set_auto_stop_enabled()
+            # Experimental mode options
             if ExperimentalMode:
                 if 'HdrCaptureActive' in SessionData:
                     HdrCaptureActive = eval(SessionData["HdrCaptureActive"])
@@ -2890,7 +2922,21 @@ def load_session_data():
                     aux = int(SessionData["PreviewModule"])
                     PreviewModuleValue = aux
                     preview_module_value.set(aux)
+            # Expert mode options
             if ExpertMode:
+                if 'MatchWaitMargin' in SessionData:
+                    MatchWaitMarginValue = SessionData["MatchWaitMargin"]
+                else:
+                    MatchWaitMarginValue = 50
+                aux = int(MatchWaitMarginValue)
+                match_wait_margin_value.set(aux)
+                widget_list_enable([id_ExposureWbAdaptPause])
+                if 'CaptureStabilizationDelay' in SessionData:
+                    aux = float(SessionData["CaptureStabilizationDelay"])
+                    StabilizationDelayValue = round(aux)
+                else:
+                    StabilizationDelayValue = 100
+                stabilization_delay_value.set(StabilizationDelayValue)
                 if 'AutoExpEnabled' in SessionData:
                     AutoExpEnabled = SessionData["AutoExpEnabled"]
                     AE_enabled.set(AutoExpEnabled)
@@ -2910,7 +2956,7 @@ def load_session_data():
                         auto_exp_wb_wait_btn.select()
                     else:
                         auto_exp_wb_wait_btn.deselect()
-                if 'CurrentAwbAuto' in SessionData:     # Delete legacy name
+                if 'CurrentAwbAuto' in SessionData:     # Delete legacy name, replace with new
                     SessionData['AutoWbEnabled'] = SessionData['CurrentAwbAuto']
                     del SessionData['CurrentAwbAuto']
                 if 'AutoWbEnabled' in SessionData:
@@ -2968,8 +3014,11 @@ def load_session_data():
                     StepsPerFrame = MinFrameSteps
                     steps_per_frame_value.set(MinFrameSteps)
                     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
-                if 'FrameStepsAuto' in SessionData:
-                    AutoFrameStepsEnabled = SessionData["FrameStepsAuto"]
+                if 'FrameStepsAuto' in SessionData:     # Delete legacy name, replace with new
+                    SessionData['AutoFrameStepsEnabled'] = SessionData['FrameStepsAuto']
+                    del SessionData['FrameStepsAuto']
+                if 'AutoFrameStepsEnabled' in SessionData:
+                    AutoFrameStepsEnabled = SessionData["AutoFrameStepsEnabled"]
                     auto_framesteps_enabled.set(AutoFrameStepsEnabled)
                     cmd_steps_per_frame_auto()
                     if AutoFrameStepsEnabled:
@@ -2989,8 +3038,11 @@ def load_session_data():
                     FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
                     frame_extra_steps_value.set(FrameExtraStepsValue)
                     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
-                if 'PTLevelAuto' in SessionData:
-                    AutoPtLevelEnabled = SessionData["PTLevelAuto"]
+                if 'PTLevelAuto' in SessionData:     # Delete legacy name, replace with new
+                    SessionData['AutoPtLevelEnabled'] = SessionData['PTLevelAuto']
+                    del SessionData['PTLevelAuto']
+                if 'AutoPtLevelEnabled' in SessionData:
+                    AutoPtLevelEnabled = SessionData["AutoPtLevelEnabled"]
                     auto_pt_level_enabled.set(AutoPtLevelEnabled)
                     cmd_set_auto_pt_level()
                     if AutoPtLevelEnabled:
@@ -3041,6 +3093,26 @@ def load_session_data():
                     sharpness_value.set(aux)
                     if not SimulatedRun and not CameraDisabled:
                         camera.set_controls({"Sharpness": aux})
+            else:
+                # If expert mode not enabled, activate automated options
+                # (but do not set in session data to keep persisted options)
+                AutoExpEnabled = True
+                AutoWbEnabled = True
+                AutoFrameStepsEnabled = True
+                AutoPtLevelEnabled = True
+                FrameFineTuneValue = 20
+                ScanSpeedValue = 5
+                if not SimulatedRun and not CameraDisabled:
+                    camera.set_controls({"AeEnable": AutoExpEnabled})
+                    camera.set_controls({"AwbEnable": AutoWbEnabled})
+                    send_arduino_command(CMD_SET_PT_LEVEL, 0)
+                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
+
+        # Refresh plotter mode in Arduino here since when reading from config I2C has not been enabled yet
+        send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
+
         widget_list_enable([id_ManualScanEnabled])
 
 
@@ -3401,8 +3473,6 @@ def cmd_set_auto_exposure():
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeEnable": AutoExpEnabled})
         camera.set_controls({"ExposureTime": aux})
-        if not AutoExpEnabled:
-            camera.set_controls({"ExposureTime": manual_exposure_value})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
@@ -3510,7 +3580,7 @@ def cmd_steps_per_frame_auto():
     AutoFrameStepsEnabled = auto_framesteps_enabled.get()
     widget_list_enable([id_AutoFrameStepsEnabled])
     steps_per_frame_btn.config(text="Steps/Frame AUTO:" if AutoFrameStepsEnabled else "Steps/Frame:")
-    SessionData["FrameStepsAuto"] = AutoFrameStepsEnabled
+    SessionData["AutoFrameStepsEnabled"] = AutoFrameStepsEnabled
     send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0 if AutoFrameStepsEnabled else StepsPerFrame)
 
 
@@ -3534,7 +3604,7 @@ def cmd_set_auto_pt_level():
     AutoPtLevelEnabled = auto_pt_level_enabled.get()
     widget_list_enable([id_AutoPtLevelEnabled])
     pt_level_btn.config(text="PT Level AUTO:" if AutoPtLevelEnabled else "PT Level:")
-    SessionData["PTLevelAuto"] = AutoPtLevelEnabled
+    SessionData["AutoPtLevelEnabled"] = AutoPtLevelEnabled
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else PtLevelValue)
 
 
@@ -3824,11 +3894,11 @@ def create_widgets():
     global hdr_bracket_width_spinbox, hdr_bracket_shift_spinbox, hdr_bracket_width_label, hdr_bracket_shift_label
     global hdr_bracket_width_value, hdr_bracket_shift_value
     global hdr_bracket_auto, hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
-    global frames_to_go_str, FramesToGo, time_to_go_str
+    global frames_to_go_str, FramesToGo, frames_to_go_time_str
     global retreat_movie_btn, manual_scan_checkbox
     global file_type_dropdown, file_type_dropdown_selected
     global resolution_dropdown
-    global Scanned_Images_number_str, Scanned_Images_time_str, Scanned_Images_Fpm_str
+    global Scanned_Images_number, scanned_Images_time_value, scanned_Images_fps_value
     global resolution_label, file_type_label
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
@@ -4196,48 +4266,67 @@ def create_widgets():
     top_right_area_row += 1
 
     # Create frame to display number of scanned images, and frames per minute
-    scanned_images_frame = LabelFrame(top_right_area_frame, text='Scanned frames', height=4,
+    scanned_images_frame = LabelFrame(top_right_area_frame, text='Done', height=4,
                                       font=("Arial", FontSize - 2), name='scanned_images_frame')
     scanned_images_frame.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NSEW')
 
-    Scanned_Images_number_str = tk.StringVar(value=str(CurrentFrame))
-    scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number_str,
-                                        font=("Arial", FontSize + 3), name='scanned_Images_number_label')
-    scanned_Images_number_label.pack(side=TOP)
+    scanned_Images_label = Label(scanned_images_frame, text="Frames:", font=("Arial", FontSize-2),
+                                 name='scanned_Images_label')
+    scanned_Images_label.grid(row=0, column=0, sticky="W")
+
+    Scanned_Images_number = tk.IntVar(value=CurrentFrame)
+    scanned_Images_number_label = Label(scanned_images_frame, textvariable=Scanned_Images_number, width=5,
+                                        font=("Arial", FontSize-2), name='scanned_Images_number_label')
+    scanned_Images_number_label.grid(row=0, column=1, sticky="E")
     as_tooltips.add(scanned_Images_number_label, "Number of film frames scanned so far.")
 
-    scanned_images_fpm_frame = Frame(scanned_images_frame, name='scanned_images_fpm_frame')
-    scanned_images_fpm_frame.pack(side=TOP)
-    Scanned_Images_time_str = tk.StringVar(value="Film time:")
-    scanned_Images_time_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_time_str,
-                                      font=("Arial", FontSize - 2), name='scanned_Images_time_label')
-    scanned_Images_time_label.pack(side=BOTTOM)
-    as_tooltips.add(scanned_Images_time_label, "Film time in min:sec")
+    scanned_images_fps_label = Label(scanned_images_frame, text="Frames/Sec:", font=("Arial", FontSize-2),
+                                 name='scanned_images_fps_label')
+    scanned_images_fps_label.grid(row=1, column=0, sticky="W")
 
-    Scanned_Images_Fpm_str = tk.StringVar(value="Frames/Sec:")
-    scanned_images_fpm_label = Label(scanned_images_fpm_frame, textvariable=Scanned_Images_Fpm_str,
-                                     font=("Arial", FontSize - 2), name='scanned_images_fpm_label')
-    scanned_images_fpm_label.pack(side=LEFT)
-    as_tooltips.add(scanned_images_fpm_label, "Scan speed in frames per minute.")
+    scanned_Images_fps_value = tk.StringVar(value="")
+    scanned_images_fps_value_label = Label(scanned_images_frame, textvariable=scanned_Images_fps_value, width=5,
+                                     font=("Arial", FontSize - 2), name='scanned_images_fps_value_label')
+    scanned_images_fps_value_label.grid(row=1, column=1, sticky="E")
+    as_tooltips.add(scanned_images_fps_value_label, "Scan speed in frames per minute.")
+
+    scanned_images_time_label = Label(scanned_images_frame, text="Film time:", font=("Arial", FontSize-2),
+                                 name='scanned_images_time_label')
+    scanned_images_time_label.grid(row=2, column=0, sticky="W")
+
+    scanned_Images_time_value = tk.StringVar(value="")
+    scanned_Images_time_value_label = Label(scanned_images_frame, textvariable=scanned_Images_time_value, width=5,
+                                      font=("Arial", FontSize - 2), name='scanned_Images_time_value_label')
+    scanned_Images_time_value_label.grid(row=2, column=1, sticky="E")
+    as_tooltips.add(scanned_Images_time_value_label, "Film time in min:sec")
 
     # Create frame to display number of frames to go, and estimated time to finish
-    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Frames to go', font=("Arial", FontSize - 2),
-                                    name='frames_to_go_frame')
+    frames_to_go_frame = LabelFrame(top_right_area_frame, text='Pending', height=4,
+                                    font=("Arial", FontSize - 2), name='frames_to_go_frame')
     frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
     top_right_area_row += 1
 
-    frames_to_go_str = tk.StringVar(value='')
-    frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=5, font=("Arial", FontSize),
-                                  justify="right", name='frames_to_go_entry')
+    frames_to_go_label = Label(frames_to_go_frame, text="Frames:", font=("Arial", FontSize-2),
+                                 name='frames_to_go_label')
+    frames_to_go_label.grid(row=0, column=0, sticky="W")
+
+    frames_to_go_str = tk.StringVar(value=str(FramesToGo))
+    frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=5,
+                                  font=("Arial", FontSize-2), justify="right", name='frames_to_go_entry')
     # Bind the KeyRelease event to the entry widget
     frames_to_go_entry.bind("<KeyPress>", frames_to_go_key_press)
-    frames_to_go_entry.pack(side=TOP)
+    frames_to_go_entry.grid(row=0, column=1, sticky="E")
     as_tooltips.add(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of "
                                         "remaining time to finish.")
-    time_to_go_str = tk.StringVar(value='')
-    time_to_go_time = Label(frames_to_go_frame, textvariable=time_to_go_str, font=("Arial", FontSize - 2),
-                            name='time_to_go_time')
-    time_to_go_time.pack(side=TOP)
+
+    time_to_go_label = Label(frames_to_go_frame, text="Time:", font=("Arial", FontSize-2),
+                                 name='time_to_go_label')
+    time_to_go_label.grid(row=1, column=0, sticky="W")
+
+    frames_to_go_time_str = tk.StringVar(value='')
+    frames_to_go_time = Label(frames_to_go_frame, textvariable=frames_to_go_time_str,  width=8,
+                              font=("Arial", FontSize - 2), name='frames_to_go_time')
+    frames_to_go_time.grid(row=1, column=1, sticky="E")
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', height=1, font=("Arial", FontSize - 2),
@@ -4991,6 +5080,10 @@ def create_widgets():
     main_container.update_idletasks()
     app_width = min(main_container.winfo_reqwidth(), screen_width - 150)
     app_height = min(main_container.winfo_reqheight(), screen_height - 150)
+    if ExpertMode and extended_frame.winfo_reqwidth() > top_area_frame.winfo_reqwidth():
+        x = int((extended_frame.winfo_reqwidth() - top_area_frame.winfo_reqwidth()) / 2)
+        top_area_frame.config(padx=x-1)
+
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
     win.geometry(f'{app_width}x{app_height - 20}')  # setting the size of the window

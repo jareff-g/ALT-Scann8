@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.20"
-#define  __date__       "2024-03-19"
-#define  __version_highlight__  "Fix - Film in film gate function was broket while implementing neutral default"
+#define __version__     "1.0.21"
+#define  __date__       "2024-03-21"
+#define  __version_highlight__  "Make auto PT level range wider (10-90% instead of 20-80%)"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -58,6 +58,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_VERSION_ID 1
 #define CMD_GET_CNT_STATUS 2
 #define CMD_RESET_CONTROLLER 3
+#define CMD_ADJUST_MIN_FRAME_STEPS 4
 #define CMD_START_SCAN 10
 #define CMD_TERMINATE 11
 #define CMD_GET_NEXT_FRAME 12
@@ -146,8 +147,8 @@ int PerforationThresholdLevelS8 = 90;       // Default value for S8
 int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransistor value to decide if new frame is detected
 int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
-int MinFrameStepsR8 = R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
-int MinFrameStepsS8 = S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+int MinFrameStepsR8;                  // R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
+int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
@@ -261,6 +262,9 @@ void setup() {
 
     // Unlock reels at start up, then lock on demand
     SetReelsAsNeutral(HIGH, HIGH, HIGH);
+
+    // Adjust Min frame steps based on capstan diameter
+    AdjustMinFrameStepsFromCapstanDiameter(CapstanDiameter);
 }
 
 void loop() {
@@ -295,6 +299,18 @@ void loop() {
             case CMD_RESET_CONTROLLER:
                 resetFunc();
                 break;
+            case CMD_ADJUST_MIN_FRAME_STEPS:
+                DebugPrint(">Adjust MFS", param);
+                if (param >= 80 && param <= 300) {   // Capsta diameter between 8-30mm
+                    CapstanDiameter = param/10;
+                    AdjustMinFrameStepsFromCapstanDiameter(CapstanDiameter);
+                    if (IsS8)
+                        MinFrameSteps = MinFrameStepsS8;
+                    else
+                        MinFrameSteps = MinFrameStepsR8;
+                    OriginalMinFrameSteps = MinFrameSteps;
+                }
+                break;
             case CMD_SET_PT_LEVEL:
                 DebugPrint(">PTLevel", param);
                 if (param >= 0 && param <= 900) {
@@ -311,16 +327,24 @@ void loop() {
             case CMD_SET_MIN_FRAME_STEPS:
                 DebugPrint(">MinFSteps", param);
                 if (param == 0 || param >= 100 && param <= 600) {
-                    if (param == 0)
+                    if (param == 0) {
                         Frame_Steps_Auto = true;     // zero means we go in automatic mode
+                        if (IsS8)
+                            MinFrameSteps = MinFrameStepsS8;
+                        else
+                            MinFrameSteps = MinFrameStepsR8;
+                        OriginalMinFrameSteps = MinFrameSteps;
+                    }
                     else {
                         Frame_Steps_Auto = false;
                         MinFrameSteps = param;
                         OriginalMinFrameSteps = MinFrameSteps;
+                        /*
                         if (IsS8)
                             MinFrameStepsS8 = param;
                         else
                             MinFrameStepsR8 = param;
+                        */
                         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                         DebugPrint(">MinSteps",param);
                     }
@@ -448,7 +472,7 @@ void loop() {
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
-                        collect_timer = 10;
+                        collect_timer = 500;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                         ScanState = Sts_SlowForward;
@@ -628,6 +652,11 @@ void loop() {
     }
 }
 
+void AdjustMinFrameStepsFromCapstanDiameter(float diameter) {
+    MinFrameStepsR8 = R8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
+    MinFrameStepsS8 = S8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+}
+
 void SetReelsAsNeutral(boolean ReelA, boolean ReelB, boolean ReelC) {
     digitalWrite(MotorA_Neutral, ReelA);  // No need to unlock reel A, it is always unlocked (except in Rewind)
     digitalWrite(MotorB_Neutral, ReelB);
@@ -772,8 +801,8 @@ int GetLevelPT() {
     if (MinPT_Dynamic < (MaxPT_Dynamic-15)) MinPT_Dynamic+=15;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
     if (PT_Level_Auto && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
-        fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.2);
-        user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.8 * ratio);
+        fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.1);
+        user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.9 * ratio);
         //PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
         PerforationThresholdLevel = int((MinPT_Dynamic + fixed_margin + user_margin)/10);
     }
@@ -816,12 +845,12 @@ void ReportPlotterInfo() {
 boolean SlowForward(){
     static unsigned long LastMove = 0;
     unsigned long CurrentTime = micros();
-    if (CurrentTime > LastMove || LastMove-CurrentTime > 700) { // If timer expired (or wrapped over) ...
+    if (CurrentTime > LastMove || LastMove-CurrentTime > 400) { // If timer expired (or wrapped over) ...
         GetLevelPT();   // No need to know PT level here, but used to update plotter data
         CollectOutgoingFilm();
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
-        LastMove = CurrentTime + 700;
+        LastMove = CurrentTime + 400;
     }
     // Check if film still present (auto stop at end of reel)
     if (AutoStopEnabled && NoFilmDetected) {
