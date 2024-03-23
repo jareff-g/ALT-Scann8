@@ -2911,7 +2911,6 @@ def load_session_data_post_init():
     global ExposureWbAdaptPause
     global FileType, CapstanDiameter
     global CaptureResolution
-    global FilmType, HdrMergeInPlace
 
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
