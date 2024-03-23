@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.51"
+__version__ = "1.10.52"
 __date__ = "2024-03-23"
 __version_highlight__ = "Add QR code in DEBUG mode"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -37,7 +37,7 @@ from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, 
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
 import tkinter.font as tkFont
 
-from PIL import ImageTk, Image
+from PIL import ImageTk, Image, __version__ as PIL_Version
 
 import os
 import time
@@ -70,11 +70,18 @@ try:
 except ImportError:
     SimulatedRun = True
 
+try:
+    import qrcode
+    qr_lib_installed = True
+#except ImportError:
+except Exception as e:
+    print(f"Qr import issue: {e}")
+    qr_lib_installed = False
+
 import threading
 import queue
 import cv2
 import re
-import qrcode
 
 from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
@@ -762,12 +769,13 @@ def cmd_settings_popup_accept():
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
-        if LoggingMode == 'DEBUG':
-            refresh_ui = True   # To display qr code
-        elif qr_code_frame != None:
-            destroy_widgets(qr_code_frame)
-            qr_code_frame.destroy()
-            qr_code_frame = None
+        if qr_lib_installed:
+            if LoggingMode == 'DEBUG':
+                refresh_ui = True   # To display qr code
+            elif qr_code_frame != None:
+                destroy_widgets(qr_code_frame)
+                qr_code_frame.destroy()
+                qr_code_frame = None
         LogLevel = getattr(logging, LoggingMode.upper(), None)
         if not isinstance(LogLevel, int):
             raise ValueError('Invalid log level: %s' % LogLevel)
@@ -1013,21 +1021,37 @@ def get_last_frame_popup(last_frame):
 def refresh_qr_code():
     global qr_code, qr_image
 
+    if not qr_lib_installed:
+        return
+
     if LoggingMode != 'DEBUG' or qr_code_canvas == None:
         return
 
     if qr_code == None:
         qr_code = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-    data = f"{CaptureResolution},{FileType},{FontSize},{CapstanDiameter},{LoggingMode}"
+    data = f"Res:{CaptureResolution}, File:{FileType}, Font:{FontSize}, Capstan:{CapstanDiameter}, Log:{LoggingMode}, TTips:{DisableToolTips}, Widgets:{WidgetsEnabledWhileScanning}"
     print(data)
     qr_code.add_data(data)
     qr_code.make(fit=True)
 
+    # Get Pillow version number
+    major_version = int(PIL_Version.split('.')[0])
+    minor_version = int(PIL_Version.split('.')[1])
+
+    print(f"PIL {major_version}.{minor_version}")
+
+    # Choose resampling method based on Pillow version
+    if major_version > 8 or major_version == 8 and minor_version > 1:
+        resampling_method = Image.Resampling.LANCZOS
+    else:
+        resampling_method = Image.ANTIALIAS
+
     # Create an image from the QR Code instance
     qr_img = qr_code.make_image(fill_color="black", back_color="white")
     size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
+
     # Resize the image to fit within the canvas
-    qr_img = qr_img.resize((size, size), Image.Resampling.LANCZOS)
+    qr_img = qr_img.resize((size, size), resampling_method)
 
     qr_image = ImageTk.PhotoImage(qr_img)
     # Convert the Image object into a Tkinter-compatible image object
@@ -2107,7 +2131,8 @@ def cmd_start_scan_simulated():
             tk.messagebox.showerror("Error!", "Folder " + CurrentDir + " does not  exist!")
             ScanOngoing = False
         else:
-            refresh_qr_code()
+            if qr_lib_installed:
+                refresh_qr_code()
             simulated_captured_frame_list = os.listdir(CurrentDir)
             simulated_captured_frame_list.sort()
             simulated_images_in_list = len(simulated_captured_frame_list)
@@ -2292,7 +2317,8 @@ def start_scan():
             logging.debug("Sending CMD_START_SCAN")
             send_arduino_command(CMD_START_SCAN)
 
-        refresh_qr_code()
+        if qr_lib_installed:
+            refresh_qr_code()
 
         # Invoke capture_loop a first time when scan starts
         win.after(5, capture_loop)
@@ -4781,7 +4807,7 @@ def create_widgets():
         exposure_compensation_spinbox.bind("<FocusOut>", lambda event: cmd_exposure_compensation_selection())
 
         # QR Code
-        if LoggingMode == 'DEBUG':
+        if qr_lib_installed and LoggingMode == 'DEBUG':
             qr_code_frame = LabelFrame(expert_frame, text="Debug Info", font=("Arial", FontSize - 1),
                                           name='qr_code_frame')
             qr_code_frame.grid(row=1, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
