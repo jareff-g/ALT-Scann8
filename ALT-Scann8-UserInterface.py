@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.52"
-__date__ = "2024-03-23"
-__version_highlight__ = "Add QR code in DEBUG mode"
+__version__ = "1.10.53"
+__date__ = "2024-03-24"
+__version_highlight__ = "Add lib versions to QR code"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -52,7 +52,6 @@ import numpy as np
 
 try:
     import psutil
-
     check_disk_space = True
 except ImportError:
     check_disk_space = False
@@ -307,7 +306,6 @@ PreviousGainBlue = 1
 ManualScanEnabled = False
 CameraDisabled = False  # To allow testing scanner without a camera installed
 # QR code to display debug info
-qr_code = None
 qr_image = None
 
 # Dictionaries for additional exposure control with PiCamera2
@@ -1018,38 +1016,108 @@ def get_last_frame_popup(last_frame):
     last_frame_dlg.wait_window()  # block until window is destroyed
     return last_frame_int.get()
 
-def refresh_qr_code():
-    global qr_code, qr_image
 
-    if not qr_lib_installed:
+def generate_qr_code_info():
+    data = (f"ALT-Scann8:{__version__}\n"
+            f"Python:{sys.version}\n"
+            f"TkInter:{tk.TkVersion}\n"
+            f"PIL:{PIL_Version}\n"
+            f"Numpy:{np.__version__}\n"
+            f"OpenCV:{cv2.__version__}\n"
+            f"Res:{CaptureResolution}\n"
+            f"File:{FileType}\n"
+            f"Font:{FontSize}\n"
+            f"Cpst:{CapstanDiameter}\n")
+    return data
+
+
+def generate_qr_code_image():
+    qr_code = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=4)
+    data = generate_qr_code_info()
+    qr_code.add_data(data)
+    qr_code.make(fit=True)
+
+    # Create an image from the QR Code instance
+    qr_img = qr_code.make_image(fill_color="black", back_color="white")
+    return qr_img
+
+
+def display_qr_code_info_dismiss():
+    qr_display_dlg.grab_release()
+    qr_display_dlg.destroy()
+
+
+def copy_qr_code_info(event=None):
+    qr_info_text.tag_add("sel", "1.0", "end")
+    selected_text = qr_info_text.selection_get()
+    if selected_text:
+        win.clipboard_clear()
+        win.clipboard_append(selected_text)
+    qr_info_text.tag_remove("sel", "1.0", "end")
+
+
+def display_qr_code_info(event=None):
+    global qr_display_dlg, qr_info_text
+
+    qr_display_dlg = tk.Toplevel(win)
+
+    if 'QrPos' in ConfigData:
+        qr_display_dlg.geometry(f"+{ConfigData['QrPos'].split('+', 1)[1]}")
+
+    qr_display_dlg.title("Debug info")
+    qr_display_dlg.rowconfigure(0, weight=1)
+    qr_display_dlg.columnconfigure(0, weight=1)
+
+    data = generate_qr_code_info()
+    lines = data.split('\n')
+    num_lines = len(lines)
+    max_length = 0
+    for line in lines:
+        line_length = len(line)
+        if line_length > max_length:
+            max_length = line_length
+    qr_info_text = tk.Text(qr_display_dlg, wrap="word", font=("Arial", FontSize - 6),
+                                     name='qr_info_text', height=num_lines, width=max_length)
+    qr_info_text.insert("end", data)
+    qr_info_text.config(state = DISABLED)
+    qr_info_text.pack(side=TOP, padx=5, pady=5)
+
+    qr_info_dismiss_btn = tk.Button(qr_display_dlg, text="Dismiss", command=display_qr_code_info_dismiss)
+    qr_info_dismiss_btn.pack(side=LEFT, fill="x", expand=True, pady=5)
+
+    qr_info_copy_btn = tk.Button(qr_display_dlg, text="Copy", command=copy_qr_code_info)
+    qr_info_copy_btn.pack(side=RIGHT, fill="x", expand=True, pady=5)
+
+    qr_display_dlg.protocol("WM_DELETE_WINDOW", display_qr_code_info_dismiss)  # intercept close button
+
+    qr_display_dlg.transient(win)  # dialog window is related to main
+    qr_display_dlg.wait_visibility()
+    qr_display_dlg.grab_set()
+    #qr_display_dlg.wait_window()  # block until window is destroyed
+
+
+def refresh_qr_code():
+    global qr_image
+
+    if SimplifiedMode or not qr_lib_installed:
         return
 
     if LoggingMode != 'DEBUG' or qr_code_canvas == None:
         return
 
-    if qr_code == None:
-        qr_code = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
-    data = f"Res:{CaptureResolution}, File:{FileType}, Font:{FontSize}, Capstan:{CapstanDiameter}, Log:{LoggingMode}, TTips:{DisableToolTips}, Widgets:{WidgetsEnabledWhileScanning}"
-    print(data)
-    qr_code.add_data(data)
-    qr_code.make(fit=True)
+    qr_img = generate_qr_code_image()
+
+    size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
 
     # Get Pillow version number
     major_version = int(PIL_Version.split('.')[0])
     minor_version = int(PIL_Version.split('.')[1])
-
-    print(f"PIL {major_version}.{minor_version}")
 
     # Choose resampling method based on Pillow version
     if major_version > 8 or major_version == 8 and minor_version > 1:
         resampling_method = Image.Resampling.LANCZOS
     else:
         resampling_method = Image.ANTIALIAS
-
-    # Create an image from the QR Code instance
-    qr_img = qr_code.make_image(fill_color="black", back_color="white")
-    size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
-
     # Resize the image to fit within the canvas
     qr_img = qr_img.resize((size, size), resampling_method)
 
@@ -2907,9 +2975,9 @@ def load_session_data_post_init():
     global MatchWaitMarginValue
     global StepsPerFrame, PtLevelValue, FrameFineTuneValue, FrameExtraStepsValue, ScanSpeedValue
     global StabilizationDelayValue
-    global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift
+    global HdrMinExp, HdrMaxExp, HdrBracketWidth, HdrBracketShift, HdrMergeInPlace
     global ExposureWbAdaptPause
-    global FileType, CapstanDiameter
+    global FileType, FilmType, CapstanDiameter
     global CaptureResolution
 
     if ConfigurationDataLoaded:
@@ -3425,6 +3493,8 @@ def create_main_window():
 
     logging.info(f"Window size: {app_width}x{app_height + 20}")
 
+    refresh_qr_code()
+
     # Get Top window coordinates
     TopWinX = win.winfo_x()
     TopWinY = win.winfo_y()
@@ -3590,7 +3660,7 @@ def cmd_set_auto_exposure():
 
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeEnable": AutoExpEnabled})
-        camera.set_controls({"ExposureTime": aux})
+        camera.set_controls({"ExposureTime": manual_exposure_value})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
@@ -4810,12 +4880,10 @@ def create_widgets():
             qr_code_frame = LabelFrame(expert_frame, text="Debug Info", font=("Arial", FontSize - 1),
                                           name='qr_code_frame')
             qr_code_frame.grid(row=1, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
-            qr_code_canvas = Canvas(qr_code_frame, bg='white', width=plotter_width, height=plotter_height,
-                                    name='qr_code_canvas')
+            qr_code_width = qr_code_frame.winfo_reqwidth() - 10
+            qr_code_canvas = Canvas(qr_code_frame, bg='white', name='qr_code_canvas', width=1, height=1)
             qr_code_canvas.pack(side=TOP, anchor=N, expand=True, fill='both')
-            qr_code_width = min(qr_code_canvas.winfo_reqwidth() - 10, qr_code_canvas.winfo_reqheight() - 10)
-            qr_code_height = qr_code_width
-            qr_code_canvas.config(width=qr_code_width, height=qr_code_height)
+            qr_code_canvas.bind("<Button-1>", display_qr_code_info)
         else:
             qr_code_canvas = None
             qr_code_frame = None
@@ -5331,7 +5399,7 @@ def main(argv):
     if DisableThreads:
         logging.debug("Threads disabled.")
     if PlotterMode:
-        logging.debug("Toggle ploter mode.")
+        logging.debug("Toggle plotter mode.")
 
     if not SimulatedRun:
         arduino_listen_loop()
