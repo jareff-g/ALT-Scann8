@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.53"
+__version__ = "1.10.54"
 __date__ = "2024-03-24"
-__version_highlight__ = "Add lib versions to QR code"
+__version_highlight__ = "Make QR code bigger"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1104,10 +1104,12 @@ def refresh_qr_code():
 
     if LoggingMode != 'DEBUG' or qr_code_canvas == None:
         return
+    win.update_idletasks()
 
     qr_img = generate_qr_code_image()
 
     size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
+    print(f"({qr_code_canvas.winfo_width()},{qr_code_canvas.winfo_height()})")
 
     # Get Pillow version number
     major_version = int(PIL_Version.split('.')[0])
@@ -4573,11 +4575,14 @@ def create_widgets():
                                   name='expert_frame')
         expert_frame.pack(side=LEFT, padx=x_pad, pady=y_pad, expand=True, fill='y')
         # expert_frame.place(relx=0.25, rely=0.5, anchor="center")
+        expert_frame.rowconfigure(0, weight=0)
+        expert_frame.rowconfigure(1, weight=20)
+        expert_frame.rowconfigure(2, weight=0)
         # *********************************
         # Exposure / white balance
         exp_wb_frame = LabelFrame(expert_frame, text='Auto Exposure / White Balance ', font=("Arial", FontSize - 1),
                                   name='exp_wb_frame')
-        exp_wb_frame.grid(row=0, rowspan=2, column=0, padx=x_pad, pady=y_pad, sticky='NSEW')
+        exp_wb_frame.grid(row=0, rowspan=3, column=0, padx=x_pad, pady=y_pad, sticky='NSEW')
         exp_wb_row = 0
 
         # Match wait (exposure & AWB) margin allowance (0%, wait for same value, 100%, any value will do)
@@ -4753,7 +4758,7 @@ def create_widgets():
         # Frame to add brightness/contrast controls
         brightness_frame = LabelFrame(expert_frame, text="Brightness/Contrast", font=("Arial", FontSize - 1),
                                       name='brightness_frame')
-        brightness_frame.grid(row=0, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
+        brightness_frame.grid(row=0, rowspan=2, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
         brightness_row = 0
 
         # brightness
@@ -4879,10 +4884,9 @@ def create_widgets():
         if qr_lib_installed and LoggingMode == 'DEBUG':
             qr_code_frame = LabelFrame(expert_frame, text="Debug Info", font=("Arial", FontSize - 1),
                                           name='qr_code_frame')
-            qr_code_frame.grid(row=1, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
-            qr_code_width = qr_code_frame.winfo_reqwidth() - 10
+            qr_code_frame.grid(row=1, rowspan=2, column=2, padx=x_pad, pady=y_pad, sticky='NSEW')
             qr_code_canvas = Canvas(qr_code_frame, bg='white', name='qr_code_canvas', width=1, height=1)
-            qr_code_canvas.pack(side=TOP, anchor=N, expand=True, fill='both')
+            qr_code_canvas.pack(side=TOP, expand=True, fill='both')
             qr_code_canvas.bind("<Button-1>", display_qr_code_info)
         else:
             qr_code_canvas = None
@@ -4892,7 +4896,7 @@ def create_widgets():
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", font=("Arial", FontSize - 1),
                                            name='frame_alignment_frame')
-        frame_alignment_frame.grid(row=0, column=2, padx=x_pad, pady=y_pad, sticky='NSEW')
+        frame_alignment_frame.grid(row=0, column=2, padx=x_pad, pady=y_pad, sticky='EW')
         frame_align_row = 0
 
         # Spinbox to select MinFrameSteps on Arduino
@@ -4992,7 +4996,7 @@ def create_widgets():
         # Frame to add stabilization controls (speed & delay)
         speed_quality_frame = LabelFrame(expert_frame, text="Frame stabilization", font=("Arial", FontSize - 1),
                                          name='speed_quality_frame')
-        speed_quality_frame.grid(row=1, column=2, padx=x_pad, pady=y_pad, sticky='NSEW')
+        speed_quality_frame.grid(row=2, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
 
         # Spinbox to select Speed on Arduino (1-10)
         scan_speed_label = tk.Label(speed_quality_frame, text='Scan Speed:', font=("Arial", FontSize - 1),
