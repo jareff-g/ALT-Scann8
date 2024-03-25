@@ -1981,7 +1981,7 @@ def capture_single(mode):
 
     # *** ALT-Scann8 capture frame ***
     if hw_panel_installed:
-        hw_panel.captured_frame()
+        hw_panel.ALT_Scann8_captured_frame()
 
     is_dng = FileType == 'dng'
     is_png = FileType == 'png'
