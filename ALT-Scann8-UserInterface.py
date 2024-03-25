@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.54"
-__date__ = "2024-03-24"
-__version_highlight__ = "Make QR code bigger"
+__version__ = "1.10.55"
+__date__ = "2024-03-25"
+__version_highlight__ = "Bugfixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -76,6 +76,13 @@ try:
 except Exception as e:
     print(f"Qr import issue: {e}")
     qr_lib_installed = False
+
+try:
+    from hw_panel import HwPanel
+    hw_panel_installed = True
+except Exception as e:
+    print(f"Hw panel import issue: {e}")
+    hw_panel_installed = False
 
 import threading
 import queue
@@ -474,6 +481,10 @@ def cmd_app_standard_exit():
 def exit_app(do_save):  # Exit Application
     global ExitingApp
 
+    # *** ALT-Scann8 shutdown starts ***
+    if hw_panel_installed:
+        hw_panel.ALT_Scann8_shutdown_started()
+
     win.config(cursor="watch")
     win.update()
     # Flag app is exiting for all outstanding afters to expire
@@ -767,7 +778,7 @@ def cmd_settings_popup_accept():
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
-        if qr_lib_installed:
+        if not SimplifiedMode and qr_lib_installed:
             if LoggingMode == 'DEBUG':
                 refresh_ui = True   # To display qr code
             elif qr_code_frame != None:
@@ -1967,6 +1978,10 @@ def capture_hdr(mode):
 def capture_single(mode):
     global CurrentFrame
     global total_wait_time_save_image
+
+    # *** ALT-Scann8 capture frame ***
+    if hw_panel_installed:
+        hw_panel.captured_frame()
 
     is_dng = FileType == 'dng'
     is_png = FileType == 'png'
@@ -3539,6 +3554,7 @@ def tscann8_init():
     global MergeMertens, camera_resolutions
     global active_threads
     global time_save_image, time_preview_display, time_awb, time_autoexp
+    global hw_panel
 
     if SimulatedRun:
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
@@ -3564,13 +3580,19 @@ def tscann8_init():
         # Initializes resolution list from a hardcoded sensor_modes
         camera_resolutions = CameraResolutions(simulated_sensor_modes)
 
-        # Initialize rolling average objects
+    # Initialize rolling average objects
     time_save_image = RollingAverage(50)
     time_preview_display = RollingAverage(50)
     time_awb = RollingAverage(50)
     time_autoexp = RollingAverage(50)
 
     create_main_window()
+
+    # Check if hw panel module available
+    if hw_panel_installed:
+        hw_panel = HwPanel(win)
+    else:
+        hw_panel = None
 
     # Init HDR variables
     hdr_init()
@@ -3662,7 +3684,7 @@ def cmd_set_auto_exposure():
 
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeEnable": AutoExpEnabled})
-        camera.set_controls({"ExposureTime": manual_exposure_value})
+        camera.set_controls({"ExposureTime": int(manual_exposure_value)})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
@@ -5409,6 +5431,10 @@ def main(argv):
         arduino_listen_loop()
 
     ALT_scann_init_done = True
+
+    # *** ALT-Scann8 load complete ***
+    if hw_panel_installed:
+        hw_panel.ALT_Scann8_init_completed()
 
     onesec_periodic_checks()
 
