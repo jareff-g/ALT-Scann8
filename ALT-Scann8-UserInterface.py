@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.57"
+__version__ = "1.10.58"
 __date__ = "2024-04-09"
 __version_highlight__ = "Allow user to abort startup if paths in config are not accessible (unmounted drive)"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -108,6 +108,9 @@ FocusZoomFactorY = 0.2
 FreeWheelActive = False
 BaseFolder = os.environ['HOME']
 CurrentDir = BaseFolder
+BaseFolderBackup = BaseFolder
+CurrentDirBackup = BaseFolder
+
 FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
@@ -711,6 +714,16 @@ def cmd_set_new_folder():
 
 
 def cmd_settings_popup_dismiss():
+    global BaseFolder, CurrentDir
+    global BaseFolderBackup, CurrentDirBackup
+
+    BaseFolder = BaseFolderBackup
+    ConfigData["BaseFolder"] = str(BaseFolder)
+    base_folder_btn.config(text=BaseFolder)
+    CurrentDir = CurrentDirBackup
+    ConfigData["CurrentDir"] = str(CurrentDir)
+    folder_frame_target_dir.config(text=CurrentDir)
+
     options_dlg.grab_release()
     options_dlg.destroy()
 
@@ -839,6 +852,11 @@ def cmd_settings_popup():
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
+    global BaseFolderBackup, CurrentDirBackup
+
+    # Save folders in case settings dialog is dismissed
+    BaseFolderBackup = BaseFolder
+    CurrentDirBackup = CurrentDir
 
     options_row = 0
 
@@ -1143,7 +1161,7 @@ def refresh_qr_code():
 
 
 def set_base_folder():
-    global BaseFolder
+    global BaseFolder, CurrentDir
     options_dlg.withdraw()  # Hide the root window
     BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", paretn=None)
     if not os.path.isdir(BaseFolder):
@@ -1151,6 +1169,10 @@ def set_base_folder():
     else:
         ConfigData["BaseFolder"] = str(BaseFolder)
         base_folder_btn.config(text=BaseFolder)
+        CurrentDir = BaseFolder
+        ConfigData["CurrentDir"] = str(CurrentDir)
+        folder_frame_target_dir.config(text=CurrentDir)
+
     options_dlg.deiconify()
 
 
@@ -2928,11 +2950,27 @@ def load_configuration_data_from_disk():
         ConfigurationDataLoaded = True
 
 
+def validate_config_folders():
+    retvalue = True
+    if ConfigurationDataLoaded:
+        if 'BaseFolder' in ConfigData:
+            if not os.path.isdir(ConfigData["BaseFolder"]):
+                retvalue = tk.messagebox.askyesno(title='Drive not mounted?',
+                                                  message='Base folder defined in configuration file is not accessible. '
+                                                          'Do you want to proceed using the current user home folder? '
+                                                          'Otherwise ALT-Scann8 startup will be aborted.')
+        if retvalue and 'CurrentDir' in ConfigData:
+            if not os.path.isdir(ConfigData["CurrentDir"]):
+                retvalue = tk.messagebox.askyesno(title='Drive not mounted?',
+                                                  message='Target folder used in previous session is not accessible. '
+                                                          'Do you want to proceed using the current user home folder? '
+                                                          'Otherwise ALT-Scann8 startup will be aborted.')
+    return retvalue
+
+
 def load_config_data_pre_init():
     global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
-
-    retvalue = True
 
     for item in ConfigData:
         logging.debug("%s=%s", item, str(ConfigData[item]))
@@ -2969,17 +3007,10 @@ def load_config_data_pre_init():
         if 'BaseFolder' in ConfigData:
             if os.path.isdir(ConfigData["BaseFolder"]):
                 BaseFolder = ConfigData["BaseFolder"]
-            else:
-                retvalue = tk.messagebox.askyesno(title='Base folder not accessible',
-                                                 message='Base folder defined in configuration file is not accessible. '
-                                                         'Do you want to proceed using the current user home folder? '
-                                                         'Otherwise ALT-Scann8 startup will be aborted.')
         if 'LogLevel' in ConfigData:
             LogLevel = ConfigData["LogLevel"]
             LoggingMode = logging.getLevelName(LogLevel)
             logging.getLogger().setLevel(LogLevel)
-
-    return retvalue
 
 
 def load_session_data_post_init():
@@ -3004,8 +3035,6 @@ def load_session_data_post_init():
     global ExposureWbAdaptPause
     global FileType, FilmType, CapstanDiameter
     global CaptureResolution
-
-    retvalue = True
 
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
@@ -3041,10 +3070,6 @@ def load_session_data_post_init():
                 CurrentDir = ConfigData["CurrentDir"]
                 # If directory in configuration does not exist we set the current working dir
                 if not os.path.isdir(CurrentDir):
-                    retvalue = tk.messagebox.askyesno(title='Target folder not accessible',
-                                                  message='Target folder used in previous session is not accessible. '
-                                                          'Do you want to proceed using the current user home folder? '
-                                                          'Otherwise ALT-Scann8 startup will be aborted.')
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
             if 'CaptureResolution' in ConfigData:
@@ -3331,8 +3356,6 @@ def load_session_data_post_init():
         send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
 
         widget_list_enable([id_ManualScanEnabled])
-
-    return retvalue
 
 
 def reinit_controller():
@@ -5420,17 +5443,17 @@ def main(argv):
 
     load_configuration_data_from_disk()  # Read json file in memory, to be processed by 'load_session_data_post_init'
 
-    if not load_config_data_pre_init():
+    if not validate_config_folders():
         return
+
+    load_config_data_pre_init()
 
     tscann8_init()
 
     if DisableToolTips:
         as_tooltips.disable()
 
-    if not load_session_data_post_init():
-        exit_app(False)
-        return
+    load_session_data_post_init()
 
     init_multidependent_widgets()
 
