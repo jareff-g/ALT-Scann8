@@ -58,26 +58,29 @@ class HwPanel():
     Singleton class - ensures only one instance is ever created.
     """
     _instance = None
+    ExitingApp = False
     active = ''
     hwpanel_after = None
     hwpanel_first_add = 0x20
     hwpanel_num_add = 4
     hwpanel_current_add = 0 # Round robin counter to poll all MCP23017 chip addresses
+    CMD_GET_CNT_STATUS = 2
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, master_win):
+    def __init__(self, master_win, i2c):
         if not hasattr(self, 'initialized'):
             self.main_win = master_win
+            self.i2c = i2c
             print(f"master_win: {master_win}, self.main_win: {self.main_win}")
             self.hwpanel_after = self.main_win.after(10, self.hwpanel_listen_loop)
 
-    def hwpanel_listen_loop():  # Waits for events from MCP23017 chips
+    def hwpanel_listen_loop(self):  # Waits for events from MCP23017 chips
         try:
-            HwPanelData = i2c.read_i2c_block_data(hwpanel_first_add+hwpanel_current_add, CMD_GET_CNT_STATUS, 5)
+            HwPanelData = self.i2c.read_i2c_block_data(self.hwpanel_first_add+self.hwpanel_current_add, self.CMD_GET_CNT_STATUS, 5)
             HwPanelTrigger = HwPanelData[0]
             HwPanelParam1 = HwPanelData[1] * 256 + HwPanelData[2]
             HwPanelParam2 = HwPanelData[3] * 256 + HwPanelData[4]  # Sometimes this part arrives as 255, 255, no idea why
@@ -101,7 +104,7 @@ class HwPanel():
         elif HwPanelTrigger == 2:
             pass
 
-        if not ExitingApp:
+        if not self.ExitingApp:
             self.hwpanel_after = self.main_win.after(10, self.hwpanel_listen_loop)
 
     def ALT_Scann8_init_completed(self):
@@ -109,8 +112,9 @@ class HwPanel():
         # Replace pass statement with whatever you want to do at init time
 
     def ALT_Scann8_shutdown_started(self):
-        pass
-        # Replace pass statement with whatever you want to do at termination time
+        global ExitingApp
+        self.ExitingApp = True
+        # Add more statements with whatever you want to do at termination time
 
     def ALT_Scann8_captured_frame(self):
         pass

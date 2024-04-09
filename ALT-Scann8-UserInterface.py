@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.55"
-__date__ = "2024-03-25"
-__version_highlight__ = "Bugfixes"
+__version__ = "1.10.56"
+__date__ = "2024-04-09"
+__version_highlight__ = "Prototype of API for hw panels"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3554,7 +3554,7 @@ def tscann8_init():
     global MergeMertens, camera_resolutions
     global active_threads
     global time_save_image, time_preview_display, time_awb, time_autoexp
-    global hw_panel
+    global hw_panel, hw_panel_installed
 
     if SimulatedRun:
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
@@ -3589,8 +3589,11 @@ def tscann8_init():
     create_main_window()
 
     # Check if hw panel module available
+    if SimulatedRun:
+        hw_panel_installed = False
+
     if hw_panel_installed:
-        hw_panel = HwPanel(win)
+        hw_panel = HwPanel(win, i2c)
     else:
         hw_panel = None
 
