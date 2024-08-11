@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.58"
-__date__ = "2024-04-09"
-__version_highlight__ = "Allow user to abort startup if paths in config are not accessible (unmounted drive)"
+__version__ = "1.10.59"
+__date__ = "2024-08-11"
+__version_highlight__ = "Make UV led level adjustable"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -77,12 +77,13 @@ except Exception as e:
     print(f"Qr import issue: {e}")
     qr_lib_installed = False
 
-try:
-    from hw_panel import HwPanel
-    hw_panel_installed = True
-except Exception as e:
-    print(f"Hw panel import issue: {e}")
-    hw_panel_installed = False
+hw_panel_installed = False
+#try:
+#    from hw_panel import HwPanel
+#    hw_panel_installed = True
+#except Exception as e:
+#    print(f"Hw panel import issue: {e}")
+#    hw_panel_installed = False
 
 import threading
 import queue
@@ -218,6 +219,7 @@ CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
 CMD_SET_FRAME_FINE_TUNE = 54
 CMD_SET_EXTRA_STEPS = 56
+CMD_SET_UV_LEVEL = 58
 CMD_REWIND = 60
 CMD_FAST_FORWARD = 61
 CMD_INCREASE_WIND_SPEED = 62
@@ -2635,8 +2637,8 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
 
     MaxPT = max(MaxPT, PTValue)
     MinPT = min(MinPT, PTValue)
-    plotter_canvas.create_text(10, 5, text=str(MaxPT), anchor='nw', font=f"Helvetica {8}")
-    plotter_canvas.create_text(10, plotter_height - 15, text=str(MinPT), anchor='nw', font=f"Helvetica {8}")
+    plotter_canvas.create_text(10, 5, text=str(MaxPT), anchor='nw', font=f"Helvetica {12}")
+    plotter_canvas.create_text(10, plotter_height - 15, text=str(MinPT), anchor='nw', font=f"Helvetica {12}")
     # Shift the graph to the left
     for item in plotter_canvas.find_all():
         plotter_canvas.move(item, -5, 0)
@@ -3164,6 +3166,10 @@ def load_session_data_post_init():
                 aux = int(ConfigData["PreviewModule"])
                 PreviewModuleValue = aux
                 preview_module_value.set(aux)
+            if 'UVBrightness' in ConfigData:
+                aux = int(ConfigData["UVBrightness"])
+                send_arduino_command(CMD_SET_UV_LEVEL, aux)
+                uv_brightness_value.set(aux)
         # Expert mode options
         if ExpertMode:
             if 'MatchWaitMargin' in ConfigData:
@@ -3909,9 +3915,18 @@ def cmd_preview_module_selection():
     ConfigData["PreviewModule"] = aux
 
 
+def cmd_uv_brightness_selection():
+    aux = value_normalize(uv_brightness_value, 1, 255, 255)
+    ConfigData["UVBrightness"] = aux
+    send_arduino_command(CMD_SET_UV_LEVEL, aux)
+
+
 def preview_module_validation(new_value):
     return value_validation(new_value, preview_module_spinbox, 1, 50, 1)
 
+
+def uv_brightness_validation(new_value):
+    return value_validation(new_value, uv_brightness_spinbox, 1, 255, 255)
 
 
 def cmd_stabilization_delay_selection():
@@ -4175,6 +4190,7 @@ def create_widgets():
     global options_btn
     global match_wait_margin_spinbox
     global qr_code_canvas, qr_code_frame
+    global uv_brightness_value, uv_brightness_spinbox
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5102,13 +5118,13 @@ def create_widgets():
     if ExperimentalMode:
         experimental_frame = LabelFrame(extended_frame, text='Experimental Area', font=("Arial", FontSize - 1),
                                         name='experimental_frame')
-        experimental_frame.pack(side=LEFT, padx=x_pad, pady=y_pad, expand=True, fill='y')
+        experimental_frame.pack(side=TOP, padx=x_pad, pady=y_pad, expand=True, fill='y')
         # experimental_frame.place(relx=0.75, rely=0.5, anchor="center")
 
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", font=("Arial", FontSize - 1),
                                name='hdr_frame')
-        hdr_frame.pack(side=LEFT, fill='both', padx=x_pad, pady=y_pad, expand=True)
+        hdr_frame.grid(row=0, column=0, sticky='NWE', padx=x_pad, pady=y_pad)
         hdr_row = 0
         hdr_capture_active = tk.BooleanVar(value=HdrCaptureActive)
         hdr_capture_active_checkbox = tk.Checkbutton(hdr_frame, text=' Active', height=1,
@@ -5225,34 +5241,10 @@ def create_widgets():
                                                      "encoding. Allow to make some use of the time spent waiting for "
                                                      "the camera to adapt the exposure.")
 
-        # Experimental miscellaneous sub-frame
-        experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous',
-                                                      font=("Arial", FontSize - 1),
-                                                      name ='experimental_miscellaneous_frame')
-        experimental_miscellaneous_frame.pack(side=LEFT, padx=x_pad, pady=y_pad, fill='both', expand=True)
-        experimental_row = 0
-
-        # Display entry to throttle Rwnd/FF speed
-        rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame, text='RW/FF speed:',
-                                            font=("Arial", FontSize - 1), name='rwnd_speed_control_label')
-        rwnd_speed_control_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
-        rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
-        rwnd_speed_control_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, state='readonly', width=4,
-                                                    command=cmd_rwnd_speed_control_selection, from_=40, to=800,
-                                                    increment=50, textvariable=rwnd_speed_control_value,
-                                                    font=("Arial", FontSize - 1), name='rwnd_speed_control_spinbox')
-        rwnd_speed_control_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad)
-        cmd_rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
-        rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(cmd_rewind_speed_validation_cmd, '%P'))
-        as_tooltips.add(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
-        # No need to validate on FocusOut, since no keyboard entry is allowed in this one
-        experimental_row += 1
-
         # Damaged film helpers, to help handling damaged film (broken perforations)
-        damaged_film_frame = LabelFrame(experimental_miscellaneous_frame, text='Damaged film',
+        damaged_film_frame = LabelFrame(experimental_frame, text='Damaged film',
                                         font=("Arial", FontSize - 1), name='damaged_film_frame')
-        damaged_film_frame.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
-        experimental_row +=1
+        damaged_film_frame.grid(row=1, column=0, sticky='NWE', padx=x_pad, pady=y_pad)
 
         # Checkbox to enable/disable manual scan
         Manual_scan_activated = tk.BooleanVar(value=ManualScanEnabled)
@@ -5290,6 +5282,29 @@ def create_widgets():
         manual_scan_take_snap_btn.pack(side=RIGHT, fill=Y)
         as_tooltips.add(manual_scan_take_snap_btn, "Take snapshot of frame at current position, then tries to advance "
                                                    "to next frame.")
+
+        # Experimental miscellaneous sub-frame
+        experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous',
+                                                      font=("Arial", FontSize - 1),
+                                                      name ='experimental_miscellaneous_frame')
+        experimental_miscellaneous_frame.grid(row=0, column=1, sticky='NWE', padx=x_pad, pady=y_pad)
+        experimental_row = 0
+
+        # Display entry to throttle Rwnd/FF speed
+        rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame, text='RW/FF speed:',
+                                            font=("Arial", FontSize - 1), name='rwnd_speed_control_label')
+        rwnd_speed_control_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
+        rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
+        rwnd_speed_control_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, state='readonly', width=4,
+                                                    command=cmd_rwnd_speed_control_selection, from_=40, to=800,
+                                                    increment=50, textvariable=rwnd_speed_control_value,
+                                                    font=("Arial", FontSize - 1), name='rwnd_speed_control_spinbox')
+        rwnd_speed_control_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad)
+        cmd_rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
+        rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(cmd_rewind_speed_validation_cmd, '%P'))
+        as_tooltips.add(rwnd_speed_control_spinbox, "Speed up/slow down the RWND/FF speed.")
+        # No need to validate on FocusOut, since no keyboard entry is allowed in this one
+        experimental_row += 1
 
         # Retreat movie button (slow backward through filmgate)
         retreat_movie_btn = Button(experimental_miscellaneous_frame, text="Movie Backward", command=cmd_retreat_movie,
@@ -5333,6 +5348,21 @@ def create_widgets():
                                                 "frames. Can speed up scanning significantly")
         preview_module_spinbox.configure(validate="key", validatecommand=(cmd_preview_module_validation_cmd, '%P'))
         preview_module_spinbox.bind("<FocusOut>", lambda event: cmd_preview_module_selection())
+        experimental_row += 1
+
+        # Spinbox to select UV led brightness
+        uv_brightness_label = tk.Label(experimental_miscellaneous_frame, text='UV brightness:',
+                                        font=("Arial", FontSize - 1), name='uv_brightness_label')
+        uv_brightness_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
+        uv_brightness_value = tk.IntVar(value=255)  # Default value, overriden by configuration
+        uv_brightness_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=cmd_uv_brightness_selection,
+                                                width=3, textvariable=uv_brightness_value, from_=1, to=255,
+                                                font=("Arial", FontSize - 1), name='uv_brightness_spinbox')
+        uv_brightness_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        cmd_uv_brightness_validation_cmd = uv_brightness_spinbox.register(uv_brightness_validation)
+        as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
+        uv_brightness_spinbox.configure(validate="key", validatecommand=(cmd_uv_brightness_validation_cmd, '%P'))
+        uv_brightness_spinbox.bind("<FocusOut>", lambda event: cmd_uv_brightness_selection())
         experimental_row += 1
 
     # Adjust plotter size based on right  frames
