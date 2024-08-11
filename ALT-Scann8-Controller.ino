@@ -15,12 +15,12 @@ More info in README.md file
 */
 
 #define __author__      "Juan Remirez de Esparza"
-#define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.21"
-#define  __date__       "2024-03-21"
-#define  __version_highlight__  "Make auto PT level range wider (10-90% instead of 20-80%)"
+#define __version__     "1.0.22"
+#define  __date__       "2024-08-11"
+#define  __version_highlight__  "Make UV led level adjustable"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -75,6 +75,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
 #define CMD_SET_EXTRA_STEPS 56
+#define CMD_SET_UV_LEVEL 58
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -322,6 +323,15 @@ void loop() {
                         OriginalPerforationThresholdLevel = param;
                     }
                     DebugPrint(">PTLevel",param);
+                }
+                break;
+            case CMD_SET_UV_LEVEL:
+                DebugPrint(">UVLevel", param);
+                if (param >= 1 && param <= 255) {
+                    UVLedBrightness = param;
+                    if (UVLedOn) {
+                        analogWrite(11, UVLedBrightness); // If UV LED on, set it to requested level
+                    }
                 }
                 break;
             case CMD_SET_MIN_FRAME_STEPS:
