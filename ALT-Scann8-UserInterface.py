@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.59"
-__date__ = "2024-08-11"
-__version_highlight__ = "Make UV led level adjustable"
+__version__ = "1.10.60"
+__date__ = "2024-08-13"
+__version_highlight__ = "Allow manual switch of UV led"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -35,7 +35,6 @@ import tkinter.messagebox
 import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
-import tkinter.font as tkFont
 
 from PIL import ImageTk, Image, __version__ as PIL_Version
 
@@ -107,6 +106,7 @@ FocusZoomPosY = 0.35
 FocusZoomFactorX = 0.2
 FocusZoomFactorY = 0.2
 FreeWheelActive = False
+ManualUvLedOn = False
 BaseFolder = os.environ['HOME']
 CurrentDir = BaseFolder
 BaseFolderBackup = BaseFolder
@@ -210,6 +210,7 @@ CMD_STOP_SCAN = 13
 CMD_SET_REGULAR_8 = 18
 CMD_SET_SUPER_8 = 19
 CMD_SWITCH_REEL_LOCK_STATUS = 20
+CMD_MANUAL_UV_LED = 22
 CMD_FILM_FORWARD = 30
 CMD_FILM_BACKWARD = 31
 CMD_SINGLE_STEP = 40
@@ -551,6 +552,23 @@ def cmd_set_free_mode():
 
     # Enable/Disable related buttons
     except_widget_global_enable(free_btn, not FreeWheelActive)
+
+
+def cmd_manual_uv():
+    global ManualUvLedOn
+
+    ManualUvLedOn = not ManualUvLedOn
+
+    if ManualUvLedOn:
+        manual_uv_btn.config(text='Plotter OFF', bg='red', fg='white', relief=SUNKEN)
+    else:
+        manual_uv_btn.config(text='Plotter ON', bg=save_bg, fg=save_fg, relief=RAISED)
+
+    if not SimulatedRun:
+        send_arduino_command(CMD_MANUAL_UV_LED)
+
+    # Enable/Disable related buttons
+    except_widget_global_enable(manual_uv_btn, not ManualUvLedOn)
 
 
 def cmd_set_auto_stop_enabled():
@@ -4122,7 +4140,7 @@ def create_widgets():
     global AdvanceMovie_btn
     global negative_image_checkbox, negative_image
     global fast_forward_btn, rewind_btn
-    global free_btn
+    global free_btn, manual_uv_btn
     global rpi_temp_value_label
     global start_btn
     global folder_frame_target_dir
@@ -4203,7 +4221,7 @@ def create_widgets():
 
         # Add a horizontal scrollbar to the canvas
         scrolled_canvas_scrollbar_h = tk.Scrollbar(win, orient=tk.HORIZONTAL, command=scrolled_canvas.xview)
-        scrolled_canvas_scrollbar_h.pack(side=tk.BOTTOM, fill=tk.X)
+        scrolled_canvas_scrollbar_h.pack(side=BOTTOM, fill=tk.X)
 
         scrolled_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
@@ -5363,6 +5381,14 @@ def create_widgets():
         as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
         uv_brightness_spinbox.configure(validate="key", validatecommand=(cmd_uv_brightness_validation_cmd, '%P'))
         uv_brightness_spinbox.bind("<FocusOut>", lambda event: cmd_uv_brightness_selection())
+        experimental_row += 1
+
+        # Manual UV Led switch
+        manual_uv_btn = Button(experimental_miscellaneous_frame, text="Plotter on", command=cmd_manual_uv,
+                          activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1), name='manual_uv_btn')
+        manual_uv_btn.widget_type = "experimental"
+        manual_uv_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
+        as_tooltips.add(manual_uv_btn, "Manually switch UV led (to allow tunning using plotter)")
         experimental_row += 1
 
     # Adjust plotter size based on right  frames

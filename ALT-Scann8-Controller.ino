@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.22"
-#define  __date__       "2024-08-11"
-#define  __version_highlight__  "Make UV led level adjustable"
+#define __version__     "1.0.23"
+#define  __date__       "2024-08-13"
+#define  __version_highlight__  "Allow manual switch of UV led"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -66,6 +66,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_REGULAR_8 18
 #define CMD_SET_SUPER_8 19
 #define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_MANUAL_UV_LED 22
 #define CMD_FILM_FORWARD 30
 #define CMD_FILM_BACKWARD 31
 #define CMD_SINGLE_STEP 40
@@ -128,7 +129,8 @@ enum ScanState{
     Sts_FastForward,
     Sts_SlowForward,
     Sts_SlowBackward,
-    Sts_SingleStep
+    Sts_SingleStep,
+    Sts_ManualUvLed
 }
 ScanState=Sts_Idle;
 
@@ -478,6 +480,10 @@ void loop() {
                         ScanState = Sts_UnlockReels;
                         delay(50);
                         break;
+                    case CMD_MANUAL_UV_LED:
+                        analogWrite(11, UVLedBrightness); // Switch UV LED on
+                        ScanState = Sts_ManualUvLed;
+                        break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         FilmDetectedTime = millis() + MaxFilmStallTime;
@@ -608,6 +614,16 @@ void loop() {
                         digitalWrite(MotorB_Neutral, HIGH);
                         digitalWrite(MotorC_Neutral, HIGH);
                     }
+                    GetLevelPT();   // No need to know PT level here, but used to update plotter data
+                }
+                break;
+            case Sts_ManualUvLed:
+                if (UI_Command == CMD_MANUAL_UV_LED) { //request to switch of uv led
+                    UVLedOn = false;
+                    analogWrite(11, 0);
+                    ScanState = Sts_Idle;
+                }
+                else {
                     GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
                 break;
