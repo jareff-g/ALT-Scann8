@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.60"
-__date__ = "2024-08-13"
-__version_highlight__ = "Allow manual switch of UV led"
+__version__ = "1.10.63"
+__date__ = "2024-11-25"
+__version_highlight__ = "Various bugfixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1183,7 +1183,7 @@ def refresh_qr_code():
 def set_base_folder():
     global BaseFolder, CurrentDir
     options_dlg.withdraw()  # Hide the root window
-    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", paretn=None)
+    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", parent=None)
     if not os.path.isdir(BaseFolder):
         tk.messagebox.showerror("Error!", f"Folder {BaseFolder} does not exist. Please specify an existing folder name.")
     else:
@@ -1558,7 +1558,6 @@ def capture_save_thread(queue, event, id):
             break
         # Invert image if button selected
         is_dng = FileType == 'dng'
-        is_jpg = FileType == 'jpg'
         # Extract info from message
         type = message[0]
         if type == REQUEST_TOKEN:
@@ -1611,7 +1610,7 @@ def capture_save_thread(queue, event, id):
 
 
 def draw_preview_image(preview_image, curframe, idx):
-    global total_wait_time_preview_display
+    global total_wait_time_preview_display, PreviewModuleValue
 
     curtime = time.time()
 
@@ -1910,7 +1909,7 @@ def adjust_hdr_bracket():
 
 
 def capture_hdr(mode):
-    global recalculate_hdr_exp_list
+    global recalculate_hdr_exp_list, PreviewModuleValue
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -2019,7 +2018,7 @@ def capture_hdr(mode):
 
 def capture_single(mode):
     global CurrentFrame
-    global total_wait_time_save_image
+    global total_wait_time_save_image, PreviewModuleValue
 
     # *** ALT-Scann8 capture frame ***
     if hw_panel_installed:
@@ -2096,7 +2095,7 @@ def capture_single(mode):
 # 'still': Button to capture still (specific filename)
 # 'preview': Manual scan, display only, do not save
 def capture(mode):
-    global PreviousCurrentExposure
+    global PreviousCurrentExposure, PreviewModuleValue
     global PreviousGainRed, PreviousGainBlue
     global total_wait_time_autoexp, total_wait_time_awb
     global CurrentStill
@@ -2477,6 +2476,7 @@ def capture_loop():
     global ScanStopRequested
     global session_frames, CurrentStill
     global disk_space_error_to_notify
+    global AutoStopEnabled
 
     if ScanStopRequested:
         stop_scan()
@@ -2518,7 +2518,8 @@ def capture_loop():
                         minutes_pending = FramesToGo // FramesPerMinute
                         frames_to_go_time_str.set(f"{(minutes_pending // 60):02}h {(minutes_pending % 60):02}m")
                 else:
-                    ScanStopRequested = True  # Stop in next capture loop
+                    if AutoStopEnabled and autostop_type.get() == "counter_to_zero":
+                        ScanStopRequested = True  # Stop in next capture loop
                     ConfigData["FramesToGo"] = -1
                     frames_to_go_str.set('')  # clear frames to go box to prevent it stops again in next scan
             CurrentFrame += 1
@@ -3092,22 +3093,6 @@ def load_session_data_post_init():
                 if not os.path.isdir(CurrentDir):
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
-            if 'CaptureResolution' in ConfigData:
-                valid_resolution_list = camera_resolutions.get_list()
-                selected_resolution = ConfigData["CaptureResolution"]
-                if selected_resolution not in valid_resolution_list:
-                    if selected_resolution + ' *' in valid_resolution_list:
-                        selected_resolution = selected_resolution + ' *'
-                    else:
-                        selected_resolution = valid_resolution_list[2]
-                CaptureResolution = selected_resolution
-                if CaptureResolution == "4056x3040":
-                    max_inactivity_delay = reference_inactivity_delay * 2
-                else:
-                    max_inactivity_delay = reference_inactivity_delay
-                send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
-                logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-                PiCam2_change_resolution()
             if ExperimentalMode:
                 if 'HdrCaptureActive' in ConfigData:
                     if isinstance(ConfigData["HdrCaptureActive"], str):
@@ -3169,6 +3154,22 @@ def load_session_data_post_init():
             ConfigData["HdrBracketShift"] = HdrBracketShift
             widget_list_enable([id_HdrCaptureActive])
 
+        if 'CaptureResolution' in ConfigData:
+            valid_resolution_list = camera_resolutions.get_list()
+            selected_resolution = ConfigData["CaptureResolution"]
+            if selected_resolution not in valid_resolution_list:
+                if selected_resolution + ' *' in valid_resolution_list:
+                    selected_resolution = selected_resolution + ' *'
+                else:
+                    selected_resolution = valid_resolution_list[2]
+            CaptureResolution = selected_resolution
+            if CaptureResolution == "4056x3040":
+                max_inactivity_delay = reference_inactivity_delay * 2
+            else:
+                max_inactivity_delay = reference_inactivity_delay
+            send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+            logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
+            PiCam2_change_resolution()
         if 'CapstanDiameter' in ConfigData:
             CapstanDiameter = ConfigData["CapstanDiameter"]
             logging.debug(f"Retrieved from config: CapstanDiameter = {CapstanDiameter} ({ConfigData['CapstanDiameter']})")
@@ -3408,6 +3409,8 @@ def reinit_controller():
 
 
 def PiCam2_change_resolution():
+    global CaptureResolution
+
     camera_resolutions.set_active(CaptureResolution)
     if SimulatedRun or CameraDisabled:
         return  # Skip camera specific part
@@ -3929,8 +3932,9 @@ def scan_speed_validation(new_value):
 
 
 def cmd_preview_module_selection():
-    aux = value_normalize(preview_module_value, 1, 50, 1)
-    ConfigData["PreviewModule"] = aux
+    global PreviewModuleValue
+    PreviewModuleValue = value_normalize(preview_module_value, 1, 50, 1)
+    ConfigData["PreviewModule"] = PreviewModuleValue
 
 
 def cmd_uv_brightness_selection():
@@ -5305,7 +5309,7 @@ def create_widgets():
         experimental_miscellaneous_frame = LabelFrame(experimental_frame, text='Miscellaneous',
                                                       font=("Arial", FontSize - 1),
                                                       name ='experimental_miscellaneous_frame')
-        experimental_miscellaneous_frame.grid(row=0, column=1, sticky='NWE', padx=x_pad, pady=y_pad)
+        experimental_miscellaneous_frame.grid(row=0, column=1, rowspan=2, sticky='NWE', padx=x_pad, pady=y_pad)
         experimental_row = 0
 
         # Display entry to throttle Rwnd/FF speed
