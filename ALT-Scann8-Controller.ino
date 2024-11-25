@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.23"
-#define  __date__       "2024-08-13"
-#define  __version_highlight__  "Allow manual switch of UV led"
+#define __version__     "1.0.24"
+#define  __date__       "2024-11-25"
+#define  __version_highlight__  "Faster collect when doing film slow forward"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -783,7 +783,7 @@ void CollectOutgoingFilm(void) {
         if (TractionSwitchActive)
             TimeToCollect = CurrentTime + collect_timer;
         else
-            TimeToCollect = CurrentTime + 5;
+            TimeToCollect = CurrentTime + 3;
     }
 }
 
