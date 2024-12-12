@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.24"
-#define  __date__       "2024-11-25"
-#define  __version_highlight__  "Faster collect when doing film slow forward"
+#define __version__     "1.0.25"
+#define  __date__       "2024-12-12"
+#define  __version_highlight__  "Fix bug adjusting scan speed when reaching frame detection"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -139,7 +139,6 @@ int UVLedBrightness = 255;                  // Brightness UV led, may need to be
 unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
 unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
 unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
 unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
@@ -166,7 +165,7 @@ int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 int OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
 int FrameStepsDone = 0;                     // Count steps
-// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// OriginalScanSpeed keeps a safe value to revert to in case of need, should not be updated
 // with dynamically calculated values
 unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
@@ -1012,8 +1011,8 @@ ScanResult scan(int UI_Command) {
 
         TractionSwitchActive = digitalRead(TractionStopPin);
 
-        if (FrameStepsDone > DecreaseSpeedFrameSteps)
-            ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+        if (FrameStepsDone > DecreaseSpeedFrameSteps)   // Progressively decrease speed before frame detection
+            ScanSpeed = OriginalScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
         FrameDetected = false;
 
