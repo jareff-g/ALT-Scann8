@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.63"
-__date__ = "2024-11-25"
-__version_highlight__ = "Various bugfixes"
+__version__ = "1.10.64"
+__date__ = "2024-12-14"
+__version_highlight__ = "Bugfix: Match margin spinbox not enabled on startup"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3191,6 +3191,13 @@ def load_session_data_post_init():
                 uv_brightness_value.set(aux)
         # Expert mode options
         if ExpertMode:
+            if 'ExposureWbAdaptPause' in ConfigData:
+                ExposureWbAdaptPause = ConfigData["ExposureWbAdaptPause"]
+                auto_exp_wb_change_pause.set(ExposureWbAdaptPause)
+                if ExposureWbAdaptPause:
+                    auto_exp_wb_wait_btn.select()
+                else:
+                    auto_exp_wb_wait_btn.deselect()
             if 'MatchWaitMargin' in ConfigData:
                 MatchWaitMarginValue = ConfigData["MatchWaitMargin"]
             else:
@@ -3216,13 +3223,6 @@ def load_session_data_post_init():
                 if not SimulatedRun and not CameraDisabled:
                     camera.set_controls({"ExposureTime": int(aux)})
                 exposure_value.set(aux / 1000)
-            if 'ExposureWbAdaptPause' in ConfigData:
-                ExposureWbAdaptPause = ConfigData["ExposureWbAdaptPause"]
-                auto_exp_wb_change_pause.set(ExposureWbAdaptPause)
-                if ExposureWbAdaptPause:
-                    auto_exp_wb_wait_btn.select()
-                else:
-                    auto_exp_wb_wait_btn.deselect()
             if 'CurrentAwbAuto' in ConfigData:     # Delete legacy name, replace with new
                 ConfigData['AutoWbEnabled'] = ConfigData['CurrentAwbAuto']
                 del ConfigData['CurrentAwbAuto']
