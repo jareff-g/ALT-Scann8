@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.24"
-#define  __date__       "2024-11-25"
-#define  __version_highlight__  "Faster collect when doing film slow forward"
+#define __version__     "1.0.25"
+#define  __date__       "2024-12-12"
+#define  __version_highlight__  "Fix bug adjusting scan speed when reaching frame detection"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -136,11 +136,11 @@ ScanState=Sts_Idle;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 255;                  // Brightness UV led, may need to be changed depending on LED type
-unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
-unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
-unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+int ScanSpeed = 10;                         // 10 - Nominal scan speed as displayed in the UI
+unsigned long BaseScanSpeedDelay = 10;      // 25 - Base delay to calculate scan speed on which other are based
+unsigned long StepScanSpeedDelay = 100;     // 250: Increment delays to reduce scan speed
+unsigned long ScanSpeedDelay = BaseScanSpeedDelay;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long DecreaseScanSpeedDelayStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
@@ -155,7 +155,7 @@ int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(N
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
-int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 3;  // 3 - Hardcoded, before Dec 2024 it was adjusted according to scan speed
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -166,9 +166,9 @@ int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 int OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
 int FrameStepsDone = 0;                     // Count steps
-// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// OriginalScanSpeedDelay keeps a safe value to revert to in case of need, should not be updated
 // with dynamically calculated values
-unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
+unsigned long OriginalScanSpeedDelay = ScanSpeedDelay;          // Keep to restore original value when needed
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
 int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
@@ -384,10 +384,12 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 if (param >= 1 and param <= 10) {   // Handle only if valid speed (I2C sometimes fails)
-                    ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
+                    ScanSpeed = param;
+                    ScanSpeedDelay = BaseScanSpeedDelay + (10-param) * StepScanSpeedDelay;
                     scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
-                    OriginalScanSpeed = ScanSpeed;
-                    DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
+                    OriginalScanSpeedDelay = ScanSpeedDelay;
+                    //DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
+                    DecreaseSpeedFrameStepsBefore = 3;
                     DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 }
                 break;
@@ -434,7 +436,7 @@ void loop() {
                         StartFrameTime = micros();
                         FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
-                        ScanSpeed = OriginalScanSpeed;
+                        ScanSpeedDelay = OriginalScanSpeedDelay;
                         collect_timer = scan_collect_timer;
                         tone(A2, 2000, 50);
                         break;
@@ -448,7 +450,7 @@ void loop() {
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
-                        ScanSpeed = OriginalScanSpeed;
+                        ScanSpeedDelay = OriginalScanSpeedDelay;
                         DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
                         DebugPrintStr(">Next fr.");
                         // Also send, if required, to RPi autocalculated threshold level every frame
@@ -987,7 +989,7 @@ void capstan_advance(int steps) {
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
         if (steps > 1)
-            delayMicroseconds(1000);
+            delayMicroseconds(100 + (10-ScanSpeed)*50);
     }
     digitalWrite(MotorB_Stepper, LOW);
 }
@@ -998,12 +1000,13 @@ ScanResult scan(int UI_Command) {
     ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
     static unsigned long TimeToScan = 0;
     unsigned long CurrentTime = micros();
+    int FrameStepsToDo = 1;
 
-    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeed) {
+    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeedDelay) {
         return (retvalue);
     }
     else {
-        TimeToScan = CurrentTime + ScanSpeed;
+        TimeToScan = CurrentTime + ScanSpeedDelay;
 
         if (GreenLedOn) {  // If last time frame was detected ...
             GreenLedOn = false;
@@ -1012,8 +1015,9 @@ ScanResult scan(int UI_Command) {
 
         TractionSwitchActive = digitalRead(TractionStopPin);
 
-        if (FrameStepsDone > DecreaseSpeedFrameSteps)
-            ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+        if (FrameStepsDone > DecreaseSpeedFrameSteps)   // Progressively decrease speed before frame detection
+            ScanSpeedDelay = OriginalScanSpeedDelay +
+                min(20000, DecreaseScanSpeedDelayStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
         FrameDetected = false;
 
@@ -1026,8 +1030,9 @@ ScanResult scan(int UI_Command) {
         //-------------ScanFilm-----------
         FrameDetected = IsHoleDetected();
         if (!FrameDetected) {
-            capstan_advance(1);
-            FrameStepsDone++;
+            FrameStepsToDo = min(1 + (ScanSpeed - 1) * 15, max(1,DecreaseSpeedFrameSteps-FrameStepsDone));
+            capstan_advance(FrameStepsToDo);
+            FrameStepsDone+=FrameStepsToDo;
         }
 
         if (FrameDetected) {
