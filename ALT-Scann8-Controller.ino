@@ -19,7 +19,7 @@ More info in README.md file
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
 #define __version__     "1.0.25"
-#define  __date__       "2024-12-12"
+#define  __date__       "2024-12-14"
 #define  __version_highlight__  "Fix bug adjusting scan speed when reaching frame detection"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
