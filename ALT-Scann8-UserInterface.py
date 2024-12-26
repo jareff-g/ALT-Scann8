@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.64"
-__date__ = "2024-12-14"
-__version_highlight__ = "Bugfix: Match margin spinbox not enabled on startup"
+__version__ = "1.10.65"
+__date__ = "2024-12-26"
+__version_highlight__ = "Bugfix: Error when selecting target folder with no frames (no functional impact)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1214,8 +1214,9 @@ def cmd_set_existing_folder():
         if os.path.isfile(os.path.join(NewDir, name)):
             # Extract frame number using regular expression
             frame_number = re.findall(r'\d+', name)
-            last_frame = max(last_frame, int(frame_number[0]))  # Only one number in the filename, so we take the first
-            filecount += 1
+            if len(frame_number) > 0:
+                last_frame = max(last_frame, int(frame_number[0]))  # Only one number in the filename, so we take the first
+                filecount += 1
 
     current_frame_str = str(get_last_frame_popup(last_frame))
 
