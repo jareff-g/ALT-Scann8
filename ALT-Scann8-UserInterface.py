@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.65"
-__date__ = "2024-12-26"
-__version_highlight__ = "Bugfix: Error when selecting target folder with no frames (no functional impact)"
+__version__ = "1.10.66"
+__date__ = "2025-01-01"
+__version_highlight__ = "Change value_normalize: When value out of bounds, set to lower/higher instead of default"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3709,8 +3709,10 @@ def value_normalize(var, min_value, max_value, default):
     except tk.TclError as e:
         var.set(default)
         return min_value
-    if value > max_value or value < min_value:
-        value = default
+    if value > max_value:
+        value = max_value
+    if value < min_value:
+        value = min_value
     var.set(value)
     return value
 
