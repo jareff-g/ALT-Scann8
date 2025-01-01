@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.66"
+__version__ = "1.10.67"
 __date__ = "2025-01-01"
-__version_highlight__ = "Change value_normalize: When value out of bounds, set to lower/higher instead of default"
+__version_highlight__ = "Fix issue when opening popups before main window is created"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3522,6 +3522,7 @@ def create_main_window():
         win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
     else:
         destroy_widgets(win)
+        win.deiconify()
     if SimulatedRun:
         win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
     else:
@@ -5453,6 +5454,7 @@ def main(argv):
     global FontSize, UIScrollbars
     global WidgetsEnabledWhileScanning
     global DisableToolTips
+    global win
 
     DisableToolTips = False
 
@@ -5503,6 +5505,9 @@ def main(argv):
         init_logging()
 
     ALT_scann_init_done = False
+
+    win = tkinter.Tk()  # Create temporary main window to support popups before main window is created
+    win.withdraw()  # Hide temporary main window
 
     load_configuration_data_from_disk()  # Read json file in memory, to be processed by 'load_session_data_post_init'
 
