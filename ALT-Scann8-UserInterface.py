@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.67"
-__date__ = "2025-01-01"
-__version_highlight__ = "Fix issue when opening popups before main window is created"
+__version__ = "1.10.68"
+__date__ = "2025-01-06"
+__version_highlight__ = "Fix few bugs happening on a very first run (before config file exists)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -754,6 +754,7 @@ def cmd_settings_popup_accept():
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue, CapstanDiameter
     global qr_code_frame
+    global capstan_diameter_float
 
     ConfigData["PopupPos"] = options_dlg.geometry()
 
@@ -959,7 +960,7 @@ def cmd_settings_popup():
     capstan_diameter_float = tk.DoubleVar(value=CapstanDiameter)
     logging.debug(f"Settings popup: capstan_diameter_float = {CapstanDiameter} ({capstan_diameter_float.get()})")
     capstan_diameter_spinbox = DynamicSpinbox(capstan_diameter_frame, command=cmd_exposure_selection, width=4, from_=8, to=30,
-                                      textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 2))
+                                      format="%.1f", textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 2))
     capstan_diameter_spinbox.pack(side=LEFT)
     capstan_diameter_mm_label = tk.Label(capstan_diameter_frame, text="mm", font=("Arial", FontSize-2))
     capstan_diameter_mm_label.pack(side=LEFT)
@@ -2970,6 +2971,10 @@ def load_configuration_data_from_disk():
         ConfigData = json.load(configuration_data_file)
         configuration_data_file.close()
         ConfigurationDataLoaded = True
+        logging.debug("Config data loaded from %s", ConfigurationDataFilename)
+    else:
+        logging.debug("Config data not loaded, file %s does not exist", ConfigurationDataFilename)
+
 
 
 def validate_config_folders():
@@ -3170,7 +3175,6 @@ def load_session_data_post_init():
                 max_inactivity_delay = reference_inactivity_delay
             send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
             logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-            PiCam2_change_resolution()
         if 'CapstanDiameter' in ConfigData:
             CapstanDiameter = ConfigData["CapstanDiameter"]
             logging.debug(f"Retrieved from config: CapstanDiameter = {CapstanDiameter} ({ConfigData['CapstanDiameter']})")
@@ -3382,6 +3386,8 @@ def load_session_data_post_init():
         send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
 
         widget_list_enable([id_ManualScanEnabled])
+    # Initialize camera resolution with value set, whether default or from configuration
+    PiCam2_change_resolution()
 
 
 def reinit_controller():
@@ -3423,6 +3429,9 @@ def PiCam2_change_resolution():
     camera.stop()
     camera.configure(capture_config)
     camera.start()
+
+    logging.debug(f"Camera resolution set at: {CaptureResolution}")
+
 
 
 def PiCam2_configure():
