@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.25"
-#define  __date__       "2024-12-14"
-#define  __version_highlight__  "Fix bug adjusting scan speed when reaching frame detection"
+#define __version__     "1.0.26"
+#define  __date__       "2025-01-01"
+#define  __version_highlight__  "Fix bug with UV led brightness at scan start (broken by tone in same function)"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -425,6 +425,8 @@ void loop() {
                         SendToRPi(RSP_VERSION_ID, 1, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
                     case CMD_START_SCAN:
+                        tone(A2, 2000, 50); // Beep to indicate start of scanning
+                        delay(50);     // Delay to avoind beep interfering with uv led PWB (both use same timer)
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -432,13 +434,12 @@ void loop() {
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                         scan_process_ongoing = true;
-                        delay(200);     // Wait for PT to stabilize after switching UV led on
+                        delay(50);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
                         ScanSpeedDelay = OriginalScanSpeedDelay;
                         collect_timer = scan_collect_timer;
-                        tone(A2, 2000, 50);
                         break;
                     case CMD_TERMINATE:  //Exit app
                         if (UVLedOn) {
