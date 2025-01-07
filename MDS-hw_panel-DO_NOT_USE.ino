@@ -307,6 +307,20 @@ byte RPI_LOCK = 0;    // RPI requirements staus
 
 void setup() {
 
+  //*******************************************************************
+  // 2024/12/29 - Code copied from ALT-Scann8-Controller.ino
+  // Initialize I2C bus, using different address in case commo bus on 
+  // Raspberry Pi is reused
+  //*******************************************************************
+  // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
+  Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
+  
+  Wire.begin(17);  // join I2c bus with address #17
+  Wire.setClock(400000);  // Set the I2C clock frequency to 400 kHz
+  Wire.onReceive(receiveEvent); // register event
+  Wire.onRequest(sendEvent);
+  //*******************************************************************
+
   // delay (2000);  // Panel wait for 2 seconds before full Light ON
 
   // Serial.begin(115200);  // Only for some test
@@ -425,3 +439,100 @@ void loop() {
 //************************************************
 
 //***
+
+//*****************************************************************************
+// 2024/12/29 - Code below copied from ALT-Scann8-Controller, to handle I2C bus
+//*****************************************************************************
+
+// ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
+// JRE 13/09/22: Theoretically this might happen any time, thu UI_Command might change in the middle of the loop. Adding a queue...
+void receiveEvent(int byteCount) {
+    int IncomingIc, param = 0;
+
+    if (Wire.available())
+        IncomingIc = Wire.read();
+    if (Wire.available())
+        param =  Wire.read();
+    if (Wire.available())
+        param +=  256*Wire.read();
+    while (Wire.available())
+        Wire.read();
+
+    if (IncomingIc > 0) {
+        push_cmd(IncomingIc, param); // No error treatment for now
+    }
+}
+
+// -- Sending I2C command to Raspberry PI, take picture now -------
+void sendEvent() {
+    int cmd, p1, p2;
+    cmd = pop_rsp(&p1, &p2);
+    if (cmd != -1) {
+        BufferForRPi[0] = cmd;
+        BufferForRPi[1] = p1/256;
+        BufferForRPi[2] = p1%256;
+        BufferForRPi[3] = p2/256;
+        BufferForRPi[4] = p2%256;
+        Wire.write(BufferForRPi,5);
+    }
+    else {
+        BufferForRPi[0] = 0;
+        BufferForRPi[1] = 0;
+        BufferForRPi[2] = 0;
+        BufferForRPi[3] = 0;
+        BufferForRPi[4] = 0;
+        Wire.write(BufferForRPi,5);
+    }
+}
+
+boolean push(Queue * queue, int IncomingIc, int param, int param2) {
+    boolean retvalue = false;
+    if ((queue -> in+1) % QUEUE_SIZE != queue -> out) {
+        queue -> Data[queue -> in] = IncomingIc;
+        queue -> Param[queue -> in] = param;
+        queue -> Param2[queue -> in] = param2;
+        queue -> in++;
+        queue -> in %= QUEUE_SIZE;
+        retvalue = true;
+    }
+    // else: Queue full: Should not happen. Not sure how this should be handled
+    return(retvalue);
+}
+
+int pop(Queue * queue, int * param, int * param2) {
+    int retvalue = -1;  // default return value: -1 (error)
+    if (queue -> out != queue -> in) {
+        retvalue = queue -> Data[queue -> out];
+        if (param != NULL)
+            *param =  queue -> Param[queue -> out];
+        if (param2 != NULL)
+            *param2 =  queue -> Param2[queue -> out];
+        queue -> out++;
+        queue -> out %= QUEUE_SIZE;
+    }
+    // else: Queue empty: Nothing to do
+    return(retvalue);
+}
+
+boolean push_cmd(int cmd, int param) {
+    push(&CommandQueue, cmd, param, 0);
+}
+int pop_cmd(int * param) {
+    return(pop(&CommandQueue, param, NULL));
+}
+boolean push_rsp(int rsp, int param, int param2) {
+    push(&ResponseQueue, rsp, param, param2);
+}
+int pop_rsp(int * param, int * param2) {
+    return(pop(&ResponseQueue, param, param2));
+}
+
+boolean dataInCmdQueue(void) {
+    return (CommandQueue.out != CommandQueue.in);
+}
+
+boolean dataInRspQueue(void) {
+    return (ResponseQueue.out != ResponseQueue.in);
+}
+
+
