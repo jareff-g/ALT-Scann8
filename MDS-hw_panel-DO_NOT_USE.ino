@@ -35,17 +35,17 @@ Needs Intensive revision and Intensive test when connection with Raspberry and A
 // ******************************************
 #define QUEUE_SIZE 20
 typedef struct Queue {
-    int Data[QUEUE_SIZE];
-    int Param[QUEUE_SIZE];
-    int Param2[QUEUE_SIZE];
-    int in;
-    int out;
+  int Data[QUEUE_SIZE];
+  int Param[QUEUE_SIZE];
+  int Param2[QUEUE_SIZE];
+  int in;
+  int out;
 };
 
 volatile Queue CommandQueue;
 volatile Queue ResponseQueue;
 
-byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
+byte BufferForRPi[9];  // 9 byte array to send data to Raspberry Pi over I2C bus
 
 // ******************************************
 // End of ALT-Scann8 copied code
@@ -54,8 +54,8 @@ byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bu
 // ******************************************
 // New code to support hw panel in ALT-Scann8
 // ******************************************
-#define RPI_I2C_ADD 17  // I2B bus address to communicate with RPi 
-#define ALT_SCAN_8_START  1
+#define RPI_I2C_ADD 17  // I2B bus address to communicate with RPi
+#define ALT_SCAN_8_START 1
 #define ALT_SCAN_8_STOP 2
 #define ALT_SCAN_8_FORWARD 3
 #define ALT_SCAN_8_BACKWARD 4
@@ -98,7 +98,7 @@ byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bu
 
 
 // ******************************************
-// End of new code to support hw panel in ALT-Scann8 
+// End of new code to support hw panel in ALT-Scann8
 // ******************************************
 
 // Set I2C bus to use: Wire, Wire1, etc.  // DELETE - no longer needed
@@ -379,17 +379,18 @@ void setup() {
 
   //*******************************************************************
   // 2024/12/29 - Code copied from ALT-Scann8-Controller.ino
-  // Initialize I2C bus, using different address in case commo bus on 
+  // Initialize I2C bus, using different address in case commo bus on
   // Raspberry Pi is reused
   //*******************************************************************
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
   Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
-  
-  Wire.begin(RPI_I2C_ADD);  // join I2c bus with address #17
-  Wire.setClock(400000);  // Set the I2C clock frequency to 400 kHz
-  Wire.onReceive(receiveEvent); // register event
+
+  Wire.begin();                  // start the I2C interface
+  Wire.begin(RPI_I2C_ADD);       // join I2c bus with address #17
+  Wire.setClock(400000);         // Set the I2C clock frequency to 400 kHz
+  Wire.onReceive(receiveEvent);  // register event
   Wire.onRequest(sendEvent);
-  
+
   // JRE 04/08/2022
   CommandQueue.in = 0;
   CommandQueue.out = 0;
@@ -427,6 +428,17 @@ void setup() {
   mcp_2.pinMode(BUTTON_FORWARD, INPUT_PULLUP);
   mcp_2.pinMode(BUTTON_BACKWARD, INPUT_PULLUP);
 
+
+  // ---Orginal Block at Row 837
+  // LED Motor control at Start (STOP is Default)
+  mcp_1.digitalWrite(LED_STOP, HIGH);
+  mcp_1.digitalWrite(LED_START, LOW);
+  mcp_1.digitalWrite(LED_FORWARD, LOW);
+  mcp_1.digitalWrite(LED_BACKWARD, LOW);
+  mcp_1.digitalWrite(LED_FF, LOW);
+  mcp_1.digitalWrite(LED_RW, LOW);
+  //
+
 }  // CHIUDE il void Setup
 
 
@@ -437,9 +449,9 @@ void setup() {
 //###################################################################
 
 void loop() {
-  int param;  // Retrieves possible parameter in command from RPi
-  int UI_Command; // Stores I2C command from RPI
-  
+  int param;       // Retrieves possible parameter in command from RPi
+  int UI_Command;  // Stores I2C command from RPI
+
   //###################################################################
   //
   //	Void_LOOP - MCP23017 Expander
@@ -465,6 +477,8 @@ void loop() {
   }
 
   // Start Button
+  FormatSelectLOCK = 1;  // FORCED - For initial Test only - to DELETE
+
   if (!mcp_2.digitalRead(BUTTON_START) == 1 && FormatSelectLOCK == 1 && StopLOCK == 0 && mcp_2.digitalRead(BUTTON_STOP) == 1) {  // INVERTED logic as using Pull-Down
     StopLOCK = 1;
     StartLOCK = 1;
@@ -501,7 +515,7 @@ void loop() {
     mcp_1.digitalWrite(LED_FF, 1);
     // New code to tell ALT_SCANN_8 to perform fast forward
     SendToRPi(ALT_SCAN_8_FF, 0, 0);  // Request RPi to move film fast forward
-  }  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
+  }                                  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
 
   // RW Rewind Button
   if (!mcp_1.digitalRead(BUTTON_RW) == 1 && StopLOCK == 0 && mcp_2.digitalRead(BUTTON_STOP) == 1) {  // INVERTED logic as using Pull-Down
@@ -510,18 +524,18 @@ void loop() {
     mcp_1.digitalWrite(LED_RW, 1);
     // New code to tell ALT_SCANN_8 to perform rewind
     SendToRPi(ALT_SCAN_8_RW, 0, 0);  // Request RPi to move film rewind
-  }  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
+  }                                  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
 
   // Code copied from ALT-Scann8-Controller, to retrieve commands from RPi
   if (dataInCmdQueue())
-    UI_Command = pop_cmd(&param);   // Get next command from queue if one exists
+    UI_Command = pop_cmd(&param);  // Get next command from queue if one exists
   else
     UI_Command = 0;
 
   // RPi Command processing switch: Create #defines and functions as required
   // At this point panel module should handle actions on RPi UI side - To be implemented
   if (UI_Command != 0) {
-    switch (UI_Command) {   // RPi commands
+    switch (UI_Command) {  // RPi commands
       case CMD_START_SCAN:
         break;
       case CMD_STOP_SCAN:
@@ -553,100 +567,96 @@ void loop() {
 //*****************************************************************************
 
 // ---- Send commands to RPi
-void SendToRPi(byte rsp, int param1, int param2)
-{
-    push_rsp(rsp, param1, param2);
+void SendToRPi(byte rsp, int param1, int param2) {
+  push_rsp(rsp, param1, param2);
 }
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
 // JRE 13/09/22: Theoretically this might happen any time, thu UI_Command might change in the middle of the loop. Adding a queue...
 void receiveEvent(int byteCount) {
-    int IncomingIc, param = 0;
+  int IncomingIc, param = 0;
 
-    if (Wire.available())
-        IncomingIc = Wire.read();
-    if (Wire.available())
-        param =  Wire.read();
-    if (Wire.available())
-        param +=  256*Wire.read();
-    while (Wire.available())
-        Wire.read();
+  if (Wire.available())
+    IncomingIc = Wire.read();
+  if (Wire.available())
+    param = Wire.read();
+  if (Wire.available())
+    param += 256 * Wire.read();
+  while (Wire.available())
+    Wire.read();
 
-    if (IncomingIc > 0) {
-        push_cmd(IncomingIc, param); // No error treatment for now
-    }
+  if (IncomingIc > 0) {
+    push_cmd(IncomingIc, param);  // No error treatment for now
+  }
 }
 
 // -- Sending I2C command to Raspberry PI, take picture now -------
 void sendEvent() {
-    int cmd, p1, p2;
-    cmd = pop_rsp(&p1, &p2);
-    if (cmd != -1) {
-        BufferForRPi[0] = cmd;
-        BufferForRPi[1] = p1/256;
-        BufferForRPi[2] = p1%256;
-        BufferForRPi[3] = p2/256;
-        BufferForRPi[4] = p2%256;
-        Wire.write(BufferForRPi,5);
-    }
-    else {
-        BufferForRPi[0] = 0;
-        BufferForRPi[1] = 0;
-        BufferForRPi[2] = 0;
-        BufferForRPi[3] = 0;
-        BufferForRPi[4] = 0;
-        Wire.write(BufferForRPi,5);
-    }
+  int cmd, p1, p2;
+  cmd = pop_rsp(&p1, &p2);
+  if (cmd != -1) {
+    BufferForRPi[0] = cmd;
+    BufferForRPi[1] = p1 / 256;
+    BufferForRPi[2] = p1 % 256;
+    BufferForRPi[3] = p2 / 256;
+    BufferForRPi[4] = p2 % 256;
+    Wire.write(BufferForRPi, 5);
+  } else {
+    BufferForRPi[0] = 0;
+    BufferForRPi[1] = 0;
+    BufferForRPi[2] = 0;
+    BufferForRPi[3] = 0;
+    BufferForRPi[4] = 0;
+    Wire.write(BufferForRPi, 5);
+  }
 }
 
-boolean push(Queue * queue, int IncomingIc, int param, int param2) {
-    boolean retvalue = false;
-    if ((queue -> in+1) % QUEUE_SIZE != queue -> out) {
-        queue -> Data[queue -> in] = IncomingIc;
-        queue -> Param[queue -> in] = param;
-        queue -> Param2[queue -> in] = param2;
-        queue -> in++;
-        queue -> in %= QUEUE_SIZE;
-        retvalue = true;
-    }
-    // else: Queue full: Should not happen. Not sure how this should be handled
-    return(retvalue);
+boolean push(Queue* queue, int IncomingIc, int param, int param2) {
+  boolean retvalue = false;
+  if ((queue->in + 1) % QUEUE_SIZE != queue->out) {
+    queue->Data[queue->in] = IncomingIc;
+    queue->Param[queue->in] = param;
+    queue->Param2[queue->in] = param2;
+    queue->in++;
+    queue->in %= QUEUE_SIZE;
+    retvalue = true;
+  }
+  // else: Queue full: Should not happen. Not sure how this should be handled
+  return (retvalue);
 }
 
-int pop(Queue * queue, int * param, int * param2) {
-    int retvalue = -1;  // default return value: -1 (error)
-    if (queue -> out != queue -> in) {
-        retvalue = queue -> Data[queue -> out];
-        if (param != NULL)
-            *param =  queue -> Param[queue -> out];
-        if (param2 != NULL)
-            *param2 =  queue -> Param2[queue -> out];
-        queue -> out++;
-        queue -> out %= QUEUE_SIZE;
-    }
-    // else: Queue empty: Nothing to do
-    return(retvalue);
+int pop(Queue* queue, int* param, int* param2) {
+  int retvalue = -1;  // default return value: -1 (error)
+  if (queue->out != queue->in) {
+    retvalue = queue->Data[queue->out];
+    if (param != NULL)
+      *param = queue->Param[queue->out];
+    if (param2 != NULL)
+      *param2 = queue->Param2[queue->out];
+    queue->out++;
+    queue->out %= QUEUE_SIZE;
+  }
+  // else: Queue empty: Nothing to do
+  return (retvalue);
 }
 
 boolean push_cmd(int cmd, int param) {
-    push(&CommandQueue, cmd, param, 0);
+  push(&CommandQueue, cmd, param, 0);
 }
-int pop_cmd(int * param) {
-    return(pop(&CommandQueue, param, NULL));
+int pop_cmd(int* param) {
+  return (pop(&CommandQueue, param, NULL));
 }
 boolean push_rsp(int rsp, int param, int param2) {
-    push(&ResponseQueue, rsp, param, param2);
+  push(&ResponseQueue, rsp, param, param2);
 }
-int pop_rsp(int * param, int * param2) {
-    return(pop(&ResponseQueue, param, param2));
+int pop_rsp(int* param, int* param2) {
+  return (pop(&ResponseQueue, param, param2));
 }
 
 boolean dataInCmdQueue(void) {
-    return (CommandQueue.out != CommandQueue.in);
+  return (CommandQueue.out != CommandQueue.in);
 }
 
 boolean dataInRspQueue(void) {
-    return (ResponseQueue.out != ResponseQueue.in);
+  return (ResponseQueue.out != ResponseQueue.in);
 }
-
-
