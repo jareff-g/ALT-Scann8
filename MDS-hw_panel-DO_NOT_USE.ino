@@ -30,6 +30,77 @@ Needs Intensive revision and Intensive test when connection with Raspberry and A
 #include "NoiascaHt16k33.h"  // Noiasca HT16K33 library - download from http://werner.rothschopf.net/
 #include "DFRobot_MCP23017.h"
 
+// ******************************************
+// Code copied from ALT-Scann8-Controller.ino
+// ******************************************
+#define QUEUE_SIZE 20
+typedef struct Queue {
+    int Data[QUEUE_SIZE];
+    int Param[QUEUE_SIZE];
+    int Param2[QUEUE_SIZE];
+    int in;
+    int out;
+};
+
+volatile Queue CommandQueue;
+volatile Queue ResponseQueue;
+
+byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
+
+// ******************************************
+// End of ALT-Scann8 copied code
+// ******************************************
+
+// ******************************************
+// New code to support hw panel in ALT-Scann8
+// ******************************************
+#define RPI_I2C_ADD 17  // I2B bus address to communicate with RPi 
+#define ALT_SCAN_8_START  1
+#define ALT_SCAN_8_STOP 2
+#define ALT_SCAN_8_FORWARD 3
+#define ALT_SCAN_8_BACKWARD 4
+#define ALT_SCAN_8_FF 5
+#define ALT_SCAN_8_RW 6
+
+// I2C commands (RPi to Arduino): Constant definition
+#define CMD_VERSION_ID 1
+#define CMD_GET_CNT_STATUS 2
+#define CMD_RESET_CONTROLLER 3
+#define CMD_ADJUST_MIN_FRAME_STEPS 4
+#define CMD_START_SCAN 10
+#define CMD_TERMINATE 11
+#define CMD_GET_NEXT_FRAME 12
+#define CMD_STOP_SCAN 13
+#define CMD_SET_REGULAR_8 18
+#define CMD_SET_SUPER_8 19
+#define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_MANUAL_UV_LED 22
+#define CMD_FILM_FORWARD 30
+#define CMD_FILM_BACKWARD 31
+#define CMD_SINGLE_STEP 40
+#define CMD_ADVANCE_FRAME 41
+#define CMD_ADVANCE_FRAME_FRACTION 42
+#define CMD_SET_PT_LEVEL 50
+#define CMD_SET_MIN_FRAME_STEPS 52
+#define CMD_SET_FRAME_FINE_TUNE 54
+#define CMD_SET_EXTRA_STEPS 56
+#define CMD_SET_UV_LEVEL 58
+#define CMD_REWIND 60
+#define CMD_FAST_FORWARD 61
+#define CMD_INCREASE_WIND_SPEED 62
+#define CMD_DECREASE_WIND_SPEED 63
+#define CMD_UNCONDITIONAL_REWIND 64
+#define CMD_UNCONDITIONAL_FAST_FORWARD 65
+#define CMD_SET_SCAN_SPEED 70
+#define CMD_SET_STALL_TIME 72
+#define CMD_SET_AUTO_STOP 74
+#define CMD_REPORT_PLOTTER_INFO 87
+
+
+// ******************************************
+// End of new code to support hw panel in ALT-Scann8 
+// ******************************************
+
 // Set I2C bus to use: Wire, Wire1, etc.  // DELETE - no longer needed
 // #define WIRE Wire                      // DELETE - no longer needed
 
@@ -298,7 +369,6 @@ byte Busy_LOCK = 0;   // Busy staus
 byte RPI_LOCK = 0;    // RPI requirements staus
 
 
-
 //###################################################################
 //
 //	Void_Setup - BEGIN
@@ -315,10 +385,20 @@ void setup() {
   // Possible serial speeds: 1200, 2400, 4800, 9600, 19200, 38400, 57600,74880, 115200, 230400, 250000, 500000, 1000000, 2000000
   Serial.begin(1000000);  // As fast as possible for debug, otherwise it slows down execution
   
-  Wire.begin(17);  // join I2c bus with address #17
+  Wire.begin(RPI_I2C_ADD);  // join I2c bus with address #17
   Wire.setClock(400000);  // Set the I2C clock frequency to 400 kHz
   Wire.onReceive(receiveEvent); // register event
   Wire.onRequest(sendEvent);
+  
+  // JRE 04/08/2022
+  CommandQueue.in = 0;
+  CommandQueue.out = 0;
+  ResponseQueue.in = 0;
+  ResponseQueue.out = 0;
+
+
+  //*******************************************************************
+  // End of initialization code copied from ALT-Scann8-Controller.ino
   //*******************************************************************
 
   // delay (2000);  // Panel wait for 2 seconds before full Light ON
@@ -357,7 +437,9 @@ void setup() {
 //###################################################################
 
 void loop() {
-
+  int param;  // Retrieves possible parameter in command from RPi
+  int UI_Command; // Stores I2C command from RPI
+  
   //###################################################################
   //
   //	Void_LOOP - MCP23017 Expander
@@ -388,6 +470,8 @@ void loop() {
     StartLOCK = 1;
     mcp_1.digitalWrite(LED_STOP, 0);
     mcp_1.digitalWrite(LED_START, 1);
+    // New code to tell ALT_SCANN_8 to start
+    SendToRPi(ALT_SCAN_8_START, 0, 0);  // Request RPi to start scanning
   }
 
 
@@ -396,6 +480,8 @@ void loop() {
     StopLOCK = 1;
     mcp_1.digitalWrite(LED_STOP, 0);
     mcp_1.digitalWrite(LED_FORWARD, 1);
+    // New code to tell ALT_SCANN_8 to move film forward
+    SendToRPi(ALT_SCAN_8_FORWARD, 0, 0);  // Request RPi to move film forward
   }
 
 
@@ -404,6 +490,8 @@ void loop() {
     StopLOCK = 1;
     mcp_1.digitalWrite(LED_STOP, 0);
     mcp_1.digitalWrite(LED_BACKWARD, 1);
+    // New code to tell ALT_SCANN_8 to move film backward
+    SendToRPi(ALT_SCAN_8_BACKWARD, 0, 0);  // Request RPi to move film backward
   }
 
   // FF Fast Forward Button
@@ -411,6 +499,8 @@ void loop() {
     StopLOCK = 1;
     mcp_1.digitalWrite(LED_STOP, 0);
     mcp_1.digitalWrite(LED_FF, 1);
+    // New code to tell ALT_SCANN_8 to perform fast forward
+    SendToRPi(ALT_SCAN_8_FF, 0, 0);  // Request RPi to move film fast forward
   }  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
 
   // RW Rewind Button
@@ -418,8 +508,26 @@ void loop() {
     StopLOCK = 1;
     mcp_1.digitalWrite(LED_STOP, 0);
     mcp_1.digitalWrite(LED_RW, 1);
+    // New code to tell ALT_SCANN_8 to perform rewind
+    SendToRPi(ALT_SCAN_8_RW, 0, 0);  // Request RPi to move film rewind
   }  // LED_RPI_PinchRollerDetect will Blink briefly to remember that FF and RW are not allowed if Pinch-Roller is Inserted
 
+  // Code copied from ALT-Scann8-Controller, to retrieve commands from RPi
+  if (dataInCmdQueue())
+    UI_Command = pop_cmd(&param);   // Get next command from queue if one exists
+  else
+    UI_Command = 0;
+
+  // RPi Command processing switch: Create #defines and functions as required
+  // At this point panel module should handle actions on RPi UI side - To be implemented
+  if (UI_Command != 0) {
+    switch (UI_Command) {   // RPi commands
+      case CMD_START_SCAN:
+        break;
+      case CMD_STOP_SCAN:
+        break;
+    }
+  }
 }  // CHIUDE il Void Loop
 
 
@@ -443,6 +551,12 @@ void loop() {
 //*****************************************************************************
 // 2024/12/29 - Code below copied from ALT-Scann8-Controller, to handle I2C bus
 //*****************************************************************************
+
+// ---- Send commands to RPi
+void SendToRPi(byte rsp, int param1, int param2)
+{
+    push_rsp(rsp, param1, param2);
+}
 
 // ---- Receive I2C command from Raspberry PI, ScanFilm... and more ------------
 // JRE 13/09/22: Theoretically this might happen any time, thu UI_Command might change in the middle of the loop. Adding a queue...
