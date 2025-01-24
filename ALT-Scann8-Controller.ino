@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.26"
-#define  __date__       "2025-01-01"
-#define  __version_highlight__  "Fix bug with UV led brightness at scan start (broken by tone in same function)"
+#define __version__     "1.0.28"
+#define  __date__       "2025-01-24"
+#define  __version_highlight__  "Partial revert to original scan speed algorythm + Fix UV led brightness issue"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -388,8 +388,7 @@ void loop() {
                     ScanSpeedDelay = BaseScanSpeedDelay + (10-param) * StepScanSpeedDelay;
                     scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
                     OriginalScanSpeedDelay = ScanSpeedDelay;
-                    //DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
-                    DecreaseSpeedFrameStepsBefore = 3;
+                    DecreaseSpeedFrameStepsBefore = max(3, 60 - 5*param);
                     DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 }
                 break;
@@ -426,7 +425,7 @@ void loop() {
                         break;
                     case CMD_START_SCAN:
                         tone(A2, 2000, 50); // Beep to indicate start of scanning
-                        delay(50);     // Delay to avoind beep interfering with uv led PWB (both use same timer)
+                        delay(100);     // Delay to avoind beep interfering with uv led PWB (both use same timer)
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -976,7 +975,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*1)) || FrameStepsDone > int(MinFrameSteps * 1.1)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
@@ -990,7 +989,7 @@ void capstan_advance(int steps) {
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
         if (steps > 1)
-            delayMicroseconds(100 + (10-ScanSpeed)*50);
+            delayMicroseconds(500 + (10-ScanSpeed)*50);
     }
     digitalWrite(MotorB_Stepper, LOW);
 }
@@ -1031,7 +1030,8 @@ ScanResult scan(int UI_Command) {
         //-------------ScanFilm-----------
         FrameDetected = IsHoleDetected();
         if (!FrameDetected) {
-            FrameStepsToDo = min(1 + (ScanSpeed - 1) * 15, max(1,DecreaseSpeedFrameSteps-FrameStepsDone));
+            //FrameStepsToDo = min(1 + (ScanSpeed - 1) * 1, max(1,DecreaseSpeedFrameSteps-FrameStepsDone));
+            FrameStepsToDo = 1;
             capstan_advance(FrameStepsToDo);
             FrameStepsDone+=FrameStepsToDo;
         }
@@ -1043,10 +1043,13 @@ ScanResult scan(int UI_Command) {
             LastFrameSteps = FrameStepsDone;
             adjust_framesteps(LastFrameSteps);
             FrameStepsDone = 0;
+            TimeToScan = 0;
             StartPictureSaveTime = micros();
             // Tell UI (Raspberry PI) a new frame is available for processing
             if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
                 tone(A2, 2000, 35);
+                delay(100);     // Delay to avoid beep interfering with uv led PWB (both use same timer)
+                analogWrite(11, UVLedBrightness); // Set UV LED to right brightness, as usign tone might have broken it (same timer used by both)
             }
             FrameDetected = false;
             retvalue = SCAN_FRAME_DETECTED;
