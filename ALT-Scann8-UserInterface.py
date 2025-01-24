@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.68"
-__date__ = "2025-01-06"
-__version_highlight__ = "Fix few bugs happening on a very first run (before config file exists)"
+__version__ = "1.10.69"
+__date__ = "2025-01-24"
+__version_highlight__ = "Fix issue with settings when starting for the first time: Retrieve base folder differently"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -136,7 +136,7 @@ NewFrameAvailable = False  # To be set to true upon reception of Arduino event
 ScanProcessError = False  # To be set to true upon reception of Arduino event
 ScanProcessError_LastTime = 0
 # Directory where python scrips run, to store the json file with persistent data
-ScriptDir = os.path.dirname(__file__)
+ScriptDir = os.path.dirname(os.path.realpath(__file__))
 ConfigurationDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 ConfigurationDataLoaded = False
 # Variables to deal with remaining disk space
