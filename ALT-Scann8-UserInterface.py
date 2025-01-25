@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.69"
-__date__ = "2025-01-24"
-__version_highlight__ = "Fix issue with settings when starting for the first time: Retrieve base folder differently"
+__version__ = "1.10.70"
+__date__ = "2025-01-25"
+__version_highlight__ = "Fix settings popup issue after activating preview window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -40,6 +40,7 @@ from PIL import ImageTk, Image, __version__ as PIL_Version
 
 import os
 import time
+import locale
 import json
 
 from datetime import datetime
@@ -111,6 +112,7 @@ BaseFolder = os.environ['HOME']
 CurrentDir = BaseFolder
 BaseFolderBackup = BaseFolder
 CurrentDirBackup = BaseFolder
+saved_locale = locale.getlocale(locale.LC_NUMERIC)   # Save current locale to restore it after displaying preview
 
 FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
@@ -485,6 +487,7 @@ def cmd_app_standard_exit():
 
 
 def exit_app(do_save):  # Exit Application
+    global win
     global ExitingApp
 
     # *** ALT-Scann8 shutdown starts ***
@@ -734,6 +737,7 @@ def cmd_set_new_folder():
 
 
 def cmd_settings_popup_dismiss():
+    global options_dlg
     global BaseFolder, CurrentDir
     global BaseFolderBackup, CurrentDirBackup
 
@@ -749,12 +753,13 @@ def cmd_settings_popup_dismiss():
 
 
 def cmd_settings_popup_accept():
+    global options_dlg
     global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
-    global FrameFineTuneValue, ScanSpeedValue, CapstanDiameter
+    global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
-    global capstan_diameter_float
+    global CapstanDiameter, capstan_diameter_float
 
     ConfigData["PopupPos"] = options_dlg.geometry()
 
@@ -865,15 +870,16 @@ def cmd_settings_popup_accept():
 
 
 def cmd_settings_popup():
-    global options_dlg
+    global options_dlg, win
     global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global simplified_mode, ui_scrollbars, font_size_int, disable_tooltips, capstan_diameter_float
+    global simplified_mode, ui_scrollbars, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
     global BaseFolderBackup, CurrentDirBackup
+    global CapstanDiameter, capstan_diameter_float
 
     # Save folders in case settings dialog is dismissed
     BaseFolderBackup = BaseFolder
@@ -1043,6 +1049,7 @@ def get_last_frame_popup_dismiss():
 
 
 def get_last_frame_popup(last_frame):
+    global win
     global last_frame_dlg
     last_frame_dlg = tk.Toplevel(win)
     last_frame_dlg.title("Last frame")
@@ -1098,6 +1105,7 @@ def display_qr_code_info_dismiss():
 
 
 def copy_qr_code_info(event=None):
+    global win
     qr_info_text.tag_add("sel", "1.0", "end")
     selected_text = qr_info_text.selection_get()
     if selected_text:
@@ -1107,6 +1115,7 @@ def copy_qr_code_info(event=None):
 
 
 def display_qr_code_info(event=None):
+    global win
     global qr_display_dlg, qr_info_text
 
     qr_display_dlg = tk.Toplevel(win)
@@ -1147,6 +1156,7 @@ def display_qr_code_info(event=None):
 
 
 def refresh_qr_code():
+    global win
     global qr_image
 
     if SimplifiedMode or not qr_lib_installed:
@@ -1388,6 +1398,7 @@ def cmd_retreat_movie():
 
 
 def cmd_rewind_movie():
+    global win
     global RewindMovieActive
     global RewindErrorOutstanding, RewindEndOutstanding
 
@@ -1437,6 +1448,7 @@ def cmd_rewind_movie():
 
 
 def rewind_loop():
+    global win
     if RewindMovieActive:
         # Invoke rewind_loop one more time, as long as rewind is ongoing
         if not RewindErrorOutstanding and not RewindEndOutstanding:
@@ -1446,6 +1458,7 @@ def rewind_loop():
 
 
 def cmd_fast_forward_movie():
+    global win
     global FastForwardActive
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
 
@@ -1493,6 +1506,7 @@ def cmd_fast_forward_movie():
 
 
 def fast_forward_loop():
+    global win
     if FastForwardActive:
         # Invoke fast_forward_loop one more time, as long as rewind is ongoing
         if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:
@@ -1746,6 +1760,8 @@ def cmd_set_negative_image():
 #  - Exposure adjustment
 def cmd_set_real_time_display():
     global RealTimeDisplay
+    global camera
+    global saved_locale
     RealTimeDisplay = real_time_display.get()
     if RealTimeDisplay:
         logging.debug("Real time display enabled")
@@ -1766,6 +1782,8 @@ def cmd_set_real_time_display():
             camera.start()
             time.sleep(0.1)
             camera.switch_mode(capture_config)
+            # Restore the saved locale
+            locale.setlocale(locale.LC_NUMERIC, saved_locale)
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
@@ -2209,6 +2227,7 @@ def capture(mode):
 
 
 def cmd_start_scan_simulated():
+    global win
     global ScanOngoing
     global CurrentScanStartFrame, CurrentScanStartTime
     global simulated_captured_frame_list, simulated_images_in_list
@@ -2273,6 +2292,7 @@ def cmd_start_scan_simulated():
 
 
 def stop_scan_simulated():
+    global win
     global ScanOngoing
 
     start_btn.config(text="START Scan", bg=save_bg, fg=save_fg, relief=RAISED)
@@ -2285,6 +2305,7 @@ def stop_scan_simulated():
 
 
 def capture_loop_simulated():
+    global win
     global CurrentFrame
     global FramesPerMinute, FramesToGo
     global simulated_capture_image
@@ -2381,6 +2402,7 @@ def capture_loop_simulated():
 
 
 def start_scan():
+    global win
     global ScanOngoing
     global CurrentScanStartFrame, CurrentScanStartTime
     global ScanStopRequested
@@ -2453,6 +2475,7 @@ def start_scan():
 
 
 def stop_scan():
+    global win
     global ScanOngoing
 
     if ScanOngoing:  # Scanner session to be stopped
@@ -2471,6 +2494,7 @@ def stop_scan():
 
 
 def capture_loop():
+    global win
     global CurrentFrame
     global FramesPerMinute, FramesToGo
     global NewFrameAvailable
@@ -2635,6 +2659,7 @@ def preview_check():
 
 
 def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
+    global win
     global onesec_after
 
     temperature_check()
@@ -2706,6 +2731,7 @@ def send_arduino_command(cmd, param=0):
 
 
 def arduino_listen_loop():  # Waits for Arduino communicated events and dispatches accordingly
+    global win
     global NewFrameAvailable
     global RewindErrorOutstanding, RewindEndOutstanding
     global FastForwardErrorOutstanding, FastForwardEndOutstanding
@@ -2836,6 +2862,7 @@ def widget_refresh(widget):
 
 # Enable/diable/refresh widgets in predefined list of dependent widgets
 def widget_list_update(cmd, category_list):
+    global win
     global dependent_widget_dict
 
     # Dependent widget lists (in a dictionary)
@@ -2927,6 +2954,7 @@ def widget_list_refresh(category_list):
 
 # Sets readonly custom property 'block_kbd_entry' for all custom spinboxes
 def custom_spinboxes_kbd_lock(widget):
+    global win
     if widget == win and UIScrollbars:
         widget = scrolled_canvas
     widgets = widget.winfo_children()
@@ -2939,10 +2967,12 @@ def custom_spinboxes_kbd_lock(widget):
 
 # Disables/enables all widgets except one
 def except_widget_global_enable(except_button, enabled):
+    global win
     except_widget_global_enable_aux(except_button, enabled, win)
 
 
 def except_widget_global_enable_aux(except_button, enabled, widget):
+    global win
     if widget == win and UIScrollbars:
         widget = scrolled_canvas
 
@@ -3622,6 +3652,7 @@ def init_logging():
 
 
 def tscann8_init():
+    global win
     global camera
     global i2c
     global CurrentDir
@@ -4154,6 +4185,7 @@ def destroy_widgets(container):
 
 
 def create_widgets():
+    global win
     global AdvanceMovie_btn
     global negative_image_checkbox, negative_image
     global fast_forward_btn, rewind_btn
@@ -5561,7 +5593,7 @@ def main(argv):
     onesec_periodic_checks()
 
     # Main Loop
-    win.mainloop()  # running3 the loop that works as a trigger
+    win.mainloop()  # running the loop that works as a trigger
 
     if not SimulatedRun and not CameraDisabled:
         camera.close()
