@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.70"
-__date__ = "2025-01-25"
-__version_highlight__ = "Fix settings popup issue after activating preview window"
+__version__ = "1.10.71"
+__date__ = "2025-01-26"
+__version_highlight__ = "Keep AE/AWB value when switching to manual"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -320,6 +320,7 @@ PreviousGainRed = 1
 PreviousGainBlue = 1
 ManualScanEnabled = False
 CameraDisabled = False  # To allow testing scanner without a camera installed
+KeepManualValues = False    # In case we want to keep manual values when switching to auto
 # QR code to display debug info
 qr_image = None
 
@@ -1271,21 +1272,23 @@ def cmd_set_auto_wb():
     wb_red_spinbox.config(state='readonly' if AutoWbEnabled else NORMAL)
 
     if AutoWbEnabled:
-        manual_wb_red_value = wb_red_value.get()
-        manual_wb_blue_value = wb_blue_value.get()
+        if KeepManualValues:
+            manual_wb_red_value = wb_red_value.get()
+            manual_wb_blue_value = wb_blue_value.get()
         auto_wb_red_btn.config(text="AWB Red:")
         auto_wb_blue_btn.config(text="AWB Blue:")
     else:
-        ConfigData["GainRed"] = manual_wb_red_value
-        ConfigData["GainBlue"] = manual_wb_blue_value
-        wb_red_value.set(manual_wb_red_value)
-        wb_blue_value.set(manual_wb_blue_value)
+        if KeepManualValues:
+            ConfigData["GainRed"] = manual_wb_red_value
+            ConfigData["GainBlue"] = manual_wb_blue_value
+            wb_red_value.set(manual_wb_red_value)
+            wb_blue_value.set(manual_wb_blue_value)
         auto_wb_red_btn.config(text="WB Red:")
         auto_wb_blue_btn.config(text="WB Blue:")
 
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AwbEnable": AutoWbEnabled})
-        if not AutoWbEnabled:
+        if not AutoWbEnabled and KeepManualValues:
             camera_colour_gains = (wb_red_value.get(), wb_blue_value.get())
             camera.set_controls({"ColourGains": camera_colour_gains})
 
@@ -3787,17 +3790,18 @@ def cmd_set_auto_exposure():
     exposure_spinbox.config(state='readonly' if AutoExpEnabled else NORMAL)
 
     if AutoExpEnabled:
-        manual_exposure_value = int(exposure_value.get() * 1000)
+        if KeepManualValues:
+            manual_exposure_value = int(exposure_value.get() * 1000)
         auto_exposure_btn.config(text="Auto Exp:")
-        aux = manual_exposure_value
     else:
-        exposure_value.set(int(manual_exposure_value/1000))
+        if KeepManualValues:
+            exposure_value.set(int(manual_exposure_value/1000))
         auto_exposure_btn.config(text="Exposure:")
-        aux = 0
 
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeEnable": AutoExpEnabled})
-        camera.set_controls({"ExposureTime": int(manual_exposure_value)})
+        if KeepManualValues:
+            camera.set_controls({"ExposureTime": int(manual_exposure_value)})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
