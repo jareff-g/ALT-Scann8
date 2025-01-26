@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.71"
+__version__ = "1.10.72"
 __date__ = "2025-01-26"
-__version_highlight__ = "Keep AE/AWB value when switching to manual"
+__version_highlight__ = "Fix Auto-Stop radio buttons UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2841,7 +2841,8 @@ def widget_update(cmd, widget, enabled, inc):
         else:
             counter += inc
         widget.config(state=DISABLED if counter > 0 else NORMAL)
-        widget.disabled_counter = counter
+        if hasattr(widget, "disabled_counter"):
+            widget.disabled_counter = counter
     elif cmd == 'refresh':
         if hasattr(widget, "disabled_counter"):
             counter = widget.disabled_counter
