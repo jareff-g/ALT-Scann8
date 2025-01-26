@@ -15,12 +15,12 @@ More info in README.md file
 */
 
 #define __author__      "Juan Remirez de Esparza"
-#define __copyright__   "Copyright 2022-24, Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.28"
-#define  __date__       "2025-01-24"
-#define  __version_highlight__  "Partial revert to original scan speed algorythm + Fix UV led brightness issue"
+#define __version__     "1.0.29"
+#define  __date__       "2025-01-26"
+#define  __version_highlight__  "Removed redundant code, imptove auto framesteps calculation"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -281,8 +281,6 @@ void loop() {
         else
             UI_Command = 0;
 
-        TractionSwitchActive = digitalRead(TractionStopPin);
-
         ReportPlotterInfo();    // Regular report of plotter info
 
         /*
@@ -388,7 +386,7 @@ void loop() {
                     ScanSpeedDelay = BaseScanSpeedDelay + (10-param) * StepScanSpeedDelay;
                     scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
                     OriginalScanSpeedDelay = ScanSpeedDelay;
-                    DecreaseSpeedFrameStepsBefore = max(3, 60 - 5*param);
+                    DecreaseSpeedFrameStepsBefore = max(3, 53 - 5*param);
                     DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 }
                 break;
@@ -447,7 +445,6 @@ void loop() {
                         }
                         break;
                     case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
-                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
                         ScanSpeedDelay = OriginalScanSpeedDelay;
@@ -672,11 +669,6 @@ void loop() {
                 }
                 break;
         }
-
-        // ----- Speed on stepper motors ------------------ JRE: To be checked if needed, here or elsewhere
-        delayMicroseconds(1);
-
-        // org 5
     }
 }
 
@@ -938,12 +930,10 @@ void adjust_framesteps(int frame_steps) {
     static int steps_per_frame_list[32];
     static int idx = 0;
     static int items_in_list = 0;
-    int total;
+    int total = 0;
 
     // Check if steps per frame are going beyond reasonable limits
     if (frame_steps > int(OriginalMinFrameSteps*1.05) || frame_steps < int(OriginalMinFrameSteps*0.95)) {   // Allow 5% deviation
-        MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
-        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
         return; // Do not add invalid steps per frame to list
     }
 
@@ -953,10 +943,10 @@ void adjust_framesteps(int frame_steps) {
     if (items_in_list < 32)
         items_in_list++;
 
-    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
-        for (int i = 0; i < 32; i++)
+    if (Frame_Steps_Auto) {  // Update MinFrameSpeed only if auto activated
+        for (int i = 0; i < items_in_list; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32) - 30;
+        MinFrameSteps = int(total / items_in_list) - 5;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
