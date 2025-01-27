@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.74"
+__version__ = "1.10.75"
 __date__ = "2025-01-27"
-__version_highlight__ = "Fix manual exposure at startup: Always starting in AE despite manual settings"
+__version_highlight__ = "Fix frame fine tune value inconsistency upon first startup"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -458,7 +458,7 @@ ConfigData = {
     "MinFrameStepsS8": 290,
     "MinFrameStepsR8": 240,
     "MinFrameSteps": 290,
-    "FrameFineTune": 50,
+    "FrameFineTune": 20,
     "FrameExtraSteps": 0,
     "PTLevelS8": 80,
     "PTLevelR8": 200,
