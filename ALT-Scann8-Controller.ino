@@ -15,12 +15,12 @@ More info in README.md file
 */
 
 #define __author__      "Juan Remirez de Esparza"
-#define __copyright__   "Copyright 2023, Juan Remirez de Esparza"
+#define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.21"
-#define  __date__       "2024-03-21"
-#define  __version_highlight__  "Make auto PT level range wider (10-90% instead of 20-80%)"
+#define __version__     "1.0.29"
+#define  __date__       "2025-01-26"
+#define  __version_highlight__  "Removed redundant code, imptove auto framesteps calculation"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -66,6 +66,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_REGULAR_8 18
 #define CMD_SET_SUPER_8 19
 #define CMD_SWITCH_REEL_LOCK_STATUS 20
+#define CMD_MANUAL_UV_LED 22
 #define CMD_FILM_FORWARD 30
 #define CMD_FILM_BACKWARD 31
 #define CMD_SINGLE_STEP 40
@@ -75,6 +76,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
 #define CMD_SET_EXTRA_STEPS 56
+#define CMD_SET_UV_LEVEL 58
 #define CMD_REWIND 60
 #define CMD_FAST_FORWARD 61
 #define CMD_INCREASE_WIND_SPEED 62
@@ -127,17 +129,18 @@ enum ScanState{
     Sts_FastForward,
     Sts_SlowForward,
     Sts_SlowBackward,
-    Sts_SingleStep
+    Sts_SingleStep,
+    Sts_ManualUvLed
 }
 ScanState=Sts_Idle;
 
 // ----- Scanner specific variables: Might need to be adjusted for each specific scanner ------
 int UVLedBrightness = 255;                  // Brightness UV led, may need to be changed depending on LED type
-unsigned long BaseScanSpeed = 10;           // 25 - Base delay to calculate scan speed on which other are based
-unsigned long StepScanSpeed = 100;          // 250: Increment delays to reduce scan speed
-unsigned long ScanSpeed = BaseScanSpeed;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
-unsigned long FetchFrameScanSpeed = 3*ScanSpeed;    // 500 - Delay (microsec also) for slower stepper motor speed once minimum number of steps reached
-unsigned long DecreaseScanSpeedStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
+int ScanSpeed = 10;                         // 10 - Nominal scan speed as displayed in the UI
+unsigned long BaseScanSpeedDelay = 10;      // 25 - Base delay to calculate scan speed on which other are based
+unsigned long StepScanSpeedDelay = 100;     // 250: Increment delays to reduce scan speed
+unsigned long ScanSpeedDelay = BaseScanSpeedDelay;    // 500 - Delay in microseconds used to adjust speed of stepper motor during scan process
+unsigned long DecreaseScanSpeedDelayStep = 50;   // 100 - Increment in microseconds of delay to slow down progressively scanning speed, to improve detection (set to zero to disable)
 int RewindSpeed = 4000;                     // Initial delay in microseconds used to determine speed of rewind/FF movie
 int TargetRewindSpeedLoop = 200;            // Final delay  in microseconds for rewind/SS speed (Originally hardcoded)
 int PerforationMaxLevel = 550;              // Phototransistor reported value, max level
@@ -152,7 +155,7 @@ int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(N
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
-int DecreaseSpeedFrameStepsBefore = 0;  // 20 - No need to anticipate slow down, the default MinFrameStep should be always less
+int DecreaseSpeedFrameStepsBefore = 3;  // 3 - Hardcoded, before Dec 2024 it was adjusted according to scan speed
 int DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;    // Steps at which the scanning speed starts to slow down to improve detection
 // ------------------------------------------------------------------------------------------
 
@@ -163,9 +166,9 @@ int FilteredSignalLevel = 0;
 int OriginalPerforationThresholdLevel = PerforationThresholdLevel; // stores value for resetting PerforationThresholdLevel
 int OriginalPerforationThresholdAutoLevelRatio = PerforationThresholdAutoLevelRatio;
 int FrameStepsDone = 0;                     // Count steps
-// OriginalScanSpeed keeps a safe value to recent to in case of need, should no tbe updated
+// OriginalScanSpeedDelay keeps a safe value to revert to in case of need, should not be updated
 // with dynamically calculated values
-unsigned long OriginalScanSpeed = ScanSpeed;          // Keep to restore original value when needed
+unsigned long OriginalScanSpeedDelay = ScanSpeedDelay;          // Keep to restore original value when needed
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
 int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
@@ -278,8 +281,6 @@ void loop() {
         else
             UI_Command = 0;
 
-        TractionSwitchActive = digitalRead(TractionStopPin);
-
         ReportPlotterInfo();    // Regular report of plotter info
 
         /*
@@ -322,6 +323,15 @@ void loop() {
                         OriginalPerforationThresholdLevel = param;
                     }
                     DebugPrint(">PTLevel",param);
+                }
+                break;
+            case CMD_SET_UV_LEVEL:
+                DebugPrint(">UVLevel", param);
+                if (param >= 1 && param <= 255) {
+                    UVLedBrightness = param;
+                    if (UVLedOn) {
+                        analogWrite(11, UVLedBrightness); // If UV LED on, set it to requested level
+                    }
                 }
                 break;
             case CMD_SET_MIN_FRAME_STEPS:
@@ -372,10 +382,11 @@ void loop() {
             case CMD_SET_SCAN_SPEED:
                 DebugPrint(">Speed", param);
                 if (param >= 1 and param <= 10) {   // Handle only if valid speed (I2C sometimes fails)
-                    ScanSpeed = BaseScanSpeed + (10-param) * StepScanSpeed;
+                    ScanSpeed = param;
+                    ScanSpeedDelay = BaseScanSpeedDelay + (10-param) * StepScanSpeedDelay;
                     scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
-                    OriginalScanSpeed = ScanSpeed;
-                    DecreaseSpeedFrameStepsBefore = max(0, 50 - 5*param);
+                    OriginalScanSpeedDelay = ScanSpeedDelay;
+                    DecreaseSpeedFrameStepsBefore = max(3, 53 - 5*param);
                     DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 }
                 break;
@@ -411,6 +422,8 @@ void loop() {
                         SendToRPi(RSP_VERSION_ID, 1, 0);  // 1 - Arduino, 2 - RPi Pico
                         break;
                     case CMD_START_SCAN:
+                        tone(A2, 2000, 50); // Beep to indicate start of scanning
+                        delay(100);     // Delay to avoind beep interfering with uv led PWB (both use same timer)
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
@@ -418,13 +431,12 @@ void loop() {
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                         scan_process_ongoing = true;
-                        delay(200);     // Wait for PT to stabilize after switching UV led on
+                        delay(50);     // Wait for PT to stabilize after switching UV led on
                         StartFrameTime = micros();
                         FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
-                        ScanSpeed = OriginalScanSpeed;
+                        ScanSpeedDelay = OriginalScanSpeedDelay;
                         collect_timer = scan_collect_timer;
-                        tone(A2, 2000, 50);
                         break;
                     case CMD_TERMINATE:  //Exit app
                         if (UVLedOn) {
@@ -433,10 +445,9 @@ void loop() {
                         }
                         break;
                     case CMD_GET_NEXT_FRAME:  // Continue scan to next frame
-                        SetReelsAsNeutral(HIGH, LOW, LOW);
                         ScanState = Sts_Scan;
                         StartFrameTime = micros();
-                        ScanSpeed = OriginalScanSpeed;
+                        ScanSpeedDelay = OriginalScanSpeedDelay;
                         DebugPrint("Save t.",StartFrameTime-StartPictureSaveTime);
                         DebugPrintStr(">Next fr.");
                         // Also send, if required, to RPi autocalculated threshold level every frame
@@ -467,6 +478,10 @@ void loop() {
                     case CMD_SWITCH_REEL_LOCK_STATUS:
                         ScanState = Sts_UnlockReels;
                         delay(50);
+                        break;
+                    case CMD_MANUAL_UV_LED:
+                        analogWrite(11, UVLedBrightness); // Switch UV LED on
+                        ScanState = Sts_ManualUvLed;
                         break;
                     case CMD_FILM_FORWARD:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
@@ -601,6 +616,16 @@ void loop() {
                     GetLevelPT();   // No need to know PT level here, but used to update plotter data
                 }
                 break;
+            case Sts_ManualUvLed:
+                if (UI_Command == CMD_MANUAL_UV_LED) { //request to switch of uv led
+                    UVLedOn = false;
+                    analogWrite(11, 0);
+                    ScanState = Sts_Idle;
+                }
+                else {
+                    GetLevelPT();   // No need to know PT level here, but used to update plotter data
+                }
+                break;
             case Sts_Rewind:
                 if (!RewindFilm(UI_Command)) {
                     DebugPrintStr("-rwnd");
@@ -644,11 +669,6 @@ void loop() {
                 }
                 break;
         }
-
-        // ----- Speed on stepper motors ------------------ JRE: To be checked if needed, here or elsewhere
-        delayMicroseconds(1);
-
-        // org 5
     }
 }
 
@@ -757,7 +777,7 @@ void CollectOutgoingFilm(void) {
         if (TractionSwitchActive)
             TimeToCollect = CurrentTime + collect_timer;
         else
-            TimeToCollect = CurrentTime + 5;
+            TimeToCollect = CurrentTime + 3;
     }
 }
 
@@ -910,12 +930,10 @@ void adjust_framesteps(int frame_steps) {
     static int steps_per_frame_list[32];
     static int idx = 0;
     static int items_in_list = 0;
-    int total;
+    int total = 0;
 
     // Check if steps per frame are going beyond reasonable limits
     if (frame_steps > int(OriginalMinFrameSteps*1.05) || frame_steps < int(OriginalMinFrameSteps*0.95)) {   // Allow 5% deviation
-        MinFrameSteps = OriginalMinFrameSteps;  // Revert to original value
-        DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
         return; // Do not add invalid steps per frame to list
     }
 
@@ -925,10 +943,10 @@ void adjust_framesteps(int frame_steps) {
     if (items_in_list < 32)
         items_in_list++;
 
-    if (Frame_Steps_Auto && items_in_list == 32) {  // Update MinFrameSpeed only if auto activated
-        for (int i = 0; i < 32; i++)
+    if (Frame_Steps_Auto) {  // Update MinFrameSpeed only if auto activated
+        for (int i = 0; i < items_in_list; i++)
             total = total + steps_per_frame_list[i];
-        MinFrameSteps = int(total / 32) - 30;
+        MinFrameSteps = int(total / items_in_list) - 5;
         DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
     }
 }
@@ -947,7 +965,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) || FrameStepsDone > int(MinFrameSteps * 1.5)) {
+    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*1)) || FrameStepsDone > int(MinFrameSteps * 1.1)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
@@ -961,7 +979,7 @@ void capstan_advance(int steps) {
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
         if (steps > 1)
-            delayMicroseconds(1000);
+            delayMicroseconds(500 + (10-ScanSpeed)*50);
     }
     digitalWrite(MotorB_Stepper, LOW);
 }
@@ -972,12 +990,13 @@ ScanResult scan(int UI_Command) {
     ScanResult retvalue = SCAN_NO_FRAME_DETECTED;
     static unsigned long TimeToScan = 0;
     unsigned long CurrentTime = micros();
+    int FrameStepsToDo = 1;
 
-    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeed) {
+    if (CurrentTime < TimeToScan && TimeToScan - CurrentTime < ScanSpeedDelay) {
         return (retvalue);
     }
     else {
-        TimeToScan = CurrentTime + ScanSpeed;
+        TimeToScan = CurrentTime + ScanSpeedDelay;
 
         if (GreenLedOn) {  // If last time frame was detected ...
             GreenLedOn = false;
@@ -986,8 +1005,9 @@ ScanResult scan(int UI_Command) {
 
         TractionSwitchActive = digitalRead(TractionStopPin);
 
-        if (FrameStepsDone > DecreaseSpeedFrameSteps)
-            ScanSpeed = FetchFrameScanSpeed + min(20000, DecreaseScanSpeedStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
+        if (FrameStepsDone > DecreaseSpeedFrameSteps)   // Progressively decrease speed before frame detection
+            ScanSpeedDelay = OriginalScanSpeedDelay +
+                min(20000, DecreaseScanSpeedDelayStep * (FrameStepsDone - DecreaseSpeedFrameSteps + 1));
 
         FrameDetected = false;
 
@@ -1000,8 +1020,10 @@ ScanResult scan(int UI_Command) {
         //-------------ScanFilm-----------
         FrameDetected = IsHoleDetected();
         if (!FrameDetected) {
-            capstan_advance(1);
-            FrameStepsDone++;
+            //FrameStepsToDo = min(1 + (ScanSpeed - 1) * 1, max(1,DecreaseSpeedFrameSteps-FrameStepsDone));
+            FrameStepsToDo = 1;
+            capstan_advance(FrameStepsToDo);
+            FrameStepsDone+=FrameStepsToDo;
         }
 
         if (FrameDetected) {
@@ -1011,10 +1033,13 @@ ScanResult scan(int UI_Command) {
             LastFrameSteps = FrameStepsDone;
             adjust_framesteps(LastFrameSteps);
             FrameStepsDone = 0;
+            TimeToScan = 0;
             StartPictureSaveTime = micros();
             // Tell UI (Raspberry PI) a new frame is available for processing
             if (ScanState == Sts_SingleStep) {  // Do not send event to RPi for single step
                 tone(A2, 2000, 35);
+                delay(100);     // Delay to avoid beep interfering with uv led PWB (both use same timer)
+                analogWrite(11, UVLedBrightness); // Set UV LED to right brightness, as usign tone might have broken it (same timer used by both)
             }
             FrameDetected = false;
             retvalue = SCAN_FRAME_DETECTED;
