@@ -16,13 +16,13 @@ More info in README.md file
 """
 
 __author__ = 'Juan Remirez de Esparza'
-__copyright__ = "Copyright 2022-24, Juan Remirez de Esparza"
+__copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.72"
-__date__ = "2025-01-26"
-__version_highlight__ = "Fix Auto-Stop radio buttons UI"
+__version__ = "1.10.73"
+__date__ = "2025-01-27"
+__version_highlight__ = "Fix zoom view: Preview not fully restored after zoom disabled"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -588,7 +588,7 @@ def cmd_set_auto_stop_enabled():
 
 # Enable/Disable camera zoom to facilitate focus
 def cmd_set_focus_zoom():
-    global RealTimeZoom
+    global RealTimeZoom, ZoomSize
     RealTimeZoom = real_time_zoom.get()
     if RealTimeZoom:
         widget_enable(real_time_display_checkbox, False)
@@ -597,11 +597,13 @@ def cmd_set_focus_zoom():
 
     if not SimulatedRun and not CameraDisabled:
         if RealTimeZoom:
+            ZoomSize = camera.capture_metadata()['ScalerCrop']
+            logging.debug(f"ScalerCrop: {ZoomSize}")
             camera.set_controls(
-                {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
-                               (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
+                {"ScalerCrop": (int(FocusZoomPosX * ZoomSize[2]), int(FocusZoomPosY * ZoomSize[3])) +
+                               (int(FocusZoomFactorX * ZoomSize[2]), int(FocusZoomFactorY * ZoomSize[3]))})
         else:
-            camera.set_controls({"ScalerCrop": (0, 0) + (ZoomSize[0], ZoomSize[1])})
+            camera.set_controls({"ScalerCrop": ZoomSize})
 
     time.sleep(.2)
 
@@ -616,8 +618,8 @@ def cmd_set_focus_zoom():
 
 def adjust_focus_zoom():
     if not SimulatedRun and not CameraDisabled:
-        camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[0]), int(FocusZoomPosY * ZoomSize[1])) +
-                                           (int(FocusZoomFactorX * ZoomSize[0]), int(FocusZoomFactorY * ZoomSize[1]))})
+        camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[2]), int(FocusZoomPosY * ZoomSize[3])) +
+                                           (int(FocusZoomFactorX * ZoomSize[2]), int(FocusZoomFactorY * ZoomSize[3]))})
 
 
 def cmd_set_focus_up():
@@ -2659,6 +2661,7 @@ def preview_check():
     if RealTimeDisplay and not camera._preview:
         real_time_display.set(False)
         cmd_set_real_time_display()
+        cmd_set_focus_zoom()
 
 
 def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
@@ -3687,7 +3690,8 @@ def tscann8_init():
         camera_resolutions = CameraResolutions(camera.sensor_modes)
         logging.info(f"Camera Sensor modes: {camera.sensor_modes}")
         PiCam2_configure()
-        ZoomSize = camera.capture_metadata()['ScalerCrop'][2:]
+        ZoomSize = camera.capture_metadata()['ScalerCrop']
+        logging.debug(f"ScalerCrop: {ZoomSize}")
     if SimulatedRun:
         # Initializes resolution list from a hardcoded sensor_modes
         camera_resolutions = CameraResolutions(simulated_sensor_modes)
