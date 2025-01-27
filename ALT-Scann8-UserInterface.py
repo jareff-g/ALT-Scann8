@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.10.73"
+__version__ = "1.10.74"
 __date__ = "2025-01-27"
-__version_highlight__ = "Fix zoom view: Preview not fully restored after zoom disabled"
+__version_highlight__ = "Fix manual exposure at startup: Always starting in AE despite manual settings"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -268,7 +268,7 @@ NegativeImage = False
 RealTimeDisplay = False
 RealTimeZoom = False
 AutoStopEnabled = False
-AutoExpEnabled = False
+AutoExpEnabled = True
 AutoWbEnabled = False
 AutoFrameStepsEnabled = True
 AutoPtLevelEnabled = True
@@ -954,7 +954,7 @@ def cmd_settings_popup():
     as_tooltips.add(font_size_label, "Base font size used in main window")
     font_size_int = tk.IntVar(value=12)
     font_size_int.set(FontSize)
-    font_size_spinbox = DynamicSpinbox(options_dlg, command=cmd_exposure_selection, width=2, from_=6, to=20,
+    font_size_spinbox = DynamicSpinbox(options_dlg, width=2, from_=6, to=20,
                                       textvariable=font_size_int, increment=1, font=("Arial", FontSize - 2))
     font_size_spinbox.grid(row=options_row, column=1, sticky='W')
     options_row += 1
@@ -968,7 +968,7 @@ def cmd_settings_popup():
 
     capstan_diameter_float = tk.DoubleVar(value=CapstanDiameter)
     logging.debug(f"Settings popup: capstan_diameter_float = {CapstanDiameter} ({capstan_diameter_float.get()})")
-    capstan_diameter_spinbox = DynamicSpinbox(capstan_diameter_frame, command=cmd_exposure_selection, width=4, from_=8, to=30,
+    capstan_diameter_spinbox = DynamicSpinbox(capstan_diameter_frame, width=4, from_=8, to=30,
                                       format="%.1f", textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 2))
     capstan_diameter_spinbox.pack(side=LEFT)
     capstan_diameter_mm_label = tk.Label(capstan_diameter_frame, text="mm", font=("Arial", FontSize-2))
@@ -1723,6 +1723,7 @@ def disk_space_available():
 def cmd_switch_hdr_capture():
     global HdrCaptureActive
     global max_inactivity_delay
+    global AutoExpEnabled
 
     HdrCaptureActive = hdr_capture_active.get()
     ConfigData["HdrCaptureActive"] = HdrCaptureActive
@@ -1902,6 +1903,7 @@ def adjust_hdr_bracket():
     global hdr_best_exp, HdrMinExp
     global PreviousCurrentExposure
     global force_adjust_hdr_bracket
+    global AutoExpEnabled
 
     if not HdrCaptureActive:
         return
@@ -2416,6 +2418,7 @@ def start_scan():
     global total_wait_time_save_image
     global session_frames
     global last_frame_time
+    global AutoExpEnabled, AutoWbEnabled
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -2469,6 +2472,8 @@ def start_scan():
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AeEnable": AutoExpEnabled})
             camera.set_controls({"AwbEnable": AutoWbEnabled})
+            if not AutoExpEnabled:
+                camera.set_controls({"ExposureTime": int(int(exposure_value.get() * 1000))})
             logging.debug("Sending CMD_START_SCAN")
             send_arduino_command(CMD_START_SCAN)
 
@@ -3099,7 +3104,8 @@ def load_session_data_post_init():
     global ExposureWbAdaptPause
     global FileType, FilmType, CapstanDiameter
     global CaptureResolution
-
+    global AutoExpEnabled, AutoWbEnabled
+    
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
         confirm = tk.messagebox.askyesno(title='Load previous session status',
@@ -3148,7 +3154,6 @@ def load_session_data_post_init():
                         send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
                         logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
                         hdr_capture_active_checkbox.select()
-                    widget_list_enable([id_HdrCaptureActive])
                 if 'HdrViewX4Active' in ConfigData:
                     if isinstance(ConfigData["HdrViewX4Active"], str):
                         HdrViewX4Active = eval(ConfigData["HdrViewX4Active"])
@@ -3168,8 +3173,6 @@ def load_session_data_post_init():
                 if 'HdrBracketAuto' in ConfigData:
                     HdrBracketAuto = ConfigData["HdrBracketAuto"]
                     hdr_bracket_auto.set(HdrBracketAuto)
-                    if HdrBracketAuto:
-                        widget_list_enable([id_HdrBracketAuto])
                 if 'HdrMergeInPlace' in ConfigData:
                     HdrMergeInPlace = ConfigData["HdrMergeInPlace"]
                     hdr_merge_in_place.set(HdrMergeInPlace)
@@ -3195,7 +3198,6 @@ def load_session_data_post_init():
             ConfigData["HdrMergeInPlace"] = HdrMergeInPlace
             ConfigData["HdrBracketWidth"] = HdrBracketWidth
             ConfigData["HdrBracketShift"] = HdrBracketShift
-            widget_list_enable([id_HdrCaptureActive])
 
         if 'CaptureResolution' in ConfigData:
             valid_resolution_list = camera_resolutions.get_list()
@@ -3246,17 +3248,12 @@ def load_session_data_post_init():
                 MatchWaitMarginValue = 50
             aux = int(MatchWaitMarginValue)
             match_wait_margin_value.set(aux)
-            widget_list_enable([id_ExposureWbAdaptPause])
             if 'CaptureStabilizationDelay' in ConfigData:
                 aux = float(ConfigData["CaptureStabilizationDelay"])
                 StabilizationDelayValue = round(aux)
             else:
                 StabilizationDelayValue = 100
             stabilization_delay_value.set(StabilizationDelayValue)
-            if 'AutoExpEnabled' in ConfigData:
-                AutoExpEnabled = ConfigData["AutoExpEnabled"]
-                AE_enabled.set(AutoExpEnabled)
-                cmd_set_auto_exposure()
             if 'CurrentExposure' in ConfigData:
                 aux = ConfigData["CurrentExposure"]
                 if isinstance(aux, str):
@@ -3265,6 +3262,10 @@ def load_session_data_post_init():
                 if not SimulatedRun and not CameraDisabled:
                     camera.set_controls({"ExposureTime": int(aux)})
                 exposure_value.set(aux / 1000)
+            if 'AutoExpEnabled' in ConfigData:
+                AutoExpEnabled = ConfigData["AutoExpEnabled"]
+                AE_enabled.set(AutoExpEnabled)
+                cmd_set_auto_exposure()
             if 'CurrentAwbAuto' in ConfigData:     # Delete legacy name, replace with new
                 ConfigData['AutoWbEnabled'] = ConfigData['CurrentAwbAuto']
                 del ConfigData['CurrentAwbAuto']
@@ -3422,7 +3423,9 @@ def load_session_data_post_init():
         # Refresh plotter mode in Arduino here since when reading from config I2C has not been enabled yet
         send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
 
-        widget_list_enable([id_ManualScanEnabled])
+        widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
+                            id_HdrCaptureActive, id_HdrBracketAuto])
+
     # Initialize camera resolution with value set, whether default or from configuration
     PiCam2_change_resolution()
 
@@ -3807,6 +3810,8 @@ def cmd_set_auto_exposure():
         camera.set_controls({"AeEnable": AutoExpEnabled})
         if KeepManualValues:
             camera.set_controls({"ExposureTime": int(manual_exposure_value)})
+        elif not AutoExpEnabled:
+            camera.set_controls({"ExposureTime": int(int(exposure_value.get() * 1000))})
 
 
 def cmd_auto_exp_wb_change_pause_selection():
@@ -4479,12 +4484,13 @@ def create_widgets():
     autostop_type.set('No_film')
     autostop_no_film_rb = tk.Radiobutton(autostop_frame, text="No film", variable=autostop_type,
                                          value='No_film', font=("Arial", FontSize), command=cmd_set_auto_stop_enabled,
-                                         name='autostop_no_film_rb')
+                                         name='autostop_no_film_rb', state='disabled')
     autostop_no_film_rb.pack(side=TOP, anchor=W, padx=(10, 0))
     as_tooltips.add(autostop_no_film_rb, "Stop when film is not detected by PT")
     autostop_counter_zero_rb = tk.Radiobutton(autostop_frame, text="Count zero", variable=autostop_type,
                                               value='counter_to_zero', font=("Arial", FontSize),
-                                              command=cmd_set_auto_stop_enabled, name='autostop_counter_zero_rb')
+                                              command=cmd_set_auto_stop_enabled, name='autostop_counter_zero_rb',
+                                              state='disabled')
     autostop_counter_zero_rb.pack(side=TOP, anchor=W, padx=(10, 0))
     as_tooltips.add(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
 
