@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.0.29"
-#define  __date__       "2025-01-26"
-#define  __version_highlight__  "Removed redundant code, imptove auto framesteps calculation"
+#define __version__     "1.1.0"
+#define  __date__       "2025-01-28"
+#define  __version_highlight__  "Improve frame synchronization, specially for first frame"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -823,7 +823,6 @@ int GetLevelPT() {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
         fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.1);
         user_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.9 * ratio);
-        //PerforationThresholdLevel = int(((MinPT_Dynamic + (MaxPT_Dynamic-MinPT_Dynamic) * (ratio)))/10);
         PerforationThresholdLevel = int((MinPT_Dynamic + fixed_margin + user_margin)/10);
     }
 
@@ -965,7 +964,7 @@ boolean IsHoleDetected() {
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if ((PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*1)) || FrameStepsDone > int(MinFrameSteps * 1.1)) {
+    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps+FrameDeductSteps)) {
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
