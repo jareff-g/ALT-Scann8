@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.0"
-__date__ = "2025-01-27"
-__version_highlight__ = "Update version to 1.11.0 before merging in master branch"
+__version__ = "1.11.1"
+__date__ = "2025-01-28"
+__version_highlight__ = "Fix slowdown issue (caused by integrated plotter)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -250,7 +250,8 @@ RSP_FILM_FORWARD_ENDED = 89
 # Options variables
 ExpertMode = True
 ExperimentalMode = True
-PlotterMode = True
+PlotterEnabled = True
+PlotterScroll = False
 SimplifiedMode = False
 UIScrollbars = False
 FontSize = 0
@@ -308,6 +309,7 @@ plotter_width = 20
 plotter_height = 10
 PrevPTValue = 0
 PrevThresholdLevel = 0
+PlotterWindowPos = 0
 MaxPT = 100
 MinPT = 800
 Tolerance_AE = 8000
@@ -757,7 +759,7 @@ def cmd_settings_popup_dismiss():
 
 def cmd_settings_popup_accept():
     global options_dlg
-    global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
@@ -775,7 +777,7 @@ def cmd_settings_popup_accept():
         if SimplifiedMode:
             ExpertMode = False
             ExperimentalMode = False
-            PlotterMode = False
+            PlotterEnabled = False
             AutoExpEnabled = True
             AutoWbEnabled = True
             AutoFrameStepsEnabled = True
@@ -785,7 +787,7 @@ def cmd_settings_popup_accept():
         else:
             ExpertMode = ConfigData['ExpertMode'] = True
             ExperimentalMode = ConfigData['ExperimentalMode'] = True
-            PlotterMode = ConfigData['PlotterMode'] = True
+            PlotterEnabled = ConfigData['PlotterEnabled'] = True
             AutoExpEnabled = ConfigData['AutoExpEnabled']
             AutoWbEnabled = ConfigData['AutoWbEnabled']
             AutoFrameStepsEnabled = ConfigData['AutoFrameStepsEnabled']  # FrameStepsAuto
@@ -799,7 +801,7 @@ def cmd_settings_popup_accept():
             send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
             send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
             send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
-            send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
+            send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterEnabled)
     if UIScrollbars != ui_scrollbars.get():
         refresh_ui = True
         UIScrollbars = ui_scrollbars.get()
@@ -874,7 +876,7 @@ def cmd_settings_popup_accept():
 
 def cmd_settings_popup():
     global options_dlg, win
-    global ExpertMode, ExperimentalMode, PlotterMode, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
     global simplified_mode, ui_scrollbars, font_size_int, disable_tooltips
@@ -2682,7 +2684,7 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
 
 
 def UpdatePlotterWindow(PTValue, ThresholdLevel):
-    global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel
+    global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel, PlotterScroll, PlotterWindowPos
 
     if plotter_canvas == None:
         logging.error("Plotter canvas does not exist, exiting...")
@@ -2694,31 +2696,58 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
 
     MaxPT = max(MaxPT, PTValue)
     MinPT = min(MinPT, PTValue)
-    plotter_canvas.create_text(10, 5, text=str(MaxPT), anchor='nw', font=f"Helvetica {12}")
-    plotter_canvas.create_text(10, plotter_height - 15, text=str(MinPT), anchor='nw', font=f"Helvetica {12}")
-    # Shift the graph to the left
-    for item in plotter_canvas.find_all():
-        plotter_canvas.move(item, -5, 0)
+    top_label = plotter_canvas.create_text(10, 5, text=str(MaxPT), anchor='nw', font=f"Helvetica {12}")
+    bottom_label = plotter_canvas.create_text(10, plotter_height - 15, text=str(MinPT), anchor='nw', font=f"Helvetica {12}")
+    
+    if not PlotterScroll:
+        bg_top_label = plotter_canvas.create_rectangle(plotter_canvas.bbox(top_label),fill="white", outline="white")
+        plotter_canvas.tag_lower(bg_top_label,top_label)
+        bg_bottom_label = plotter_canvas.create_rectangle(plotter_canvas.bbox(bottom_label),fill="white", outline="white")
+        plotter_canvas.tag_lower(bg_bottom_label,bottom_label)
+
+    if PlotterScroll:
+        # Shift the graph to the left
+        for item in plotter_canvas.find_all():
+            plotter_canvas.move(item, -5, 0)
 
     usable_height = plotter_height - 15
-    # Delete lines moving out of the canvas
-    for item in plotter_canvas.find_overlapping(-10, 0, 0, usable_height):
-        plotter_canvas.delete(item)
+    if PlotterScroll:
+        # Delete lines moving out of the canvas
+        for item in plotter_canvas.find_overlapping(-10, 0, 0, usable_height):
+            plotter_canvas.delete(item)
+    else:
+        # Delete lines we are about to overwrite
+        for item in plotter_canvas.find_overlapping(PlotterWindowPos+1, 0, PlotterWindowPos+6, plotter_height-1):
+            plotter_canvas.delete(item)
 
-    # Draw the new line segment for PT Level
-    plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
-                               plotter_width - 1, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
-                               fill="blue")
+    if PlotterScroll:
+        # Draw the new line segment for PT Level
+        plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
+                                   plotter_width - 1, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
+                                   fill="blue")
+    else:
+        plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
+                                PlotterWindowPos + 5, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
+                                fill="blue")
+
     # Draw the new line segment for threshold
     if (ThresholdLevel > MaxPT):
         logging.debug(f"ThresholdLevel value is wrong ({ThresholdLevel}), replacing by previous ({PrevThresholdLevel})")
         # Swap by previous if bigger than MaxPT, sometimes I2C losses second parameter, no idea why
         ThresholdLevel = PrevThresholdLevel
-    plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
-                               plotter_width - 1, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
-                               width=1, fill="red")
+
+    if PlotterScroll:
+        plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
+                                   plotter_width - 1, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
+                                   width=1, fill="red")
+    else:
+        plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
+                                PlotterWindowPos + 5, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
+                                width=1, fill="red")
     PrevPTValue = PTValue
     PrevThresholdLevel = ThresholdLevel
+    if not PlotterScroll:
+        PlotterWindowPos = (PlotterWindowPos + 5) % plotter_width
     if MaxPT > 100:  # Do not allow below 100
         MaxPT -= 1  # Dynamic max
     if MinPT < 800:  # Do not allow above 800
@@ -2822,7 +2851,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
-        if PlotterMode:
+        if PlotterEnabled:
             UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
@@ -3038,7 +3067,7 @@ def validate_config_folders():
 
 
 def load_config_data_pre_init():
-    global ExpertMode, ExperimentalMode, PlotterMode, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
 
     for item in ConfigData:
@@ -3050,14 +3079,16 @@ def load_config_data_pre_init():
         if SimplifiedMode:
             ExpertMode = False
             ExperimentalMode = False
-            PlotterMode = False
+            PlotterEnabled = False
         else:
             if 'ExpertMode' in ConfigData:
                 ExpertMode = ConfigData["ExpertMode"]
             if 'ExperimentalMode' in ConfigData:
                 ExperimentalMode = ConfigData["ExperimentalMode"]
-            if 'PlotterMode' in ConfigData:
-                PlotterMode = ConfigData["PlotterMode"]
+            if 'PlotterEnabled' in ConfigData:
+                PlotterEnabled = ConfigData["PlotterEnabled"]
+            elif 'PlotterMode' in ConfigData:       # legacy tag for plotter window enabled
+                PlotterEnabled = ConfigData["PlotterMode"]
         if 'UIScrollbars' in ConfigData:
             UIScrollbars = ConfigData["UIScrollbars"]
         if 'DisableToolTips' in ConfigData:
@@ -3421,7 +3452,7 @@ def load_session_data_post_init():
                 send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
 
         # Refresh plotter mode in Arduino here since when reading from config I2C has not been enabled yet
-        send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
+        send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterEnabled)
 
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
@@ -3725,7 +3756,7 @@ def tscann8_init():
 
     get_controller_version()
 
-    send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterMode)
+    send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterEnabled)
 
     win.update_idletasks()
 
@@ -4187,6 +4218,21 @@ def rewind_speed_validation(new_value):
 def update_target_dir_wraplength(event):
     folder_frame_target_dir.config(wraplength=event.width - 20)  # Adjust the padding as needed
 
+
+def cmd_plotter_canvas_click(event):
+    global PlotterEnabled, PlotterScroll
+    if PlotterEnabled:
+        if not PlotterScroll:
+            PlotterScroll = True
+            logging.debug("Enable Plotter Scroll")
+        else:
+            PlotterEnabled = False
+            logging.debug("Disable Plotter")
+    else:
+        PlotterEnabled = True
+        PlotterScroll = False
+        logging.debug("Enable Plotter, without scroll")
+        
 
 # ***************
 # Widget creation
@@ -4718,7 +4764,7 @@ def create_widgets():
     top_right_area_row += 1
 
     # Integrated plotter
-    if PlotterMode:
+    if PlotterEnabled:
         integrated_plotter_frame = LabelFrame(top_right_area_frame, text='Plotter Area', font=("Arial", FontSize - 1),
                                               name='integrated_plotter_frame')
         integrated_plotter_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad,
@@ -4726,6 +4772,9 @@ def create_widgets():
         plotter_canvas = Canvas(integrated_plotter_frame, bg='white', width=plotter_width, height=plotter_height,
                                 name='plotter_canvas')
         plotter_canvas.pack(side=TOP, anchor=N)
+        as_tooltips.add(plotter_canvas, "Plotter canvas, click to disable/enable/scroll.")
+        # Bind the mouse click event to the canvas widget
+        plotter_canvas.bind("<Button-1>", cmd_plotter_canvas_click)
     top_right_area_row += 1
 
     # Create extended frame for expert and experimental areas
@@ -5457,7 +5506,7 @@ def create_widgets():
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
-    if PlotterMode:
+    if PlotterEnabled:
         plotter_width = integrated_plotter_frame.winfo_width() - 10
         plotter_height = int(plotter_width / 2)
         plotter_canvas.config(width=plotter_width, height=plotter_height)
@@ -5503,7 +5552,7 @@ def reset_controller():
 
 def main(argv):
     global SimulatedRun
-    global ExpertMode, ExperimentalMode, PlotterMode
+    global ExpertMode, ExperimentalMode, PlotterEnabled
     global LogLevel, LoggingMode
     global ALT_scann_init_done
     global CameraDisabled, DisableThreads
@@ -5535,8 +5584,6 @@ def main(argv):
             DisableToolTips = True
         elif opt == '-t':
             DisableThreads = True
-        elif opt == '-p':
-            PlotterMode = not PlotterMode
         elif opt == '-w':
             WidgetsEnabledWhileScanning = not WidgetsEnabledWhileScanning
         elif opt == '-h':
@@ -5544,7 +5591,6 @@ def main(argv):
             print("  -s             Start Simulated session")
             print("  -e             Activate expert mode")
             print("  -x             Activate experimental mode")
-            print("  -p             Activate integrated plotter")
             print("  -d             Disable camera (for development purposes)")
             print("  -n             Disable Tooltips")
             print("  -t             Disable multi-threading")
@@ -5593,8 +5639,6 @@ def main(argv):
         logging.debug(f"Font size = {FontSize}")
     if DisableThreads:
         logging.debug("Threads disabled.")
-    if PlotterMode:
-        logging.debug("Toggle plotter mode.")
 
     if not SimulatedRun:
         arduino_listen_loop()
