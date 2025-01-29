@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.1"
-__date__ = "2025-01-28"
-__version_highlight__ = "Fix slowdown issue (caused by integrated plotter)"
+__version__ = "1.11.2"
+__date__ = "2025-01-29"
+__version_highlight__ = "Add vertical progress bar to rolling plotter + proper scan stop"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2729,6 +2729,9 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
         plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
                                 PlotterWindowPos + 5, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
                                 fill="blue")
+        plotter_canvas.create_line(PlotterWindowPos+6, 0,
+                                PlotterWindowPos + 6, 15 + usable_height,
+                                fill="black")
 
     # Draw the new line segment for threshold
     if (ThresholdLevel > MaxPT):
@@ -4220,17 +4223,19 @@ def update_target_dir_wraplength(event):
 
 
 def cmd_plotter_canvas_click(event):
-    global PlotterEnabled, PlotterScroll
+    global PlotterEnabled, PlotterScroll, PlotterWindowPos
     if PlotterEnabled:
         if not PlotterScroll:
             PlotterScroll = True
             logging.debug("Enable Plotter Scroll")
         else:
             PlotterEnabled = False
+            PlotterWindowPos = 0
             logging.debug("Disable Plotter")
     else:
         PlotterEnabled = True
         PlotterScroll = False
+        PlotterWindowPos = 0
         logging.debug("Enable Plotter, without scroll")
         
 
