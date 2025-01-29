@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.0"
-#define  __date__       "2025-01-28"
-#define  __version_highlight__  "Improve frame synchronization, specially for first frame"
+#define __version__     "1.1.1"
+#define  __date__       "2025-01-29"
+#define  __version_highlight__  "Properly terminate scan when requested to stop by UI"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -404,6 +404,7 @@ void loop() {
                 }
                 scan_process_ongoing = false;
                 SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                ScanState = Sts_Idle;
                 break;
             case CMD_SET_AUTO_STOP:
                 DebugPrint(">Auto stop", param);
@@ -481,6 +482,7 @@ void loop() {
                         break;
                     case CMD_MANUAL_UV_LED:
                         analogWrite(11, UVLedBrightness); // Switch UV LED on
+                        UVLedOn = true;
                         ScanState = Sts_ManualUvLed;
                         break;
                     case CMD_FILM_FORWARD:
