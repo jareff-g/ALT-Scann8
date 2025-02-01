@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.2"
-__date__ = "2025-01-29"
-__version_highlight__ = "Add vertical progress bar to rolling plotter + proper scan stop"
+__version__ = "1.11.3"
+__date__ = "2025-01-30"
+__version_highlight__ = "Retrieve controller version in API function RSP_VERSION_ID"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -100,6 +100,7 @@ win = None
 as_tooltips = None
 ExitingApp = False
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
+Controller_version = "Unknown"
 FocusState = True
 lastFocus = True
 FocusZoomPosX = 0.35
@@ -1081,6 +1082,7 @@ def get_last_frame_popup(last_frame):
 
 def generate_qr_code_info():
     data = (f"ALT-Scann8:{__version__}\n"
+            f"Controller:{Controller_version}\n"
             f"Python:{sys.version}\n"
             f"TkInter:{tk.TkVersion}\n"
             f"PIL:{PIL_Version}\n"
@@ -2781,7 +2783,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ArduinoTrigger
     global ScanProcessError
     global last_frame_time
-    global Controller_Id
+    global Controller_Id, Controller_version
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
@@ -2815,11 +2817,16 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     if ArduinoTrigger == 0:  # Do nothing
         pass
     elif ArduinoTrigger == RSP_VERSION_ID:  # New Frame available
-        Controller_Id = ArduinoParam1
+        Controller_Id = ArduinoParam1%256
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
+            Controller_version = "Nano "
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
+            Controller_version = "Pico "
+        Controller_version += f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
+        print(f"Controller version: {Controller_version}, {ArduinoParam1}, {ArduinoParam2}")
+        generate_qr_code_info()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
         reinit_controller()
