@@ -18,15 +18,17 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.0"
-#define  __date__       "2025-01-28"
-#define  __version_highlight__  "Improve frame synchronization, specially for first frame"
+#define __version__     "1.1.2"
+#define  __date__       "2025-01-30"
+#define  __version_highlight__  "Return controller version in API function RSP_VERSION_ID"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
 
 #include <Wire.h>
 #include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
 const int PHOTODETECT = A0; // Analog pin 0 perf
 int MaxPT = 0;
@@ -272,6 +274,8 @@ void setup() {
 
 void loop() {
     int param;
+    int cnt_ver_1 = 0, cnt_ver_2 = 0, cnt_ver_3 = 0;
+    char *pt;
 
     SendToRPi(RSP_FORCE_INIT, 0, 0);  // Request UI to resend init sequence, in case controller reloaded while UI active
 
@@ -404,6 +408,7 @@ void loop() {
                 }
                 scan_process_ongoing = false;
                 SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                ScanState = Sts_Idle;
                 break;
             case CMD_SET_AUTO_STOP:
                 DebugPrint(">Auto stop", param);
@@ -419,7 +424,26 @@ void loop() {
                 switch (UI_Command) {
                     case CMD_VERSION_ID:
                         DebugPrintStr(">V_ID");
-                        SendToRPi(RSP_VERSION_ID, 1, 0);  // 1 - Arduino, 2 - RPi Pico
+                        char *pt;
+                        pt = strtok (__version__,".");
+                        if (pt != NULL) {
+                            cnt_ver_1 = atoi(pt);
+                            pt = strtok (NULL, ".");
+                            if (pt != NULL) {
+                                cnt_ver_2 = atoi(pt);
+                                pt = strtok (NULL, ".");
+                                if (pt != NULL) {
+                                    cnt_ver_3 = atoi(pt);
+                                }
+                                else
+                                    cnt_ver_3 = 0;
+                            }
+                            else
+                                cnt_ver_2 = 0;
+                        }
+                        else
+                            cnt_ver_1 = 0;
+                        SendToRPi(RSP_VERSION_ID, cnt_ver_1 * 256 + 1, cnt_ver_2 * 256 + cnt_ver_3);  // 1 - Arduino, 2 - RPi Pico
                         break;
                     case CMD_START_SCAN:
                         tone(A2, 2000, 50); // Beep to indicate start of scanning
@@ -481,6 +505,7 @@ void loop() {
                         break;
                     case CMD_MANUAL_UV_LED:
                         analogWrite(11, UVLedBrightness); // Switch UV LED on
+                        UVLedOn = true;
                         ScanState = Sts_ManualUvLed;
                         break;
                     case CMD_FILM_FORWARD:

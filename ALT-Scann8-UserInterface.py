@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.1"
-__date__ = "2025-01-28"
-__version_highlight__ = "Fix slowdown issue (caused by integrated plotter)"
+__version__ = "1.11.4"
+__date__ = "2025-02-01"
+__version_highlight__ = "Display text box to replace QR code if library not loaded"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -100,6 +100,7 @@ win = None
 as_tooltips = None
 ExitingApp = False
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
+Controller_version = "Unknown"
 FocusState = True
 lastFocus = True
 FocusZoomPosX = 0.35
@@ -822,7 +823,7 @@ def cmd_settings_popup_accept():
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
-        if not SimplifiedMode and qr_lib_installed:
+        if not SimplifiedMode:
             if LoggingMode == 'DEBUG':
                 refresh_ui = True   # To display qr code
             elif qr_code_frame != None:
@@ -858,6 +859,7 @@ def cmd_settings_popup_accept():
 
     if refresh_ui:
         create_main_window()
+        refresh_qr_code()
         widget_list_enable([id_RealTimeDisplay, id_RealTimeZoom, id_AutoStopEnabled])
         if ExpertMode:
             widget_list_enable([id_AutoWbEnabled, id_AutoExpEnabled, id_AutoPtLevelEnabled, id_AutoFrameStepsEnabled,
@@ -1081,6 +1083,7 @@ def get_last_frame_popup(last_frame):
 
 def generate_qr_code_info():
     data = (f"ALT-Scann8:{__version__}\n"
+            f"Controller:{Controller_version}\n"
             f"Python:{sys.version}\n"
             f"TkInter:{tk.TkVersion}\n"
             f"PIL:{PIL_Version}\n"
@@ -1090,6 +1093,7 @@ def generate_qr_code_info():
             f"File:{FileType}\n"
             f"Font:{FontSize}\n"
             f"Cpst:{CapstanDiameter}\n")
+    logging.debug(data)
     return data
 
 
@@ -1164,37 +1168,38 @@ def refresh_qr_code():
     global win
     global qr_image
 
-    if SimplifiedMode or not qr_lib_installed:
+    if SimplifiedMode or LoggingMode != 'DEBUG':
         return
-
-    if LoggingMode != 'DEBUG' or qr_code_canvas == None:
-        return
+    
     win.update_idletasks()
 
-    qr_img = generate_qr_code_image()
+    if qr_lib_installed:
+        qr_img = generate_qr_code_image()
 
-    size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
-    print(f"({qr_code_canvas.winfo_width()},{qr_code_canvas.winfo_height()})")
+        size = min(qr_code_canvas.winfo_width(), qr_code_canvas.winfo_height())
 
-    # Get Pillow version number
-    major_version = int(PIL_Version.split('.')[0])
-    minor_version = int(PIL_Version.split('.')[1])
+        # Get Pillow version number
+        major_version = int(PIL_Version.split('.')[0])
+        minor_version = int(PIL_Version.split('.')[1])
 
-    # Choose resampling method based on Pillow version
-    if major_version > 8 or major_version == 8 and minor_version > 1:
-        resampling_method = Image.Resampling.LANCZOS
+        # Choose resampling method based on Pillow version
+        if major_version > 8 or major_version == 8 and minor_version > 1:
+            resampling_method = Image.Resampling.LANCZOS
+        else:
+            resampling_method = Image.ANTIALIAS
+        # Resize the image to fit within the canvas
+        qr_img = qr_img.resize((size, size), resampling_method)
+
+        qr_image = ImageTk.PhotoImage(qr_img)
+        # Convert the Image object into a Tkinter-compatible image object
+
+        # Draw the image on the canvas
+        qr_code_canvas.create_image(int((qr_code_canvas.winfo_width()-size)/2),
+                                    int((qr_code_canvas.winfo_height()-size)/2), anchor=tk.NW, image=qr_image)
     else:
-        resampling_method = Image.ANTIALIAS
-    # Resize the image to fit within the canvas
-    qr_img = qr_img.resize((size, size), resampling_method)
-
-    qr_image = ImageTk.PhotoImage(qr_img)
-    # Convert the Image object into a Tkinter-compatible image object
-
-    # Draw the image on the canvas
-    qr_code_canvas.create_image(int((qr_code_canvas.winfo_width()-size)/2),
-                                int((qr_code_canvas.winfo_height()-size)/2), anchor=tk.NW, image=qr_image)
-
+        qr_code_canvas.delete("all")
+        data = generate_qr_code_info()
+        qr_code_canvas.create_text(10, 10, anchor=tk.NW, text=data, font=f"Helvetica {7}")
 
 def set_base_folder():
     global BaseFolder, CurrentDir
@@ -2287,8 +2292,7 @@ def cmd_start_scan_simulated():
             tk.messagebox.showerror("Error!", "Folder " + CurrentDir + " does not  exist!")
             ScanOngoing = False
         else:
-            if qr_lib_installed:
-                refresh_qr_code()
+            refresh_qr_code()
             simulated_captured_frame_list = os.listdir(CurrentDir)
             simulated_captured_frame_list.sort()
             simulated_images_in_list = len(simulated_captured_frame_list)
@@ -2479,8 +2483,7 @@ def start_scan():
             logging.debug("Sending CMD_START_SCAN")
             send_arduino_command(CMD_START_SCAN)
 
-        if qr_lib_installed:
-            refresh_qr_code()
+        refresh_qr_code()
 
         # Invoke capture_loop a first time when scan starts
         win.after(5, capture_loop)
@@ -2729,6 +2732,9 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
         plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
                                 PlotterWindowPos + 5, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
                                 fill="blue")
+        plotter_canvas.create_line(PlotterWindowPos+6, 0,
+                                PlotterWindowPos + 6, 15 + usable_height,
+                                fill="black")
 
     # Draw the new line segment for threshold
     if (ThresholdLevel > MaxPT):
@@ -2778,7 +2784,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ArduinoTrigger
     global ScanProcessError
     global last_frame_time
-    global Controller_Id
+    global Controller_Id, Controller_version
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
@@ -2812,11 +2818,16 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     if ArduinoTrigger == 0:  # Do nothing
         pass
     elif ArduinoTrigger == RSP_VERSION_ID:  # New Frame available
-        Controller_Id = ArduinoParam1
+        Controller_Id = ArduinoParam1%256
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
+            Controller_version = "Nano "
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
+            Controller_version = "Pico "
+        Controller_version += f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
+        win.title(f"ALT-Scann8 v{__version__} ({Controller_version})")  # setting title of the window
+        refresh_qr_code()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
         reinit_controller()
@@ -3606,7 +3617,7 @@ def create_main_window():
     if SimulatedRun:
         win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
     else:
-        win.title('ALT-Scann8 v' + __version__)  # setting title of the window
+        win.title(f"ALT-Scann8 v{__version__} ({Controller_version})")  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
     screen_width = win.winfo_screenwidth()
     screen_height = win.winfo_screenheight()
@@ -3657,8 +3668,6 @@ def create_main_window():
     create_widgets()
 
     logging.info(f"Window size: {app_width}x{app_height + 20}")
-
-    refresh_qr_code()
 
     # Get Top window coordinates
     TopWinX = win.winfo_x()
@@ -4220,17 +4229,19 @@ def update_target_dir_wraplength(event):
 
 
 def cmd_plotter_canvas_click(event):
-    global PlotterEnabled, PlotterScroll
+    global PlotterEnabled, PlotterScroll, PlotterWindowPos
     if PlotterEnabled:
         if not PlotterScroll:
             PlotterScroll = True
             logging.debug("Enable Plotter Scroll")
         else:
             PlotterEnabled = False
+            PlotterWindowPos = 0
             logging.debug("Disable Plotter")
     else:
         PlotterEnabled = True
         PlotterScroll = False
+        PlotterWindowPos = 0
         logging.debug("Enable Plotter, without scroll")
         
 
@@ -5091,18 +5102,18 @@ def create_widgets():
                                                        'it. Zero represents the base or "normal" exposure level.')
         exposure_compensation_spinbox.bind("<FocusOut>", lambda event: cmd_exposure_compensation_selection())
 
-        # QR Code
-        if qr_lib_installed and LoggingMode == 'DEBUG':
+        # QR Code - Create Canvas to display QR code or text info (if QR Code library not available)
+        if LoggingMode == 'DEBUG':
             qr_code_frame = LabelFrame(expert_frame, text="Debug Info", font=("Arial", FontSize - 1),
-                                          name='qr_code_frame')
+                                            name='qr_code_frame')
             qr_code_frame.grid(row=1, rowspan=2, column=2, padx=x_pad, pady=y_pad, sticky='NSEW')
             qr_code_canvas = Canvas(qr_code_frame, bg='white', name='qr_code_canvas', width=1, height=1)
             qr_code_canvas.pack(side=TOP, expand=True, fill='both')
             qr_code_canvas.bind("<Button-1>", display_qr_code_info)
+            as_tooltips.add(qr_code_canvas, "Click to display debug information.")
         else:
             qr_code_canvas = None
             qr_code_frame = None
-
         # *********************************
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", font=("Arial", FontSize - 1),
@@ -5644,6 +5655,8 @@ def main(argv):
         arduino_listen_loop()
 
     ALT_scann_init_done = True
+
+    refresh_qr_code()
 
     # *** ALT-Scann8 load complete ***
     if hw_panel_installed:
