@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.4"
-__date__ = "2025-02-01"
-__version_highlight__ = "Display text box to replace QR code if library not loaded"
+__version__ = "1.11.5"
+__date__ = "2025-02-05"
+__version_highlight__ = "Add scan error counter, plus log file with frames that failed to be detected"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -200,6 +200,8 @@ ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
 simulated_images_in_list = 0
+scan_error_counter = 0  # Number of RSP_SCAN_ERROR received
+scan_error_log_fullpath = ''
 
 # Commands (RPI to Arduino)
 CMD_VERSION_ID = 1
@@ -702,6 +704,7 @@ def cmd_set_focus_minus():
 
 def cmd_set_new_folder():
     global BaseFolder, CurrentDir, CurrentFrame
+    global scan_error_counter, scan_error_counter_value, scan_error_log_fullpath
 
     requested_dir = ""
     success = False
@@ -738,6 +741,10 @@ def cmd_set_new_folder():
     if success:
         folder_frame_target_dir.config(text=CurrentDir)
         Scanned_Images_number.set(CurrentFrame)
+        scan_error_counter = 0
+        scan_error_counter_value.set(0)
+        with open(scan_error_log_fullpath, 'a') as f:
+            f.write(f"Starting scan error log for {CurrentDir}\n")
         ConfigData["CurrentDir"] = str(CurrentDir)
         ConfigData["CurrentFrame"] = str(CurrentFrame)
 
@@ -1219,6 +1226,7 @@ def set_base_folder():
 
 def cmd_set_existing_folder():
     global CurrentDir, CurrentFrame
+    global scan_error_counter, scan_error_counter_value
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
@@ -1239,14 +1247,7 @@ def cmd_set_existing_folder():
                 last_frame = max(last_frame, int(frame_number[0]))  # Only one number in the filename, so we take the first
                 filecount += 1
 
-    current_frame_str = str(get_last_frame_popup(last_frame))
-
-    if current_frame_str is None:
-        current_frame_str = '0'
-
-    if current_frame_str == '':
-        current_frame_str = '0'
-    NewCurrentFrame = int(current_frame_str)
+    NewCurrentFrame = get_last_frame_popup(last_frame)
 
     if filecount > 0 and NewCurrentFrame < last_frame:
         confirm = tk.messagebox.askyesno(title='Files exist in target folder',
@@ -1260,8 +1261,12 @@ def cmd_set_existing_folder():
     if confirm:
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
+        scan_error_counter = 0
+        scan_error_counter_value.set(0)
+        with open(scan_error_log_fullpath, 'a') as f:
+            f.write(f"Starting scan error log for {CurrentDir}\n")
 
-        Scanned_Images_number.set(current_frame_str)
+        Scanned_Images_number.set(CurrentFrame)
         ConfigData["CurrentFrame"] = str(CurrentFrame)
 
         folder_frame_target_dir.config(text=CurrentDir)
@@ -2788,6 +2793,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
+    global scan_error_counter, scan_error_counter_value
+
 
     if not SimulatedRun:
         try:
@@ -2835,9 +2842,18 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
         last_frame_time = time.time() + max_inactivity_delay - 2
         NewFrameAvailable = True
+        if ArduinoParam1 <= int(StepsPerFrame*0.8) or ArduinoParam1 >= (StepsPerFrame*1.2):
+            scan_error_counter += 1
+            scan_error_counter_value.set(scan_error_counter)
+            with open(scan_error_log_fullpath, 'a') as f:
+                f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
+        scan_error_counter += 1
+        scan_error_counter_value.set(scan_error_counter)
+        with open(scan_error_log_fullpath, 'a') as f:
+            f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
         logging.warning("End of reel reached: Scan terminated")
         ScanStopRequested = True
@@ -3184,6 +3200,9 @@ def load_session_data_post_init():
                 if not os.path.isdir(CurrentDir):
                     CurrentDir = os.getcwd()
                 folder_frame_target_dir.config(text=CurrentDir)
+                with open(scan_error_log_fullpath, 'a') as f:
+                    f.write(f"Starting scan error log for {CurrentDir}\n")
+
             if ExperimentalMode:
                 if 'HdrCaptureActive' in ConfigData:
                     if isinstance(ConfigData["HdrCaptureActive"], str):
@@ -3680,10 +3699,15 @@ def create_main_window():
 
 
 def init_logging():
+    global scan_error_log_fullpath
+
     # Initialize logging
     log_path = os.path.dirname(__file__)
     if log_path == "":
         log_path = os.getcwd()
+    log_path = log_path + "/Logs"
+    if not os.path.isdir(log_path):
+        os.mkdir(log_path)
     log_file_fullpath = log_path + "/ALT-Scann8." + time.strftime("%Y%m%d") + ".log"
     logging.basicConfig(
         level=LogLevel,
@@ -3693,9 +3717,12 @@ def init_logging():
             logging.StreamHandler(sys.stdout)
         ]
     )
+    # Initialize scan error logging
+    scan_error_log_fullpath = log_path + "/ScanErrors." + time.strftime("%Y%m%d") + ".log"
 
     logging.info("ALT-Scann8 %s (%s)", __version__, __date__)
     logging.info("Log file: %s", log_file_fullpath)
+    logging.info("Scan error log file: %s", scan_error_log_fullpath)
     logging.info("Config file: %s", ConfigurationDataFilename)
 
 
@@ -4329,6 +4356,7 @@ def create_widgets():
     global match_wait_margin_spinbox
     global qr_code_canvas, qr_code_frame
     global uv_brightness_value, uv_brightness_spinbox
+    global scan_error_counter, scan_error_counter_value
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5505,6 +5533,18 @@ def create_widgets():
         as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
         uv_brightness_spinbox.configure(validate="key", validatecommand=(cmd_uv_brightness_validation_cmd, '%P'))
         uv_brightness_spinbox.bind("<FocusOut>", lambda event: cmd_uv_brightness_selection())
+        experimental_row += 1
+
+        # Scan error counter
+        scan_error_counter_label = Label(experimental_miscellaneous_frame, text="Scan errors:", font=("Arial", FontSize-2),
+                                 name='scan_error_counter_label')
+        scan_error_counter_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
+
+        scan_error_counter_value = tk.IntVar(value=0 if scan_error_counter <= 0 else scan_error_counter)
+        scan_error_counter_entry = tk.Entry(experimental_miscellaneous_frame, textvariable=scan_error_counter_value, width=5,
+                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_entry')
+        scan_error_counter_entry.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        as_tooltips.add(scan_error_counter_entry, "Number of potential scan errors (number of steps/frame differs more than 20% from standard)")
         experimental_row += 1
 
         # Manual UV Led switch

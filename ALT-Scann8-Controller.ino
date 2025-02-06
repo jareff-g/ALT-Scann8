@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.2"
-#define  __date__       "2025-01-30"
-#define  __version_highlight__  "Return controller version in API function RSP_VERSION_ID"
+#define __version__     "1.1.3"
+#define  __date__       "2025-02-05"
+#define  __version_highlight__  "Return number of steps required for detected frame (SCAN_FRAME_DETECTED)"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -611,7 +611,7 @@ void loop() {
                         break;
                     case SCAN_FRAME_DETECTED:
                         ScanState = Sts_Idle; // Exit scan loop
-                        SendToRPi(RSP_FRAME_AVAILABLE, 0, 0);
+                        SendToRPi(RSP_FRAME_AVAILABLE, LastFrameSteps, 0);
                         break;
                     case SCAN_TERMINATION_REQUESTED:
                     case SCAN_FRAME_DETECTION_ERROR:
