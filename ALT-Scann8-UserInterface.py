@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.5"
-__date__ = "2025-02-05"
-__version_highlight__ = "Add scan error counter, plus log file with frames that failed to be detected"
+__version__ = "1.11.6"
+__date__ = "2025-02-07"
+__version_highlight__ = "Replace scan errors entry by label, as no user input is required. Also add % of errors"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -201,6 +201,7 @@ simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
 simulated_images_in_list = 0
 scan_error_counter = 0  # Number of RSP_SCAN_ERROR received
+scan_error_total_frames_counter = 0  # Number of frames received since error counter set to zero
 scan_error_log_fullpath = ''
 
 # Commands (RPI to Arduino)
@@ -704,7 +705,7 @@ def cmd_set_focus_minus():
 
 def cmd_set_new_folder():
     global BaseFolder, CurrentDir, CurrentFrame
-    global scan_error_counter, scan_error_counter_value, scan_error_log_fullpath
+    global scan_error_counter, scan_error_total_frames_counter, scan_error_log_fullpath, scan_error_counter_value
 
     requested_dir = ""
     success = False
@@ -741,8 +742,8 @@ def cmd_set_new_folder():
     if success:
         folder_frame_target_dir.config(text=CurrentDir)
         Scanned_Images_number.set(CurrentFrame)
-        scan_error_counter = 0
-        scan_error_counter_value.set(0)
+        scan_error_counter = scan_error_total_frames_counter = 0
+        scan_error_counter_value.set(f"0 (0%)")
         with open(scan_error_log_fullpath, 'a') as f:
             f.write(f"Starting scan error log for {CurrentDir}\n")
         ConfigData["CurrentDir"] = str(CurrentDir)
@@ -1226,7 +1227,7 @@ def set_base_folder():
 
 def cmd_set_existing_folder():
     global CurrentDir, CurrentFrame
-    global scan_error_counter, scan_error_counter_value
+    global scan_error_counter, scan_error_total_frames_counter, scan_error_counter_value
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
@@ -1261,8 +1262,8 @@ def cmd_set_existing_folder():
     if confirm:
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
-        scan_error_counter = 0
-        scan_error_counter_value.set(0)
+        scan_error_counter = scan_error_total_frames_counter = 0
+        scan_error_counter_value.set(f"0 (0%)")
         with open(scan_error_log_fullpath, 'a') as f:
             f.write(f"Starting scan error log for {CurrentDir}\n")
 
@@ -2793,7 +2794,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
-    global scan_error_counter, scan_error_counter_value
+    global scan_error_counter, scan_error_total_frames_counter, scan_error_counter_value
 
 
     if not SimulatedRun:
@@ -2842,16 +2843,17 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         # Delay shared with arduino, 2 seconds less to avoid conflict with end reel
         last_frame_time = time.time() + max_inactivity_delay - 2
         NewFrameAvailable = True
+        scan_error_total_frames_counter += 1
         if ArduinoParam1 <= int(StepsPerFrame*0.8) or ArduinoParam1 >= (StepsPerFrame*1.2):
             scan_error_counter += 1
-            scan_error_counter_value.set(scan_error_counter)
             with open(scan_error_log_fullpath, 'a') as f:
                 f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
+        scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
         scan_error_counter += 1
-        scan_error_counter_value.set(scan_error_counter)
+        scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
         with open(scan_error_log_fullpath, 'a') as f:
             f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
@@ -4356,7 +4358,7 @@ def create_widgets():
     global match_wait_margin_spinbox
     global qr_code_canvas, qr_code_frame
     global uv_brightness_value, uv_brightness_spinbox
-    global scan_error_counter, scan_error_counter_value
+    global scan_error_counter_value
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5540,11 +5542,11 @@ def create_widgets():
                                  name='scan_error_counter_label')
         scan_error_counter_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
 
-        scan_error_counter_value = tk.IntVar(value=0 if scan_error_counter <= 0 else scan_error_counter)
-        scan_error_counter_entry = tk.Entry(experimental_miscellaneous_frame, textvariable=scan_error_counter_value, width=5,
-                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_entry')
-        scan_error_counter_entry.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
-        as_tooltips.add(scan_error_counter_entry, "Number of potential scan errors (number of steps/frame differs more than 20% from standard)")
+        scan_error_counter_value = tk.StringVar(value="0 (0%)")
+        scan_error_counter_value_label = tk.Label(experimental_miscellaneous_frame, textvariable=scan_error_counter_value, width=10,
+                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
+        scan_error_counter_value_label.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        as_tooltips.add(scan_error_counter_value_label, "Number of potential scan errors (number of steps/frame differs more than 20% from standard)")
         experimental_row += 1
 
         # Manual UV Led switch
