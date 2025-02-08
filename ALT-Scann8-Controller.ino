@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.3"
-#define  __date__       "2025-02-05"
-#define  __version_highlight__  "Return number of steps required for detected frame (SCAN_FRAME_DETECTED)"
+#define __version__     "1.1.4"
+#define  __date__       "2025-02-08"
+#define  __version_highlight__  "Perform extra steps only when auto steps is enabled"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -967,7 +967,7 @@ void adjust_framesteps(int frame_steps) {
     if (items_in_list < 32)
         items_in_list++;
 
-    if (Frame_Steps_Auto) {  // Update MinFrameSpeed only if auto activated
+    if (Frame_Steps_Auto) {  // Update MinFrameSteps only if auto activated
         for (int i = 0; i < items_in_list; i++)
             total = total + steps_per_frame_list[i];
         MinFrameSteps = int(total / items_in_list) - 5;
@@ -1052,7 +1052,7 @@ ScanResult scan(int UI_Command) {
 
         if (FrameDetected) {
             DebugPrintStr("Frame!");
-            if (FrameExtraSteps > 0)  // If positive, aditional steps after detection
+            if (Frame_Steps_Auto and FrameExtraSteps > 0)  // If auto steps enabled, and extra steps positive, aditional steps after detection
                 capstan_advance(FrameExtraSteps);
             LastFrameSteps = FrameStepsDone;
             adjust_framesteps(LastFrameSteps);

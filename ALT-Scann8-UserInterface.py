@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.6"
-__date__ = "2025-02-07"
-__version_highlight__ = "Replace scan errors entry by label, as no user input is required. Also add % of errors"
+__version__ = "1.11.7"
+__date__ = "2025-02-08"
+__version_highlight__ = "Scan errors: Count only actual errors, when frame not detected after 2X number of regular steps"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2844,11 +2844,14 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         last_frame_time = time.time() + max_inactivity_delay - 2
         NewFrameAvailable = True
         scan_error_total_frames_counter += 1
+        """
+        # Do not count frames requiring more than the regular number of steps as errors
         if ArduinoParam1 <= int(StepsPerFrame*0.8) or ArduinoParam1 >= (StepsPerFrame*1.2):
             scan_error_counter += 1
             with open(scan_error_log_fullpath, 'a') as f:
                 f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
         scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+        """
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
@@ -2958,7 +2961,7 @@ def widget_list_update(cmd, category_list):
                                                    [wb_red_spinbox,wb_blue_spinbox]]
         dependent_widget_dict[id_AutoPtLevelEnabled] = [[],
                                                         [pt_level_spinbox]]
-        dependent_widget_dict[id_AutoFrameStepsEnabled] = [[],
+        dependent_widget_dict[id_AutoFrameStepsEnabled] = [[frame_extra_steps_label, frame_extra_steps_spinbox],
                                                            [steps_per_frame_spinbox]]
         dependent_widget_dict[id_ExposureWbAdaptPause] = [[match_wait_margin_spinbox],
                                                           []]
@@ -4311,7 +4314,7 @@ def create_widgets():
     global steps_per_frame_value, frame_fine_tune_value
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
-    global frame_extra_steps_spinbox, frame_extra_steps_value
+    global frame_extra_steps_spinbox, frame_extra_steps_value, frame_extra_steps_label
     global scan_speed_spinbox, scan_speed_value
     global exposure_value
     global wb_red_spinbox, wb_blue_spinbox, wb_red_value, wb_blue_value
