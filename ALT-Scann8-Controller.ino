@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.4"
+#define __version__     "1.1.5"
 #define  __date__       "2025-02-08"
-#define  __version_highlight__  "Perform extra steps only when auto steps is enabled"
+#define  __version_highlight__  "Report PT level when passing new frame response (RSP_FRAME_AVAILABLE)"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -174,6 +174,7 @@ unsigned long OriginalScanSpeedDelay = ScanSpeedDelay;          // Keep to resto
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
 int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
+int LastPTLevel = 0;                        // Stores last PT level (stats only)
 
 boolean IsS8 = true;
 
@@ -611,7 +612,7 @@ void loop() {
                         break;
                     case SCAN_FRAME_DETECTED:
                         ScanState = Sts_Idle; // Exit scan loop
-                        SendToRPi(RSP_FRAME_AVAILABLE, LastFrameSteps, 0);
+                        SendToRPi(RSP_FRAME_AVAILABLE, LastFrameSteps, LastPTLevel);
                         break;
                     case SCAN_TERMINATION_REQUESTED:
                     case SCAN_FRAME_DETECTION_ERROR:
@@ -990,6 +991,7 @@ boolean IsHoleDetected() {
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
     // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
     if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps+FrameDeductSteps)) {
+        LastPTLevel = PT_Level;
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led

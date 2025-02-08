@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.7"
+__version__ = "1.11.8"
 __date__ = "2025-02-08"
-__version_highlight__ = "Scan errors: Count only actual errors, when frame not detected after 2X number of regular steps"
+__version_highlight__ = "Added misaligned errors using OpenCV. Keep fixed scale in plotter window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -258,6 +258,7 @@ PlotterEnabled = True
 PlotterScroll = False
 SimplifiedMode = False
 UIScrollbars = False
+DetectMisalignedFrames = True
 FontSize = 0
 LoggingMode = "INFO"
 LogLevel = 20
@@ -768,7 +769,7 @@ def cmd_settings_popup_dismiss():
 
 def cmd_settings_popup_accept():
     global options_dlg
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
@@ -815,6 +816,9 @@ def cmd_settings_popup_accept():
         refresh_ui = True
         UIScrollbars = ui_scrollbars.get()
         ConfigData["UIScrollbars"] = UIScrollbars
+    if DetectMisalignedFrames != detect_misaligned_frames.get():
+        DetectMisalignedFrames = detect_misaligned_frames.get()
+        ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
     if DisableToolTips != disable_tooltips.get():
         DisableToolTips = disable_tooltips.get()
         ConfigData["DisableToolTips"] = DisableToolTips
@@ -886,10 +890,10 @@ def cmd_settings_popup_accept():
 
 def cmd_settings_popup():
     global options_dlg, win
-    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global simplified_mode, ui_scrollbars, font_size_int, disable_tooltips
+    global simplified_mode, ui_scrollbars, detect_misaligned_frames, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
@@ -958,6 +962,14 @@ def cmd_settings_popup():
                                        font=("Arial", FontSize - 1), text="Display scrollbars")
     ui_scrollbars_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions)")
+    options_row += 1
+
+    # Detect misaligned frames (as it impacts speed)
+    detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
+    detect_misaligned_frames_btn = tk.Checkbutton(options_dlg, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
+                                       font=("Arial", FontSize - 1), text="Detect misaligned frames")
+    detect_misaligned_frames_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
+    as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
     options_row += 1
 
     # Font Size
@@ -1536,6 +1548,48 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
+def is_symmetrical(image_path, slice_width=20, threshold=0.9):
+    # Read the image
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        raise ValueError("Could not read the image")
+
+    # Convert to pure black and white (binary image)
+    _, binary_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+
+    # Get dimensions of the binary image
+    height, width = binary_img.shape
+
+    # Slice only the left part of the image
+    if slice_width > width:
+        raise ValueError("Slice width exceeds image width")
+    sliced_image = binary_img[:, :slice_width]
+
+    # Calculate the middle horizontal line
+    middle = height // 2
+
+    # If the image has an odd number of rows, exclude the middle row
+    if height % 2 != 0:
+        upper = sliced_image[:middle, :]
+        lower = cv2.flip(sliced_image[middle+1:, :], 0)  # Flip vertically
+    else:
+        upper = sliced_image[:middle, :]
+        lower = cv2.flip(sliced_image[middle:, :], 0)  # Flip vertically
+
+    # Calculate the difference between upper and flipped lower part
+    diff = cv2.absdiff(upper, lower)
+    
+    # Since it's binary, we can count non-zero pixels for difference
+    non_zero_count = np.count_nonzero(diff)
+    
+    # Calculate the symmetry score based on the number of differing pixels
+    total_pixels = slice_width * min(upper.shape[0], lower.shape[0])
+    similarity = 1 - (non_zero_count / total_pixels)
+
+    # If similarity is above the threshold, we consider it symmetrical
+    return similarity >= threshold, similarity
+
+
 def reverse_image(image):
     image_array = np.asarray(image)
     image_array = np.negative(image_array)
@@ -1574,6 +1628,7 @@ def capture_save_thread(queue, event, id):
     global ScanStopRequested
     global active_threads
     global total_wait_time_save_image
+    global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1636,6 +1691,11 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
+            if DetectMisalignedFrames and not is_symmetrical(FrameFilenamePattern % (frame_idx, FileType), 10, 0.6)[0]:
+                scan_error_counter += 1
+                scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                with open(scan_error_log_fullpath, 'a') as f:
+                    f.write(f"Misaligned frame, {CurrentFrame}\n")
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -2760,10 +2820,6 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
     PrevThresholdLevel = ThresholdLevel
     if not PlotterScroll:
         PlotterWindowPos = (PlotterWindowPos + 5) % plotter_width
-    if MaxPT > 100:  # Do not allow below 100
-        MaxPT -= 1  # Dynamic max
-    if MinPT < 800:  # Do not allow above 800
-        MinPT += 1  # Dynamic min
 
 
 # send_arduino_command: No response expected
@@ -2844,21 +2900,15 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         last_frame_time = time.time() + max_inactivity_delay - 2
         NewFrameAvailable = True
         scan_error_total_frames_counter += 1
-        """
-        # Do not count frames requiring more than the regular number of steps as errors
-        if ArduinoParam1 <= int(StepsPerFrame*0.8) or ArduinoParam1 >= (StepsPerFrame*1.2):
-            scan_error_counter += 1
-            with open(scan_error_log_fullpath, 'a') as f:
-                f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
         scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
-        """
+
     elif ArduinoTrigger == RSP_SCAN_ERROR:  # Error during scan
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
         scan_error_counter += 1
         scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
         with open(scan_error_log_fullpath, 'a') as f:
-            f.write(f"{CurrentFrame}, {ArduinoParam1}\n")
+            f.write(f"No Frame detected, {CurrentFrame}, {ArduinoParam1}, {ArduinoParam2}\n")
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
         logging.warning("End of reel reached: Scan terminated")
         ScanStopRequested = True
@@ -3099,7 +3149,7 @@ def validate_config_folders():
 
 
 def load_config_data_pre_init():
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, FontSize, DisableToolTips, BaseFolder
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
 
     for item in ConfigData:
@@ -3123,6 +3173,8 @@ def load_config_data_pre_init():
                 PlotterEnabled = ConfigData["PlotterMode"]
         if 'UIScrollbars' in ConfigData:
             UIScrollbars = ConfigData["UIScrollbars"]
+        if 'DetectMisalignedFrames' in ConfigData:
+            DetectMisalignedFrames = ConfigData["DetectMisalignedFrames"]
         if 'DisableToolTips' in ConfigData:
             DisableToolTips = ConfigData["DisableToolTips"]
         if 'WidgetsEnabledWhileScanning' in ConfigData:
@@ -3168,7 +3220,7 @@ def load_session_data_post_init():
     global FileType, FilmType, CapstanDiameter
     global CaptureResolution
     global AutoExpEnabled, AutoWbEnabled
-    
+
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
         confirm = tk.messagebox.askyesno(title='Load previous session status',
@@ -4361,7 +4413,7 @@ def create_widgets():
     global match_wait_margin_spinbox
     global qr_code_canvas, qr_code_frame
     global uv_brightness_value, uv_brightness_spinbox
-    global scan_error_counter_value
+    global scan_error_counter_value, scan_error_counter_label, scan_error_counter_value_label
 
     # Global value for separations between widgets
     y_pad = 2
