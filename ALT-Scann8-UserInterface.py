@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.12"
+__version__ = "1.11.13"
 __date__ = "2025-02-09"
-__version_highlight__ = "Remove test data from UI after latest changes"
+__version_highlight__ = "Check frame misalignment also in DNG files"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -94,6 +94,13 @@ from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
 from tooltip import Tooltips
 from rolling_average import RollingAverage
+
+try:
+    import rawpy
+    import imageio
+    check_dng_frames_for_misalignment = True
+except ImportError:
+    check_dng_frames_for_misalignment = False
 
 #  ######### Global variable definition ##########
 win = None
@@ -1590,6 +1597,12 @@ def is_symmetrical(image_path, slice_width=20, threshold=0.9):
     return similarity >= threshold, similarity
 
 
+def convert_dng_to_tiff(dng_path, tiff_path):
+    with rawpy.imread(dng_path) as raw:
+        rgb = raw.postprocess()
+    imageio.imwrite(tiff_path, rgb)
+
+
 def reverse_image(image):
     image_array = np.asarray(image)
     image_array = np.negative(image_array)
@@ -1670,6 +1683,13 @@ def capture_save_thread(queue, event, id):
             request.release()
             logging.debug("Thread %i saved request DNG image: %s ms", id,
                           str(round((time.time() - curtime) * 1000, 1)))
+            if check_dng_frames_for_misalignment and DetectMisalignedFrames and hdr_idx <= 1:   # If checking HDR, onyl first frame
+                convert_dng_to_tiff(FrameFilenamePattern % (frame_idx, FileType), 'alignment.tiff')
+                if not is_symmetrical('alignment.tiff', 10, 0.6)[0]:
+                    scan_error_counter += 1
+                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                    with open(scan_error_log_fullpath, 'a') as f:
+                        f.write(f"Misaligned frame, {CurrentFrame}\n")
         else:
             # If not is_dng AND negative_image AND request: Convert to image now, and do a PIL save
             if not NegativeImage and type == REQUEST_TOKEN:
@@ -1691,7 +1711,7 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and not is_symmetrical(FrameFilenamePattern % (frame_idx, FileType), 10, 0.6)[0]:
+            if DetectMisalignedFrames and hdr_idx <= 1 and not is_symmetrical(FrameFilenamePattern % (frame_idx, FileType), 10, 0.6)[0]:
                 scan_error_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
@@ -3667,10 +3687,10 @@ def on_configure_scrolled_canvas(event):
 # Initialize widgets with multiple dependencies
 def init_multidependent_widgets():
     if HdrCaptureActive == HdrBracketAuto and HdrBracketAuto:
-        hdr_min_exp_label.disabled_counter += 1
-        hdr_max_exp_label.disabled_counter += 1
-        hdr_min_exp_spinbox.disabled_counter += 1
-        hdr_max_exp_spinbox.disabled_counter += 1
+        hdr_min_exp_label.disabled_counter = 1
+        hdr_max_exp_label.disabled_counter = 1
+        hdr_min_exp_spinbox.disabled_counter = 1
+        hdr_max_exp_spinbox.disabled_counter = 1
         widget_list_refresh([id_HdrBracketAuto])
 
 
@@ -3804,6 +3824,9 @@ def tscann8_init():
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
     else:
         logging.info("Running on Raspberry Pi")
+
+    if not check_dng_frames_for_misalignment:
+        logging.warning("Frame alignment for DNG files is disabled. To enable it please install libraries rawpy and imageio")
 
     CurrentDir = BaseFolder
     logging.debug("BaseFolder=%s", BaseFolder)
