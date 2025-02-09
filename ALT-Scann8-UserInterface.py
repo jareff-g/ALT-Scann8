@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.10"
+__version__ = "1.11.11"
 __date__ = "2025-02-09"
-__version_highlight__ = "Change width taken by some widgets to prevent lower control area to be wider than upper"
+__version_highlight__ = "For existing config files, transform legacy name CentreWeighted to CentreWgt"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3423,6 +3423,8 @@ def load_session_data_post_init():
                     camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[aux]})
             if "AeMeteringMode" in ConfigData:
                 aux = ConfigData["AeMeteringMode"]
+                if aux == "CentreWeighted": # Change on 9th Feb 2025: Legacy name, convert to new name
+                    aux = "CentreWgt"
                 AeMeteringMode_dropdown_selected.set(aux)
                 if not SimulatedRun and not CameraDisabled:
                     camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[aux]})
