@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.8"
-__date__ = "2025-02-08"
-__version_highlight__ = "Added misaligned errors using OpenCV. Keep fixed scale in plotter window"
+__version__ = "1.11.9"
+__date__ = "2025-02-09"
+__version_highlight__ = "Move 'scan errors' counter to Frame align section, also rename to 'frame errors'"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -5199,6 +5199,7 @@ def create_widgets():
         else:
             qr_code_canvas = None
             qr_code_frame = None
+
         # *********************************
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", font=("Arial", FontSize - 1),
@@ -5215,7 +5216,7 @@ def create_widgets():
         steps_per_frame_btn.widget_type = "control"
         if ColorCodedButtons:
             steps_per_frame_btn.config(selectcolor="pale green")
-        steps_per_frame_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        steps_per_frame_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
         as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
         steps_per_frame_value = tk.IntVar(value=StepsPerFrame)  # Default to be overridden by configuration
@@ -5223,7 +5224,7 @@ def create_widgets():
                                                  textvariable=steps_per_frame_value, from_=100, to=600,
                                                  font=("Arial", FontSize - 1), name='steps_per_frame_spinbox')
         steps_per_frame_spinbox.widget_type = "control"
-        steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        steps_per_frame_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
         steps_per_frame_spinbox.configure(validate="key", validatecommand=(cmd_steps_per_frame_validation_cmd, '%P'))
         as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor "
@@ -5241,7 +5242,7 @@ def create_widgets():
         pt_level_btn.widget_type = "control"
         if ColorCodedButtons:
             pt_level_btn.config(selectcolor="pale green")
-        pt_level_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        pt_level_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
         as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         pt_level_value = tk.IntVar(value=PtLevelValue)  # To be overridden by config
@@ -5249,7 +5250,7 @@ def create_widgets():
                                           textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize - 1),
                                           name='pt_level_spinbox')
         pt_level_spinbox.widget_type = "control"
-        pt_level_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        pt_level_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(cmd_pt_level_validation_cmd, '%P'))
         as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached "
@@ -5271,7 +5272,7 @@ def create_widgets():
                                                  from_=5, to=95, increment=5, font=("Arial", FontSize - 1),
                                                  name='frame_fine_tune_spinbox')
         frame_fine_tune_spinbox.widget_type = "control"
-        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(cmd_fine_tune_validation_cmd, '%P'))
         as_tooltips.add(frame_fine_tune_spinbox, "Fine tune frame detection: Shift frame detection threshold up of "
@@ -5291,13 +5292,26 @@ def create_widgets():
                                                    textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
                                                    name='frame_extra_steps_spinbox')
         frame_extra_steps_spinbox.widget_type = "control"
-        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
         as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
                                                    "detection (n between -30 and 30). Negative values can help if "
                                                    "film gate is not correctly positioned.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
+        frame_align_row += 1
+
+        # Scan error counter
+        scan_error_counter_label = Label(frame_alignment_frame, text="Frame errors:", font=("Arial", FontSize-2),
+                                 name='scan_error_counter_label')
+        scan_error_counter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+
+        scan_error_counter_value = tk.StringVar(value="123 (0.7%)")
+        scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
+                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
+        scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        as_tooltips.add(scan_error_counter_value_label, "Number of frames missed or misaligned during scanning.")
+        frame_align_row += 1
 
         # ***************************************************
         # Frame to add stabilization controls (speed & delay)
@@ -5590,18 +5604,6 @@ def create_widgets():
         as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
         uv_brightness_spinbox.configure(validate="key", validatecommand=(cmd_uv_brightness_validation_cmd, '%P'))
         uv_brightness_spinbox.bind("<FocusOut>", lambda event: cmd_uv_brightness_selection())
-        experimental_row += 1
-
-        # Scan error counter
-        scan_error_counter_label = Label(experimental_miscellaneous_frame, text="Scan errors:", font=("Arial", FontSize-2),
-                                 name='scan_error_counter_label')
-        scan_error_counter_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
-
-        scan_error_counter_value = tk.StringVar(value="0 (0%)")
-        scan_error_counter_value_label = tk.Label(experimental_miscellaneous_frame, textvariable=scan_error_counter_value, width=10,
-                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
-        scan_error_counter_value_label.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
-        as_tooltips.add(scan_error_counter_value_label, "Number of potential scan errors (number of steps/frame differs more than 20% from standard)")
         experimental_row += 1
 
         # Manual UV Led switch
