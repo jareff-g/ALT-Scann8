@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.11"
+__version__ = "1.11.12"
 __date__ = "2025-02-09"
-__version_highlight__ = "For existing config files, transform legacy name CentreWeighted to CentreWgt"
+__version_highlight__ = "Remove test data from UI after latest changes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -5308,7 +5308,7 @@ def create_widgets():
                                  name='scan_error_counter_label')
         scan_error_counter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
-        scan_error_counter_value = tk.StringVar(value="123 (0.7%)")
+        scan_error_counter_value = tk.StringVar(value="0 (0%)")
         scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
                                   font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
         scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
