@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.9"
+__version__ = "1.11.10"
 __date__ = "2025-02-09"
-__version_highlight__ = "Move 'scan errors' counter to Frame align section, also rename to 'frame errors'"
+__version_highlight__ = "Change width taken by some widgets to prevent lower control area to be wider than upper"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -339,7 +339,7 @@ if not SimulatedRun and not CameraDisabled:
         "Shadows": controls.AeConstraintModeEnum.Shadows
     }
     AeMeteringMode_dict = {
-        "CentreWeighted": controls.AeMeteringModeEnum.CentreWeighted,
+        "CentreWgt": controls.AeMeteringModeEnum.CentreWeighted,
         "Spot": controls.AeMeteringModeEnum.Spot,
         "Matrix": controls.AeMeteringModeEnum.Matrix
     }
@@ -363,7 +363,7 @@ else:
         "Shadows": 3
     }
     AeMeteringMode_dict = {
-        "CentreWeighted": 1,
+        "CentreWgt": 1,
         "Spot": 2,
         "Matrix": 3
     }
@@ -4968,7 +4968,7 @@ def create_widgets():
         # Miscelaneous exposure controls from PiCamera2 - AeMeteringMode
         # camera.set_controls({"AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted})
         AeMeteringMode_dropdown_selected = tk.StringVar()
-        AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
+        AeMeteringMode_dropdown_selected.set("CentreWgt")  # Set the initial value
         ae_metering_mode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1),
                                      name='ae_metering_mode_label')
         ae_metering_mode_label.widget_type = "control"
@@ -5362,6 +5362,7 @@ def create_widgets():
         experimental_frame.pack(side=TOP, padx=x_pad, pady=y_pad, expand=True, fill='y')
         # experimental_frame.place(relx=0.75, rely=0.5, anchor="center")
 
+        # *****************************************
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", font=("Arial", FontSize - 1),
                                name='hdr_frame')
@@ -5381,7 +5382,7 @@ def create_widgets():
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, variable=hdr_viewx4_active,
                                                     onvalue=True, offvalue=False, command=cmd_switch_hdr_viewx4,
                                                     font=("Arial", FontSize - 1), name='hdr_viewx4_active_checkbox')
-        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, sticky=W)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, columnspan=2, sticky=W)
         as_tooltips.add(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a "
                                                     "single frame (the one in the middle), all three frames will be "
                                                     "displayed sequentially.")
@@ -5390,14 +5391,14 @@ def create_widgets():
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1),
                                      name='hdr_min_exp_label')
         hdr_min_exp_label.widget_type = "hdr"
-        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_min_exp_selection, width=4,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
                                              from_=HDR_MIN_EXP, to=HDR_MAX_EXP,
                                              increment=1, font=("Arial", FontSize - 1), name='hdr_min_exp_spinbox')
         hdr_min_exp_spinbox.widget_type = "hdr"
-        hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_min_exp_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
         hdr_min_exp_spinbox.configure(validate="key", validatecommand=(cmd_hdr_min_exp_validation_cmd, '%P'))
         as_tooltips.add(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
@@ -5407,13 +5408,13 @@ def create_widgets():
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1),
                                      name='hdr_max_exp_label')
         hdr_max_exp_label.widget_type = "hdr"
-        hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_max_exp_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=HdrMaxExp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_max_exp_selection, width=4, from_=2, to=1000,
                                              readonlybackground='pale green', textvariable=hdr_max_exp_value,
                                              increment=1, font=("Arial", FontSize - 1), name='hdr_max_exp_spinbox')
         hdr_max_exp_spinbox.widget_type = "hdr"
-        hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_max_exp_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
         hdr_max_exp_spinbox.configure(validate="key", validatecommand=(cmd_hdr_max_exp_validation_cmd, '%P'))
         as_tooltips.add(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
@@ -5423,14 +5424,14 @@ def create_widgets():
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1),
                                            name='hdr_bracket_width_label')
         hdr_bracket_width_label.widget_type = "hdr"
-        hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_bracket_width_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_bracket_width_selection, width=4,
                                                    textvariable=hdr_bracket_width_value, from_=HDR_MIN_BRACKET,
                                                    to=HDR_MAX_BRACKET, increment=1, font=("Arial", FontSize - 1),
                                                    name='hdr_bracket_width_spinbox')
         hdr_bracket_width_spinbox.widget_type = "hdr"
-        hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_bracket_width_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
         hdr_bracket_width_spinbox.configure(validate="key", validatecommand=(cmd_hdr_bracket_width_validation_cmd, '%P'))
         as_tooltips.add(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket ("
@@ -5441,14 +5442,14 @@ def create_widgets():
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1),
                                            name='hdr_bracket_shift_label')
         hdr_bracket_shift_label.widget_type = "hdr"
-        hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_bracket_shift_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_shift_value = tk.IntVar(value=HdrBracketShift)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_bracket_shift_selection, width=4,
                                                    textvariable=hdr_bracket_shift_value, from_=-100, to=100,
                                                    increment=10, font=("Arial", FontSize - 1),
                                                    name='hdr_bracket_shift_spinbox')
         hdr_bracket_shift_spinbox.widget_type = "hdr"
-        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
         hdr_bracket_shift_spinbox.configure(validate="key", validatecommand=(cmd_hdr_bracket_shift_validation_cmd, '%P'))
         as_tooltips.add(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down "
@@ -5463,7 +5464,7 @@ def create_widgets():
                                                          font=("Arial", FontSize - 1),
                                                          name='hdr_bracket_width_auto_checkbox')
         hdr_bracket_width_auto_checkbox.widget_type = "control"
-        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, sticky=W)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, columnspan=3, sticky=W)
         as_tooltips.add(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 "
                                                          "will retrieve the auto-exposure level reported by the RPi "
                                                          "HQ camera, adn will use it for the middle exposure, "
@@ -5477,7 +5478,7 @@ def create_widgets():
                                                      command=cmd_adjust_merge_in_place, font=("Arial", FontSize - 1),
                                                      name='hdr_merge_in_place_checkbox')
         hdr_merge_in_place_checkbox.widget_type = "hdr"
-        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, sticky=W)
+        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, columnspan=3, sticky=W)
         as_tooltips.add(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while "
                                                      "encoding. Allow to make some use of the time spent waiting for "
                                                      "the camera to adapt the exposure.")
