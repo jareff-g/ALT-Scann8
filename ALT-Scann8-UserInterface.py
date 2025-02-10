@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.13"
-__date__ = "2025-02-09"
-__version_highlight__ = "Check frame misalignment also in DNG files"
+__version__ = "1.11.14"
+__date__ = "2025-02-10"
+__version_highlight__ = "New method to detect misaligned frames, handling both S8/R8, with tolerance setting"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -266,6 +266,7 @@ PlotterScroll = False
 SimplifiedMode = False
 UIScrollbars = False
 DetectMisalignedFrames = True
+MisalignedFrameTolerance = 8
 FontSize = 0
 LoggingMode = "INFO"
 LogLevel = 20
@@ -758,6 +759,13 @@ def cmd_set_new_folder():
         ConfigData["CurrentFrame"] = str(CurrentFrame)
 
 
+def cmd_detect_misaligned_frames():
+    global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
+    DetectMisalignedFrames = detect_misaligned_frames.get()
+    misaligned_tolerance_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+    misaligned_tolerance_spinbox.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+
+
 def cmd_settings_popup_dismiss():
     global options_dlg
     global BaseFolder, CurrentDir
@@ -776,7 +784,7 @@ def cmd_settings_popup_dismiss():
 
 def cmd_settings_popup_accept():
     global options_dlg
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
@@ -826,6 +834,9 @@ def cmd_settings_popup_accept():
     if DetectMisalignedFrames != detect_misaligned_frames.get():
         DetectMisalignedFrames = detect_misaligned_frames.get()
         ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
+    if MisalignedFrameTolerance != misaligned_tolerance_int.get():
+        MisalignedFrameTolerance = misaligned_tolerance_int.get()
+        ConfigData["MisalignedFrameTolerance"] = MisalignedFrameTolerance
     if DisableToolTips != disable_tooltips.get():
         DisableToolTips = disable_tooltips.get()
         ConfigData["DisableToolTips"] = DisableToolTips
@@ -897,15 +908,16 @@ def cmd_settings_popup_accept():
 
 def cmd_settings_popup():
     global options_dlg, win
-    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global simplified_mode, ui_scrollbars, detect_misaligned_frames, font_size_int, disable_tooltips
+    global simplified_mode, ui_scrollbars, detect_misaligned_frames, misaligned_tolerance_int, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
     global BaseFolderBackup, CurrentDirBackup
     global CapstanDiameter, capstan_diameter_float
+    global misaligned_tolerance_label, misaligned_tolerance_spinbox
 
     # Save folders in case settings dialog is dismissed
     BaseFolderBackup = BaseFolder
@@ -974,10 +986,24 @@ def cmd_settings_popup():
     # Detect misaligned frames (as it impacts speed)
     detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
     detect_misaligned_frames_btn = tk.Checkbutton(options_dlg, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Detect misaligned frames")
+                                       font=("Arial", FontSize - 1), text="Detect misaligned frames", command=cmd_detect_misaligned_frames)
     detect_misaligned_frames_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
     options_row += 1
+
+    # Misaligned frame detection tolerance (percentage, 5 by default)
+    misaligned_tolerance_label = tk.Label(options_dlg, text="Misalign tolerance:", font=("Arial", FontSize-1))
+    misaligned_tolerance_label.grid(row=options_row, column=0, columnspan=1, sticky='W', padx=(2*FontSize,0))
+    as_tooltips.add(misaligned_tolerance_label, "Tolerance for frame misalignment detection (8% default)")
+    misaligned_tolerance_int = tk.IntVar(value=MisalignedFrameTolerance)
+    misaligned_tolerance_spinbox = DynamicSpinbox(options_dlg, width=2, from_=0, to=100,
+                                      textvariable=misaligned_tolerance_int, increment=1, font=("Arial", FontSize - 2))
+    misaligned_tolerance_spinbox.grid(row=options_row, column=1, sticky='W')
+    options_row += 1
+
+    if not DetectMisalignedFrames:
+        misaligned_tolerance_label.config(state=DISABLED)
+        misaligned_tolerance_spinbox.config(state=DISABLED)
 
     # Font Size
     font_size_label = tk.Label(options_dlg, text="Main UI font size:", font=("Arial", FontSize-1))
@@ -1555,14 +1581,14 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
-def is_symmetrical(image_path, slice_width=20, threshold=0.9):
+def is_frame_centered(image_path, film_type ='S8', threshold=8, slice_width=10):
     # Read the image
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError("Could not read the image")
 
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
 
     # Get dimensions of the binary image
     height, width = binary_img.shape
@@ -1575,26 +1601,41 @@ def is_symmetrical(image_path, slice_width=20, threshold=0.9):
     # Calculate the middle horizontal line
     middle = height // 2
 
-    # If the image has an odd number of rows, exclude the middle row
-    if height % 2 != 0:
-        upper = sliced_image[:middle, :]
-        lower = cv2.flip(sliced_image[middle+1:, :], 0)  # Flip vertically
+    # Calculate margin
+    margin = height*threshold/100
+
+    # Sum along the width to get a 1D array representing white pixels at each height
+    height_profile = np.sum(sliced_image, axis=1)
+    
+    # Find where the sum is non-zero (white areas)
+    if film_type == 'S8':
+        white_heights = np.where(height_profile > 0)[0]
     else:
-        upper = sliced_image[:middle, :]
-        lower = cv2.flip(sliced_image[middle:, :], 0)  # Flip vertically
-
-    # Calculate the difference between upper and flipped lower part
-    diff = cv2.absdiff(upper, lower)
+        white_heights = np.where(height_profile == 0)[0]
     
-    # Since it's binary, we can count non-zero pixels for difference
-    non_zero_count = np.count_nonzero(diff)
+    areas = []
+    start = None
+    previous = None
+    for i in white_heights:
+        if start is None:
+            start = i
+        if previous is not None and i-previous != 1:
+            if start is not None:
+                areas.append((start, previous - 1))
+            start = i
+        previous = i
+    if start is not None:  # Add the last area if it exists
+        areas.append((start, white_heights[-1]))
     
-    # Calculate the symmetry score based on the number of differing pixels
-    total_pixels = slice_width * min(upper.shape[0], lower.shape[0])
-    similarity = 1 - (non_zero_count / total_pixels)
-
-    # If similarity is above the threshold, we consider it symmetrical
-    return similarity >= threshold, similarity
+    results = []
+    for start, end in areas:
+        center = (start + end) // 2
+        results.append(center)
+    
+    if len(results) == 1 and results[0] >= middle - margin and results[0] <= middle + margin:
+        return True
+    else:
+        return False
 
 
 def convert_dng_to_tiff(dng_path, tiff_path):
@@ -1641,7 +1682,8 @@ def capture_save_thread(queue, event, id):
     global ScanStopRequested
     global active_threads
     global total_wait_time_save_image
-    global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames
+    global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames, MisalignedFrameTolerance
+    global FilmType
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1685,7 +1727,7 @@ def capture_save_thread(queue, event, id):
                           str(round((time.time() - curtime) * 1000, 1)))
             if check_dng_frames_for_misalignment and DetectMisalignedFrames and hdr_idx <= 1:   # If checking HDR, onyl first frame
                 convert_dng_to_tiff(FrameFilenamePattern % (frame_idx, FileType), 'alignment.tiff')
-                if not is_symmetrical('alignment.tiff', 10, 0.6)[0]:
+                if not is_frame_centered('alignment.tiff', FilmType, MisalignedFrameTolerance):
                     scan_error_counter += 1
                     scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     with open(scan_error_log_fullpath, 'a') as f:
@@ -1711,7 +1753,7 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and hdr_idx <= 1 and not is_symmetrical(FrameFilenamePattern % (frame_idx, FileType), 10, 0.6)[0]:
+            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(FrameFilenamePattern % (frame_idx, FileType), FilmType, MisalignedFrameTolerance):
                 scan_error_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
@@ -3169,7 +3211,7 @@ def validate_config_folders():
 
 
 def load_config_data_pre_init():
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips, BaseFolder
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
 
     for item in ConfigData:
@@ -3195,6 +3237,8 @@ def load_config_data_pre_init():
             UIScrollbars = ConfigData["UIScrollbars"]
         if 'DetectMisalignedFrames' in ConfigData:
             DetectMisalignedFrames = ConfigData["DetectMisalignedFrames"]
+        if 'MisalignedFrameTolerance' in ConfigData:
+            MisalignedFrameTolerance = ConfigData["MisalignedFrameTolerance"]
         if 'DisableToolTips' in ConfigData:
             DisableToolTips = ConfigData["DisableToolTips"]
         if 'WidgetsEnabledWhileScanning' in ConfigData:
