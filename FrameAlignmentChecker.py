@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __date__ = "2025-02-10"
-__version_highlight__ = "First release of Frame Alignment Checker"
+__version_highlight__ = "Fix initial bugs after first version"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -26,6 +26,7 @@ from tkinter import filedialog, scrolledtext, Spinbox, ttk
 import os
 import cv2
 import numpy as np
+import time
 
 
 def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
@@ -79,20 +80,48 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     for start, end in areas:
         center = (start + end) // 2
         results.append(center)
-    if len(results) == 1 and results[0] >= middle - margin and results[0] <= middle + margin:
-        return True, middle, len(results), results[0], middle - margin, middle + margin
+    if len(results) != 1:
+        return False, -1
+    elif results[0] >= middle - margin and results[0] <= middle + margin:
+        return True, 0
+    elif results[0] < middle - margin:
+        return False, (middle - margin) - results[0]
+    elif results[0] > middle + margin:
+        return False, results[0] - (middle + margin)
     else:
-        return False, middle, len(results), 0, middle - margin, middle + margin
+        return False, -1
 
 
 # Flag to control the processing loop
 processing = False
 
-# Example function to process images. Replace this with your actual function.
-def process_image(image_path, film_type, threshold):
-    if not processing:
-        return "Processing was interrupted"
-    return f"Processed image: {image_path}"
+def format_duration(seconds):
+    # Convert seconds to days, hours, minutes, and seconds
+    days = int(seconds // (24 * 3600))
+    seconds %= (24 * 3600)
+    hours = int(seconds // 3600)
+    seconds %= 3600
+    minutes = int(seconds // 60)
+    seconds = int(seconds % 60)
+    
+    duration_parts = []
+    
+    # Only add non-zero parts to the list
+    if days > 0:
+        duration_parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours > 0:
+        duration_parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if minutes > 0:
+        duration_parts.append(f"{minutes} minute{'s' if minutes != 1 else ''}")
+    if seconds > 0 or not duration_parts:  # If all other units are zero, still show seconds
+        duration_parts.append(f"{seconds} second{'s' if seconds != 1 else ''}")
+    
+    # Join the parts with commas and 'and' for the last item
+    if len(duration_parts) > 1:
+        return ', '.join(duration_parts[:-1]) + ' and ' + duration_parts[-1]
+    else:
+        return duration_parts[0] if duration_parts else "0 seconds"
+
 
 def select_folder():
     global processing
@@ -114,15 +143,18 @@ def process_images_in_folder(folder_path, film_type, threshold):
     total_files = len([f for f in sorted_filenames if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
     processed_files = 0
     misaligned_counter = 0
+    # Record start time
+    start_time = time.time()
 
     for filename in sorted_filenames:
         if not processing:  # Check if processing was stopped
             break
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
             image_path = os.path.join(folder_path, filename)
-            centered = is_frame_centered(image_path, film_type, threshold)[0]
+            centered, gap = is_frame_centered(image_path, film_type, threshold)
             if not centered:
-                result_text.insert(tk.END, f"Misaligned Frame detected: {image_path}\n")
+                result_text.insert(tk.END, f"Misaligned Frame detected: {image_path}, {gap}\n")
+                result_text.see(tk.END)
                 misaligned_counter += 1
             # Update progress
             processed_files += 1
@@ -131,10 +163,16 @@ def process_images_in_folder(folder_path, film_type, threshold):
             root.update_idletasks()
             root.update()
     
+    # Record end time
+    end_time = time.time()
+
+    # Calculate duration
+    duration = end_time - start_time
+
     if processing:
-        result_text.insert(tk.END, f"Processing completed (using threshold = {threshold})!\n")
+        result_text.insert(tk.END, f"Processing completed (using threshold = {threshold}). Duration: {format_duration(duration)}\n")
     else:
-        result_text.insert(tk.END, "Processing stopped by user.\n")
+        result_text.insert(tk.END, f"Processing stopped by user. Duration: {format_duration(duration)}\n")
     if processed_files > 0:
         if misaligned_counter > 0:
             result_text.insert(tk.END, f"{processed_files} frames verified, {misaligned_counter} are not correctly aligned ({misaligned_counter*100//processed_files}%).\n")
@@ -144,6 +182,10 @@ def process_images_in_folder(folder_path, film_type, threshold):
     result_text.see(tk.END)
     stop_button.config(state=tk.DISABLED)  # Disable stop button after processing ends or is stopped
     processing = False
+
+def prevent_input(event):
+    # Returning "break" prevents the event from propagating further
+    return "break"
 
 def stop_processing():
     global processing
@@ -185,6 +227,8 @@ tk.Radiobutton(radio_frame, text='R8', variable=film_type_var, value='R8').pack(
 # Scrolled text widget for displaying results
 result_text = scrolledtext.ScrolledText(root, width=40, height=10)
 result_text.pack(fill=tk.BOTH, expand=True)
+# Bind the '<Key>' event to the prevent_input function
+result_text.bind("<Key>", prevent_input)
 
 # Progress bar
 progress_bar = ttk.Progressbar(root, length=200, mode='determinate')
