@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.8"
-__date__ = "2025-02-08"
-__version_highlight__ = "Added misaligned errors using OpenCV. Keep fixed scale in plotter window"
+__version__ = "1.11.14"
+__date__ = "2025-02-10"
+__version_highlight__ = "New method to detect misaligned frames, handling both S8/R8, with tolerance setting"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -94,6 +94,13 @@ from camera_resolutions import CameraResolutions
 from dynamic_spinbox import DynamicSpinbox
 from tooltip import Tooltips
 from rolling_average import RollingAverage
+
+try:
+    import rawpy
+    import imageio
+    check_dng_frames_for_misalignment = True
+except ImportError:
+    check_dng_frames_for_misalignment = False
 
 #  ######### Global variable definition ##########
 win = None
@@ -259,6 +266,7 @@ PlotterScroll = False
 SimplifiedMode = False
 UIScrollbars = False
 DetectMisalignedFrames = True
+MisalignedFrameTolerance = 8
 FontSize = 0
 LoggingMode = "INFO"
 LogLevel = 20
@@ -339,7 +347,7 @@ if not SimulatedRun and not CameraDisabled:
         "Shadows": controls.AeConstraintModeEnum.Shadows
     }
     AeMeteringMode_dict = {
-        "CentreWeighted": controls.AeMeteringModeEnum.CentreWeighted,
+        "CentreWgt": controls.AeMeteringModeEnum.CentreWeighted,
         "Spot": controls.AeMeteringModeEnum.Spot,
         "Matrix": controls.AeMeteringModeEnum.Matrix
     }
@@ -363,7 +371,7 @@ else:
         "Shadows": 3
     }
     AeMeteringMode_dict = {
-        "CentreWeighted": 1,
+        "CentreWgt": 1,
         "Spot": 2,
         "Matrix": 3
     }
@@ -751,6 +759,13 @@ def cmd_set_new_folder():
         ConfigData["CurrentFrame"] = str(CurrentFrame)
 
 
+def cmd_detect_misaligned_frames():
+    global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
+    DetectMisalignedFrames = detect_misaligned_frames.get()
+    misaligned_tolerance_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+    misaligned_tolerance_spinbox.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+
+
 def cmd_settings_popup_dismiss():
     global options_dlg
     global BaseFolder, CurrentDir
@@ -769,7 +784,7 @@ def cmd_settings_popup_dismiss():
 
 def cmd_settings_popup_accept():
     global options_dlg
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
@@ -819,6 +834,9 @@ def cmd_settings_popup_accept():
     if DetectMisalignedFrames != detect_misaligned_frames.get():
         DetectMisalignedFrames = detect_misaligned_frames.get()
         ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
+    if MisalignedFrameTolerance != misaligned_tolerance_int.get():
+        MisalignedFrameTolerance = misaligned_tolerance_int.get()
+        ConfigData["MisalignedFrameTolerance"] = MisalignedFrameTolerance
     if DisableToolTips != disable_tooltips.get():
         DisableToolTips = disable_tooltips.get()
         ConfigData["DisableToolTips"] = DisableToolTips
@@ -890,15 +908,16 @@ def cmd_settings_popup_accept():
 
 def cmd_settings_popup():
     global options_dlg, win
-    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips
+    global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global simplified_mode, ui_scrollbars, detect_misaligned_frames, font_size_int, disable_tooltips
+    global simplified_mode, ui_scrollbars, detect_misaligned_frames, misaligned_tolerance_int, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
     global BaseFolderBackup, CurrentDirBackup
     global CapstanDiameter, capstan_diameter_float
+    global misaligned_tolerance_label, misaligned_tolerance_spinbox
 
     # Save folders in case settings dialog is dismissed
     BaseFolderBackup = BaseFolder
@@ -967,10 +986,24 @@ def cmd_settings_popup():
     # Detect misaligned frames (as it impacts speed)
     detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
     detect_misaligned_frames_btn = tk.Checkbutton(options_dlg, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Detect misaligned frames")
+                                       font=("Arial", FontSize - 1), text="Detect misaligned frames", command=cmd_detect_misaligned_frames)
     detect_misaligned_frames_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
     as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
     options_row += 1
+
+    # Misaligned frame detection tolerance (percentage, 5 by default)
+    misaligned_tolerance_label = tk.Label(options_dlg, text="Misalign tolerance:", font=("Arial", FontSize-1))
+    misaligned_tolerance_label.grid(row=options_row, column=0, columnspan=1, sticky='W', padx=(2*FontSize,0))
+    as_tooltips.add(misaligned_tolerance_label, "Tolerance for frame misalignment detection (8% default)")
+    misaligned_tolerance_int = tk.IntVar(value=MisalignedFrameTolerance)
+    misaligned_tolerance_spinbox = DynamicSpinbox(options_dlg, width=2, from_=0, to=100,
+                                      textvariable=misaligned_tolerance_int, increment=1, font=("Arial", FontSize - 2))
+    misaligned_tolerance_spinbox.grid(row=options_row, column=1, sticky='W')
+    options_row += 1
+
+    if not DetectMisalignedFrames:
+        misaligned_tolerance_label.config(state=DISABLED)
+        misaligned_tolerance_spinbox.config(state=DISABLED)
 
     # Font Size
     font_size_label = tk.Label(options_dlg, text="Main UI font size:", font=("Arial", FontSize-1))
@@ -1548,14 +1581,14 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
-def is_symmetrical(image_path, slice_width=20, threshold=0.9):
+def is_frame_centered(image_path, film_type ='S8', threshold=8, slice_width=10):
     # Read the image
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError("Could not read the image")
 
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(img, 127, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
 
     # Get dimensions of the binary image
     height, width = binary_img.shape
@@ -1568,26 +1601,47 @@ def is_symmetrical(image_path, slice_width=20, threshold=0.9):
     # Calculate the middle horizontal line
     middle = height // 2
 
-    # If the image has an odd number of rows, exclude the middle row
-    if height % 2 != 0:
-        upper = sliced_image[:middle, :]
-        lower = cv2.flip(sliced_image[middle+1:, :], 0)  # Flip vertically
+    # Calculate margin
+    margin = height*threshold/100
+
+    # Sum along the width to get a 1D array representing white pixels at each height
+    height_profile = np.sum(sliced_image, axis=1)
+    
+    # Find where the sum is non-zero (white areas)
+    if film_type == 'S8':
+        white_heights = np.where(height_profile > 0)[0]
     else:
-        upper = sliced_image[:middle, :]
-        lower = cv2.flip(sliced_image[middle:, :], 0)  # Flip vertically
-
-    # Calculate the difference between upper and flipped lower part
-    diff = cv2.absdiff(upper, lower)
+        white_heights = np.where(height_profile == 0)[0]
     
-    # Since it's binary, we can count non-zero pixels for difference
-    non_zero_count = np.count_nonzero(diff)
+    areas = []
+    start = None
+    previous = None
+    for i in white_heights:
+        if start is None:
+            start = i
+        if previous is not None and i-previous != 1:
+            if start is not None:
+                areas.append((start, previous - 1))
+            start = i
+        previous = i
+    if start is not None:  # Add the last area if it exists
+        areas.append((start, white_heights[-1]))
     
-    # Calculate the symmetry score based on the number of differing pixels
-    total_pixels = slice_width * min(upper.shape[0], lower.shape[0])
-    similarity = 1 - (non_zero_count / total_pixels)
+    results = []
+    for start, end in areas:
+        center = (start + end) // 2
+        results.append(center)
+    
+    if len(results) == 1 and results[0] >= middle - margin and results[0] <= middle + margin:
+        return True
+    else:
+        return False
 
-    # If similarity is above the threshold, we consider it symmetrical
-    return similarity >= threshold, similarity
+
+def convert_dng_to_tiff(dng_path, tiff_path):
+    with rawpy.imread(dng_path) as raw:
+        rgb = raw.postprocess()
+    imageio.imwrite(tiff_path, rgb)
 
 
 def reverse_image(image):
@@ -1628,7 +1682,8 @@ def capture_save_thread(queue, event, id):
     global ScanStopRequested
     global active_threads
     global total_wait_time_save_image
-    global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames
+    global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames, MisalignedFrameTolerance
+    global FilmType
 
     if os.path.isdir(CurrentDir):
         os.chdir(CurrentDir)
@@ -1670,6 +1725,13 @@ def capture_save_thread(queue, event, id):
             request.release()
             logging.debug("Thread %i saved request DNG image: %s ms", id,
                           str(round((time.time() - curtime) * 1000, 1)))
+            if check_dng_frames_for_misalignment and DetectMisalignedFrames and hdr_idx <= 1:   # If checking HDR, onyl first frame
+                convert_dng_to_tiff(FrameFilenamePattern % (frame_idx, FileType), 'alignment.tiff')
+                if not is_frame_centered('alignment.tiff', FilmType, MisalignedFrameTolerance):
+                    scan_error_counter += 1
+                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                    with open(scan_error_log_fullpath, 'a') as f:
+                        f.write(f"Misaligned frame, {CurrentFrame}\n")
         else:
             # If not is_dng AND negative_image AND request: Convert to image now, and do a PIL save
             if not NegativeImage and type == REQUEST_TOKEN:
@@ -1691,7 +1753,7 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and not is_symmetrical(FrameFilenamePattern % (frame_idx, FileType), 10, 0.6)[0]:
+            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(FrameFilenamePattern % (frame_idx, FileType), FilmType, MisalignedFrameTolerance):
                 scan_error_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
@@ -3149,7 +3211,7 @@ def validate_config_folders():
 
 
 def load_config_data_pre_init():
-    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, FontSize, DisableToolTips, BaseFolder
+    global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
 
     for item in ConfigData:
@@ -3175,6 +3237,8 @@ def load_config_data_pre_init():
             UIScrollbars = ConfigData["UIScrollbars"]
         if 'DetectMisalignedFrames' in ConfigData:
             DetectMisalignedFrames = ConfigData["DetectMisalignedFrames"]
+        if 'MisalignedFrameTolerance' in ConfigData:
+            MisalignedFrameTolerance = ConfigData["MisalignedFrameTolerance"]
         if 'DisableToolTips' in ConfigData:
             DisableToolTips = ConfigData["DisableToolTips"]
         if 'WidgetsEnabledWhileScanning' in ConfigData:
@@ -3423,6 +3487,8 @@ def load_session_data_post_init():
                     camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[aux]})
             if "AeMeteringMode" in ConfigData:
                 aux = ConfigData["AeMeteringMode"]
+                if aux == "CentreWeighted": # Change on 9th Feb 2025: Legacy name, convert to new name
+                    aux = "CentreWgt"
                 AeMeteringMode_dropdown_selected.set(aux)
                 if not SimulatedRun and not CameraDisabled:
                     camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[aux]})
@@ -3665,10 +3731,10 @@ def on_configure_scrolled_canvas(event):
 # Initialize widgets with multiple dependencies
 def init_multidependent_widgets():
     if HdrCaptureActive == HdrBracketAuto and HdrBracketAuto:
-        hdr_min_exp_label.disabled_counter += 1
-        hdr_max_exp_label.disabled_counter += 1
-        hdr_min_exp_spinbox.disabled_counter += 1
-        hdr_max_exp_spinbox.disabled_counter += 1
+        hdr_min_exp_label.disabled_counter = 1
+        hdr_max_exp_label.disabled_counter = 1
+        hdr_min_exp_spinbox.disabled_counter = 1
+        hdr_max_exp_spinbox.disabled_counter = 1
         widget_list_refresh([id_HdrBracketAuto])
 
 
@@ -3802,6 +3868,9 @@ def tscann8_init():
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
     else:
         logging.info("Running on Raspberry Pi")
+
+    if not check_dng_frames_for_misalignment:
+        logging.warning("Frame alignment for DNG files is disabled. To enable it please install libraries rawpy and imageio")
 
     CurrentDir = BaseFolder
     logging.debug("BaseFolder=%s", BaseFolder)
@@ -4968,7 +5037,7 @@ def create_widgets():
         # Miscelaneous exposure controls from PiCamera2 - AeMeteringMode
         # camera.set_controls({"AeMeteringMode": controls.AeMeteringModeEnum.CentreWeighted})
         AeMeteringMode_dropdown_selected = tk.StringVar()
-        AeMeteringMode_dropdown_selected.set("CentreWeighted")  # Set the initial value
+        AeMeteringMode_dropdown_selected.set("CentreWgt")  # Set the initial value
         ae_metering_mode_label = Label(exp_wb_frame, text='AE Meter mode:', font=("Arial", FontSize - 1),
                                      name='ae_metering_mode_label')
         ae_metering_mode_label.widget_type = "control"
@@ -5199,6 +5268,7 @@ def create_widgets():
         else:
             qr_code_canvas = None
             qr_code_frame = None
+
         # *********************************
         # Frame to add frame align controls
         frame_alignment_frame = LabelFrame(expert_frame, text="Frame align", font=("Arial", FontSize - 1),
@@ -5215,7 +5285,7 @@ def create_widgets():
         steps_per_frame_btn.widget_type = "control"
         if ColorCodedButtons:
             steps_per_frame_btn.config(selectcolor="pale green")
-        steps_per_frame_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        steps_per_frame_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
         as_tooltips.add(steps_per_frame_btn, "Toggle automatic steps/frame calculation.")
 
         steps_per_frame_value = tk.IntVar(value=StepsPerFrame)  # Default to be overridden by configuration
@@ -5223,7 +5293,7 @@ def create_widgets():
                                                  textvariable=steps_per_frame_value, from_=100, to=600,
                                                  font=("Arial", FontSize - 1), name='steps_per_frame_spinbox')
         steps_per_frame_spinbox.widget_type = "control"
-        steps_per_frame_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        steps_per_frame_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_steps_per_frame_validation_cmd = steps_per_frame_spinbox.register(steps_per_frame_validation)
         steps_per_frame_spinbox.configure(validate="key", validatecommand=(cmd_steps_per_frame_validation_cmd, '%P'))
         as_tooltips.add(steps_per_frame_spinbox, "If automatic steps/frame is disabled, enter the number of motor "
@@ -5241,7 +5311,7 @@ def create_widgets():
         pt_level_btn.widget_type = "control"
         if ColorCodedButtons:
             pt_level_btn.config(selectcolor="pale green")
-        pt_level_btn.grid(row=frame_align_row, column=0, sticky="EW")
+        pt_level_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
         as_tooltips.add(pt_level_btn, "Toggle automatic photo-transistor level calculation.")
 
         pt_level_value = tk.IntVar(value=PtLevelValue)  # To be overridden by config
@@ -5249,7 +5319,7 @@ def create_widgets():
                                           textvariable=pt_level_value, from_=20, to=900, font=("Arial", FontSize - 1),
                                           name='pt_level_spinbox')
         pt_level_spinbox.widget_type = "control"
-        pt_level_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        pt_level_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_pt_level_validation_cmd = pt_level_spinbox.register(pt_level_validation)
         pt_level_spinbox.configure(validate="key", validatecommand=(cmd_pt_level_validation_cmd, '%P'))
         as_tooltips.add(pt_level_spinbox, "If automatic photo-transistor is disabled, enter the level to be reached "
@@ -5271,7 +5341,7 @@ def create_widgets():
                                                  from_=5, to=95, increment=5, font=("Arial", FontSize - 1),
                                                  name='frame_fine_tune_spinbox')
         frame_fine_tune_spinbox.widget_type = "control"
-        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(cmd_fine_tune_validation_cmd, '%P'))
         as_tooltips.add(frame_fine_tune_spinbox, "Fine tune frame detection: Shift frame detection threshold up of "
@@ -5291,13 +5361,26 @@ def create_widgets():
                                                    textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
                                                    name='frame_extra_steps_spinbox')
         frame_extra_steps_spinbox.widget_type = "control"
-        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
         as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
                                                    "detection (n between -30 and 30). Negative values can help if "
                                                    "film gate is not correctly positioned.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
+        frame_align_row += 1
+
+        # Scan error counter
+        scan_error_counter_label = Label(frame_alignment_frame, text="Frame errors:", font=("Arial", FontSize-2),
+                                 name='scan_error_counter_label')
+        scan_error_counter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+
+        scan_error_counter_value = tk.StringVar(value="0 (0%)")
+        scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
+                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
+        scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        as_tooltips.add(scan_error_counter_value_label, "Number of frames missed or misaligned during scanning.")
+        frame_align_row += 1
 
         # ***************************************************
         # Frame to add stabilization controls (speed & delay)
@@ -5348,6 +5431,7 @@ def create_widgets():
         experimental_frame.pack(side=TOP, padx=x_pad, pady=y_pad, expand=True, fill='y')
         # experimental_frame.place(relx=0.75, rely=0.5, anchor="center")
 
+        # *****************************************
         # Frame to add HDR controls (on/off, exp. bracket, position, auto-adjust)
         hdr_frame = LabelFrame(experimental_frame, text="Multi-exposure fusion", font=("Arial", FontSize - 1),
                                name='hdr_frame')
@@ -5367,7 +5451,7 @@ def create_widgets():
         hdr_viewx4_active_checkbox = tk.Checkbutton(hdr_frame, text=' View X4', height=1, variable=hdr_viewx4_active,
                                                     onvalue=True, offvalue=False, command=cmd_switch_hdr_viewx4,
                                                     font=("Arial", FontSize - 1), name='hdr_viewx4_active_checkbox')
-        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, sticky=W)
+        hdr_viewx4_active_checkbox.grid(row=hdr_row, column=1, columnspan=2, sticky=W)
         as_tooltips.add(hdr_viewx4_active_checkbox, "Alternate frame display during capture. Instead of displaying a "
                                                     "single frame (the one in the middle), all three frames will be "
                                                     "displayed sequentially.")
@@ -5376,14 +5460,14 @@ def create_widgets():
         hdr_min_exp_label = tk.Label(hdr_frame, text='Lower exp. (ms):', font=("Arial", FontSize - 1),
                                      name='hdr_min_exp_label')
         hdr_min_exp_label.widget_type = "hdr"
-        hdr_min_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_min_exp_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_min_exp_value = tk.IntVar(value=HdrMinExp)
         hdr_min_exp_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_min_exp_selection, width=4,
                                              readonlybackground='pale green', textvariable=hdr_min_exp_value,
                                              from_=HDR_MIN_EXP, to=HDR_MAX_EXP,
                                              increment=1, font=("Arial", FontSize - 1), name='hdr_min_exp_spinbox')
         hdr_min_exp_spinbox.widget_type = "hdr"
-        hdr_min_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_min_exp_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_min_exp_validation_cmd = hdr_min_exp_spinbox.register(hdr_min_exp_validation)
         hdr_min_exp_spinbox.configure(validate="key", validatecommand=(cmd_hdr_min_exp_validation_cmd, '%P'))
         as_tooltips.add(hdr_min_exp_spinbox, "When multi-exposure enabled, lower value of the exposure bracket.")
@@ -5393,13 +5477,13 @@ def create_widgets():
         hdr_max_exp_label = tk.Label(hdr_frame, text='Higher exp. (ms):', font=("Arial", FontSize - 1),
                                      name='hdr_max_exp_label')
         hdr_max_exp_label.widget_type = "hdr"
-        hdr_max_exp_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_max_exp_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_max_exp_value = tk.IntVar(value=HdrMaxExp)
         hdr_max_exp_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_max_exp_selection, width=4, from_=2, to=1000,
                                              readonlybackground='pale green', textvariable=hdr_max_exp_value,
                                              increment=1, font=("Arial", FontSize - 1), name='hdr_max_exp_spinbox')
         hdr_max_exp_spinbox.widget_type = "hdr"
-        hdr_max_exp_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_max_exp_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_max_exp_validation_cmd = hdr_max_exp_spinbox.register(hdr_max_exp_validation)
         hdr_max_exp_spinbox.configure(validate="key", validatecommand=(cmd_hdr_max_exp_validation_cmd, '%P'))
         as_tooltips.add(hdr_max_exp_spinbox, "When multi-exposure enabled, upper value of the exposure bracket.")
@@ -5409,14 +5493,14 @@ def create_widgets():
         hdr_bracket_width_label = tk.Label(hdr_frame, text='Bracket width (ms):', font=("Arial", FontSize - 1),
                                            name='hdr_bracket_width_label')
         hdr_bracket_width_label.widget_type = "hdr"
-        hdr_bracket_width_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_bracket_width_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_width_value = tk.IntVar(value=HdrBracketWidth)
         hdr_bracket_width_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_bracket_width_selection, width=4,
                                                    textvariable=hdr_bracket_width_value, from_=HDR_MIN_BRACKET,
                                                    to=HDR_MAX_BRACKET, increment=1, font=("Arial", FontSize - 1),
                                                    name='hdr_bracket_width_spinbox')
         hdr_bracket_width_spinbox.widget_type = "hdr"
-        hdr_bracket_width_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_bracket_width_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_bracket_width_validation_cmd = hdr_bracket_width_spinbox.register(hdr_bracket_width_validation)
         hdr_bracket_width_spinbox.configure(validate="key", validatecommand=(cmd_hdr_bracket_width_validation_cmd, '%P'))
         as_tooltips.add(hdr_bracket_width_spinbox, "When multi-exposure enabled, width of the exposure bracket ("
@@ -5427,14 +5511,14 @@ def create_widgets():
         hdr_bracket_shift_label = tk.Label(hdr_frame, text='Bracket shift (ms):', font=("Arial", FontSize - 1),
                                            name='hdr_bracket_shift_label')
         hdr_bracket_shift_label.widget_type = "hdr"
-        hdr_bracket_shift_label.grid(row=hdr_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        hdr_bracket_shift_label.grid(row=hdr_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         hdr_bracket_shift_value = tk.IntVar(value=HdrBracketShift)
         hdr_bracket_shift_spinbox = DynamicSpinbox(hdr_frame, command=cmd_hdr_bracket_shift_selection, width=4,
                                                    textvariable=hdr_bracket_shift_value, from_=-100, to=100,
                                                    increment=10, font=("Arial", FontSize - 1),
                                                    name='hdr_bracket_shift_spinbox')
         hdr_bracket_shift_spinbox.widget_type = "hdr"
-        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
+        hdr_bracket_shift_spinbox.grid(row=hdr_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_hdr_bracket_shift_validation_cmd = hdr_bracket_shift_spinbox.register(hdr_bracket_shift_validation)
         hdr_bracket_shift_spinbox.configure(validate="key", validatecommand=(cmd_hdr_bracket_shift_validation_cmd, '%P'))
         as_tooltips.add(hdr_bracket_shift_spinbox, "When multi-exposure enabled, shift exposure bracket up or down "
@@ -5449,7 +5533,7 @@ def create_widgets():
                                                          font=("Arial", FontSize - 1),
                                                          name='hdr_bracket_width_auto_checkbox')
         hdr_bracket_width_auto_checkbox.widget_type = "control"
-        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, sticky=W)
+        hdr_bracket_width_auto_checkbox.grid(row=hdr_row, column=0, columnspan=3, sticky=W)
         as_tooltips.add(hdr_bracket_width_auto_checkbox, "Enable automatic multi-exposure: For each frame, ALT-Scann8 "
                                                          "will retrieve the auto-exposure level reported by the RPi "
                                                          "HQ camera, adn will use it for the middle exposure, "
@@ -5463,7 +5547,7 @@ def create_widgets():
                                                      command=cmd_adjust_merge_in_place, font=("Arial", FontSize - 1),
                                                      name='hdr_merge_in_place_checkbox')
         hdr_merge_in_place_checkbox.widget_type = "hdr"
-        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, sticky=W)
+        hdr_merge_in_place_checkbox.grid(row=hdr_row, column=0, columnspan=3, sticky=W)
         as_tooltips.add(hdr_merge_in_place_checkbox, "Enable to perform Mertens merge on the Raspberry Pi, while "
                                                      "encoding. Allow to make some use of the time spent waiting for "
                                                      "the camera to adapt the exposure.")
@@ -5590,18 +5674,6 @@ def create_widgets():
         as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
         uv_brightness_spinbox.configure(validate="key", validatecommand=(cmd_uv_brightness_validation_cmd, '%P'))
         uv_brightness_spinbox.bind("<FocusOut>", lambda event: cmd_uv_brightness_selection())
-        experimental_row += 1
-
-        # Scan error counter
-        scan_error_counter_label = Label(experimental_miscellaneous_frame, text="Scan errors:", font=("Arial", FontSize-2),
-                                 name='scan_error_counter_label')
-        scan_error_counter_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
-
-        scan_error_counter_value = tk.StringVar(value="0 (0%)")
-        scan_error_counter_value_label = tk.Label(experimental_miscellaneous_frame, textvariable=scan_error_counter_value, width=10,
-                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
-        scan_error_counter_value_label.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
-        as_tooltips.add(scan_error_counter_value_label, "Number of potential scan errors (number of steps/frame differs more than 20% from standard)")
         experimental_row += 1
 
         # Manual UV Led switch
