@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 __date__ = "2025-02-10"
-__version_highlight__ = "Fix initial bugs after first version"
+__version_highlight__ = "Invert image conversion (first slice, then binary threshold) before misalignment detection"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -35,17 +35,17 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     if img is None:
         raise ValueError("Could not read the image")
 
-    # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
-    # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-
     # Get dimensions of the binary image
-    height, width = binary_img.shape
+    height, width = img.shape
 
     # Slice only the left part of the image
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    sliced_image = binary_img[:, :slice_width]
+    sliced_image = img[:, :slice_width]
+
+    # Convert to pure black and white (binary image)
+    _, binary_img = cv2.threshold(sliced_image, 200, 255, cv2.THRESH_BINARY)
+    # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
     middle = height // 2
@@ -54,7 +54,7 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     margin = height*threshold//100
 
     # Sum along the width to get a 1D array representing white pixels at each height
-    height_profile = np.sum(sliced_image, axis=1)
+    height_profile = np.sum(binary_img, axis=1)
     
     # Find where the sum is non-zero (white areas)
     if film_type == 'S8':
