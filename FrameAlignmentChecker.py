@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.3"
-__date__ = "2025-02-10"
-__version_highlight__ = "Persist generated info in log file (dedicated directory)"
+__version__ = "1.0.4"
+__date__ = "2025-02-11"
+__version_highlight__ = "More bugfixes and improvements"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -74,16 +74,17 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     
     areas = []
     start = None
+    min_gap_size = int(height*0.08)  # minimum hole height is around 8% of the frame height
     previous = None
     for i in white_heights:
         if start is None:
             start = i
-        if previous is not None and i-previous > 20:    # 20 is minimum number of consecutive pixels to skip small gaps
-            if start is not None:
+        if previous is not None and i-previous > 1: # end of first ares, check size
+            if previous-start > min_gap_size:  # min_gap_size is minimum number of consecutive pixels to skip small gaps
                 areas.append((start, previous - 1))
             start = i
         previous = i
-    if start is not None:  # Add the last area if it exists
+    if start is not None and white_heights[-1]-start > min_gap_size:  # Add the last area if it exists
         areas.append((start, white_heights[-1]))
     
     result = 0
@@ -101,20 +102,29 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
         if result >= middle - margin and result <= middle + margin:
             return True, 0
         elif result < middle - margin:
-            return False, (middle - margin) - result
+            return False, -(middle - result)
         elif result > middle + margin:
-            return False, result - (middle + margin)
+            return False, result - middle
     return False, -1
 
 
-def display_image(image_path):
+def display_image(image_path, bw=False):
     img = cv2.imread(image_path)
     if img is None:
         raise ValueError("Could not read the image")
+    if bw:
+        # Convert the image to grayscale
+        gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # Convert to pure black and white (binary image)
+        _, img = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
+
     # Name for the window
-    window_name = "Press Esc to exit"    
-    cv2.imshow(window_name, cv2.resize(img,(400,300)))
+    window_name = "Press Esc to exit, +/- to resize"    
+    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+    cv2.imshow(window_name, img)
+    cv2.resizeWindow(window_name, 400, 300)
     cv2_window_opened = True
+    zoom_factor = 1
     # Loop to keep the window open
     while True:
         # Wait for key event, but only for 1 millisecond to keep the loop fast
@@ -126,8 +136,16 @@ def display_image(image_path):
             break
         
         # If 'q' key is pressed, exit the loop
-        if key == 27:
+        if key == 27:   # Esc
             break
+        elif key == 43: # '+' key
+            if zoom_factor < 4: 
+                zoom_factor += 1
+            cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
+        elif key == 45: # '-' key
+            if zoom_factor > 1: 
+                zoom_factor -= 1
+            cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
     if cv2_window_opened:
         cv2.destroyAllWindows()
 
@@ -161,13 +179,15 @@ def format_duration(seconds):
 
 
 def select_folder():
-    global processing
+    global processing, stop_processing_requested
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         result_text.delete(1.0, tk.END)  # Clear previous results
         threshold = int(spinbox.get())  # Get the value from Spinbox
         film_type = film_type_var.get()  # Get the selected mode
         processing = True
+        root.config(cursor="watch")  # Change cursor to indicate processing
+        stop_processing_requested = False
         stop_button.config(state=tk.NORMAL)  # Enable stop button
         root.after(0, process_images_in_folder, folder_selected, film_type, threshold)
     else:
@@ -181,8 +201,10 @@ def process_images_in_folder(folder_path, film_type, threshold):
     total_files = len([f for f in sorted_filenames if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
     processed_files = 0
     misaligned_counter = 0
+    empty_counter = 0
     # Record start time
     start_time = time.time()
+    result_text.insert(tk.END, f"Processing {total_files} files in {folder_path}\n")
 
     for filename in sorted_filenames:
         if stop_processing_requested:  # Check if processing was stopped            
@@ -191,10 +213,19 @@ def process_images_in_folder(folder_path, film_type, threshold):
             image_path = os.path.join(folder_path, filename)
             centered, gap = is_frame_centered(image_path, film_type, threshold)
             if not centered:
-                message = f"{image_path}, {gap}\n"
+                if gap == -1:
+                    status = "possibly empty" 
+                elif gap < 0:
+                    status = f"{-gap} pixels too high" 
+                else:
+                    status = f"{gap} pixels too low"
+                message = f"{image_path}, {status}\n"
                 result_text.insert(tk.END, message)
                 result_text.see(tk.END)
-                misaligned_counter += 1
+                if gap == -1:
+                    empty_counter += 1
+                else:
+                    misaligned_counter += 1
                 with open(frame_alignment_checker_log_fullpath, 'a') as f:
                     f.write(message)
 
@@ -222,8 +253,8 @@ def process_images_in_folder(folder_path, film_type, threshold):
         with open(frame_alignment_checker_log_fullpath, 'a') as f:
             f.write(message)
     if processed_files > 0:
-        if misaligned_counter > 0:
-            message = f"{processed_files} frames verified, {misaligned_counter} are not correctly aligned ({misaligned_counter*100/processed_files:.2f}%).\n"
+        if misaligned_counter+empty_counter > 0:
+            message = f"{processed_files} frames verified, {misaligned_counter} misaligned ({misaligned_counter*100/processed_files:.2f}%), {empty_counter} possibly empty ({empty_counter*100/processed_files:.2f}%).\n"
             result_text.insert(tk.END, message)
             with open(frame_alignment_checker_log_fullpath, 'a') as f:
                 f.write(message)
@@ -236,6 +267,8 @@ def process_images_in_folder(folder_path, film_type, threshold):
     result_text.see(tk.END)
     stop_button.config(state=tk.DISABLED)  # Disable stop button after processing ends or is stopped
     processing = False
+    root.config(cursor="")  # Change cursor to indicate processing ended
+
 
 def prevent_input(event):
     # Returning "break" prevents the event from propagating further
@@ -268,12 +301,18 @@ def on_closing():
             root.destroy()
 
 
+# Function to update the widget size on window resize
+def on_resize(event):
+    # We'll resize the frame and the text widget will follow
+    root.update_idletasks()
+
+
 def on_mouse_click(event):
     global processing
 
     if processing:
         return
-    
+
     # Get the index of the click position
     click_position = event.widget.index(f"@{event.x},{event.y}")
     
@@ -292,9 +331,23 @@ def on_mouse_click(event):
     
     # Get the text of the line (optional, for demonstration)
     line_text = event.widget.get(line_start, line_end)
-    print(f"Clicked line contents: {line_text}")
-    root.after(100, lambda: display_image(line_text.split(',')[0]))
-    
+    if event.num == 1:
+        # Left mouse button
+        root.after(100, lambda: display_image(line_text.split(',')[0]))  
+    elif event.num == 2:
+        # Middle mouse button
+        print(f"{line_text.split(',')[0]}")
+    elif event.num == 3:
+        # Right mouse button
+        root.after(100, lambda: display_image(line_text.split(',')[0], bw=True))
+
+
+def keep_cursor(event):
+    # If the cursor somehow changes, this will set it back to what we want
+    if processing:
+        event.widget.config(cursor="watch")  # Or whatever cursor you prefer
+    else:
+        event.widget.config(cursor="")  # Or whatever cursor you prefer
 
 
 def init_logging():
@@ -341,10 +394,15 @@ def main (argv):
     # Scrolled text widget for displaying results
     result_text = scrolledtext.ScrolledText(root, width=40, height=10)
     result_text.pack(fill=tk.BOTH, expand=True)
+    # Bind to any event that might change the cursor; here we use <Enter> and <Leave>
+    result_text.bind("<Enter>", keep_cursor)
+    result_text.bind("<Leave>", keep_cursor)    
     # Bind the '<Key>' event to the prevent_input function
     result_text.bind("<Key>", prevent_input)
     # Bind the left mouse button click event to our function
     result_text.bind("<Button-1>", on_mouse_click)
+    result_text.bind("<Button-2>", on_mouse_click)
+    result_text.bind("<Button-3>", on_mouse_click)
     # Configure the highlight tag for appearance
     result_text.tag_configure("highlight", background="yellow", foreground="black")
 
@@ -366,13 +424,11 @@ def main (argv):
     # Set up window close protocol
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
-    # Function to update the widget size on window resize
-    def on_resize(event):
-        # We'll resize the frame and the text widget will follow
-        root.update_idletasks()
-
     # Bind the resize event to the update function
     root.bind("<Configure>", on_resize)
+
+    # Set the minimum width to 300 pixels and the minimum height to 200 pixels
+    root.minsize(width=600, height=300)
 
     # Start the GUI
     root.mainloop()
