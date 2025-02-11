@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.2"
+__version__ = "1.0.3"
 __date__ = "2025-02-10"
-__version_highlight__ = "Invert image conversion (first slice, then binary threshold) before misalignment detection"
+__version_highlight__ = "Persist generated info in log file (dedicated directory)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -27,6 +27,16 @@ import os
 import cv2
 import numpy as np
 import time
+import sys
+
+
+# Flag to control the processing loop
+processing = False
+stop_processing_requested = False
+
+# log path
+frame_alignment_checker_log_fullpath = ''
+
 
 
 def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
@@ -68,7 +78,7 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     for i in white_heights:
         if start is None:
             start = i
-        if previous is not None and i-previous != 1:
+        if previous is not None and i-previous > 20:    # 20 is minimum number of consecutive pixels to skip small gaps
             if start is not None:
                 areas.append((start, previous - 1))
             start = i
@@ -76,24 +86,51 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     if start is not None:  # Add the last area if it exists
         areas.append((start, white_heights[-1]))
     
-    results = []
+    result = 0
+    bigger = 0
+    area_count = 0
     for start, end in areas:
-        center = (start + end) // 2
-        results.append(center)
-    if len(results) != 1:
-        return False, -1
-    elif results[0] >= middle - margin and results[0] <= middle + margin:
-        return True, 0
-    elif results[0] < middle - margin:
-        return False, (middle - margin) - results[0]
-    elif results[0] > middle + margin:
-        return False, results[0] - (middle + margin)
-    else:
-        return False, -1
+        area_count += 1
+        if area_count > 2:
+            break
+        if end-start > bigger:
+            bigger = end-start
+            center = (start + end) // 2
+            result = center
+    if result != 0:
+        if result >= middle - margin and result <= middle + margin:
+            return True, 0
+        elif result < middle - margin:
+            return False, (middle - margin) - result
+        elif result > middle + margin:
+            return False, result - (middle + margin)
+    return False, -1
 
 
-# Flag to control the processing loop
-processing = False
+def display_image(image_path):
+    img = cv2.imread(image_path)
+    if img is None:
+        raise ValueError("Could not read the image")
+    # Name for the window
+    window_name = "Press Esc to exit"    
+    cv2.imshow(window_name, cv2.resize(img,(400,300)))
+    cv2_window_opened = True
+    # Loop to keep the window open
+    while True:
+        # Wait for key event, but only for 1 millisecond to keep the loop fast
+        key = cv2.waitKey(1) & 0xFF
+        
+        # Check if the window is closed
+        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+            cv2_window_opened = False
+            break
+        
+        # If 'q' key is pressed, exit the loop
+        if key == 27:
+            break
+    if cv2_window_opened:
+        cv2.destroyAllWindows()
+
 
 def format_duration(seconds):
     # Convert seconds to days, hours, minutes, and seconds
@@ -136,8 +173,9 @@ def select_folder():
     else:
         result_text.insert(tk.END, "No folder selected\n")
 
+
 def process_images_in_folder(folder_path, film_type, threshold):
-    global processing
+    global processing, stop_processing_requested
     sorted_filenames = sorted(os.listdir(folder_path))
     
     total_files = len([f for f in sorted_filenames if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
@@ -147,15 +185,19 @@ def process_images_in_folder(folder_path, film_type, threshold):
     start_time = time.time()
 
     for filename in sorted_filenames:
-        if not processing:  # Check if processing was stopped
+        if stop_processing_requested:  # Check if processing was stopped            
             break
         if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
             image_path = os.path.join(folder_path, filename)
             centered, gap = is_frame_centered(image_path, film_type, threshold)
             if not centered:
-                result_text.insert(tk.END, f"Misaligned Frame detected: {image_path}, {gap}\n")
+                message = f"{image_path}, {gap}\n"
+                result_text.insert(tk.END, message)
                 result_text.see(tk.END)
                 misaligned_counter += 1
+                with open(frame_alignment_checker_log_fullpath, 'a') as f:
+                    f.write(message)
+
             # Update progress
             processed_files += 1
             progress = (processed_files / total_files) * 100 if total_files > 0 else 0
@@ -169,15 +211,27 @@ def process_images_in_folder(folder_path, film_type, threshold):
     # Calculate duration
     duration = end_time - start_time
 
-    if processing:
-        result_text.insert(tk.END, f"Processing completed (using threshold = {threshold}). Duration: {format_duration(duration)}\n")
+    if stop_processing_requested:
+        message = f"Processing stopped by user. Duration: {format_duration(duration)}\n"
+        result_text.insert(tk.END, message)
+        with open(frame_alignment_checker_log_fullpath, 'a') as f:
+            f.write(message)
     else:
-        result_text.insert(tk.END, f"Processing stopped by user. Duration: {format_duration(duration)}\n")
+        message = f"Processing completed (using threshold = {threshold}). Duration: {format_duration(duration)}\n"
+        result_text.insert(tk.END, message)
+        with open(frame_alignment_checker_log_fullpath, 'a') as f:
+            f.write(message)
     if processed_files > 0:
         if misaligned_counter > 0:
-            result_text.insert(tk.END, f"{processed_files} frames verified, {misaligned_counter} are not correctly aligned ({misaligned_counter*100//processed_files}%).\n")
+            message = f"{processed_files} frames verified, {misaligned_counter} are not correctly aligned ({misaligned_counter*100/processed_files:.2f}%).\n"
+            result_text.insert(tk.END, message)
+            with open(frame_alignment_checker_log_fullpath, 'a') as f:
+                f.write(message)
         else:
-            result_text.insert(tk.END, f"{processed_files} frames verified, all are correctly aligned!!!")
+            message = f"{processed_files} frames verified, all are correctly aligned!!!\n"
+            result_text.insert(tk.END, message)
+            with open(frame_alignment_checker_log_fullpath, 'a') as f:
+                f.write(message)
     # Scroll to the bottom
     result_text.see(tk.END)
     stop_button.config(state=tk.DISABLED)  # Disable stop button after processing ends or is stopped
@@ -188,72 +242,141 @@ def prevent_input(event):
     return "break"
 
 def stop_processing():
-    global processing
-    processing = False
+    global processing, stop_processing_requested
+    stop_processing_requested = True
 
-def on_closing():
+
+def terminate_main():
     global processing
     if processing:
+        root.after(50, terminate_main)
+    else:
+        root.destroy()
+
+
+def on_closing():
+    global processing, stop_processing_requested
+    if processing:
         if tk.messagebox.askokcancel("Quit", "Processing is ongoing. Do you want to stop it and quit?"):
-            processing = False
-            root.destroy()
+            stop_processing_requested = True
+            if processing:
+                root.after(50, terminate_main)
+            else:
+                root.destroy()
     else:
         if tk.messagebox.askokcancel("Quit", "Do you want to quit?"):
             root.destroy()
 
-# Main window setup
-root = tk.Tk()
-root.title(f"ALT-Scann8 utility - Standalone Frame Alignment Checker (v{__version__})")
 
-# Button to select folder
-select_button = tk.Button(root, text="Select Folder", command=select_folder)
-select_button.pack(pady=5)
+def on_mouse_click(event):
+    global processing
 
-# Frame for aligning threshold label
-threshold_frame = tk.Frame(root)
-threshold_frame.pack(pady=5)
-# Label and Spinbox for selecting a threshold
-tk.Label(threshold_frame, text="Threshold:").pack(side=tk.LEFT, padx=(20, 5), pady=5)
-spinbox = Spinbox(threshold_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'))
-spinbox.pack(side=tk.LEFT, pady=5)
-
-# Frame for aligning radio buttons horizontally
-radio_frame = tk.Frame(root)
-radio_frame.pack(pady=5)
-film_type_var = tk.StringVar(value='S8')  # Default value
-tk.Radiobutton(radio_frame, text='S8', variable=film_type_var, value='S8').pack(side=tk.LEFT)
-tk.Radiobutton(radio_frame, text='R8', variable=film_type_var, value='R8').pack(side=tk.LEFT)
-
-# Scrolled text widget for displaying results
-result_text = scrolledtext.ScrolledText(root, width=40, height=10)
-result_text.pack(fill=tk.BOTH, expand=True)
-# Bind the '<Key>' event to the prevent_input function
-result_text.bind("<Key>", prevent_input)
-
-# Progress bar
-progress_bar = ttk.Progressbar(root, length=200, mode='determinate')
-progress_bar.pack(pady=5)
-
-# Frame for aligning stop and close buttons horizontally
-button_frame = tk.Frame(root)
-button_frame.pack(pady=5)
-stop_button = tk.Button(button_frame, text="Stop", command=stop_processing, state=tk.DISABLED)
-stop_button.pack(side=tk.LEFT, padx=5)
-close_button = tk.Button(button_frame, text="Close", command=on_closing)
-close_button.pack(side=tk.LEFT, padx=5)
-
-# Set up window close protocol
-root.protocol("WM_DELETE_WINDOW", on_closing)
-
-# Function to update the widget size on window resize
-def on_resize(event):
-    # We'll resize the frame and the text widget will follow
-    root.update_idletasks()
-
-# Bind the resize event to the update function
-root.bind("<Configure>", on_resize)
-
-# Start the GUI
-root.mainloop()
+    if processing:
+        return
+    
+    # Get the index of the click position
+    click_position = event.widget.index(f"@{event.x},{event.y}")
+    
+    # Extract line number from click position
+    line = int(click_position.split('.')[0])
+    
+    # Define the start and end of the line
+    line_start = f"{line}.0"
+    line_end = f"{line}.end"
+    
+    # Remove any previous highlights
+    event.widget.tag_remove("highlight", "1.0", tk.END)
+    
+    # Add highlight to the clicked line
+    event.widget.tag_add("highlight", line_start, line_end)
+    
+    # Get the text of the line (optional, for demonstration)
+    line_text = event.widget.get(line_start, line_end)
+    print(f"Clicked line contents: {line_text}")
+    root.after(100, lambda: display_image(line_text.split(',')[0]))
+    
 
 
+def init_logging():
+    global frame_alignment_checker_log_fullpath
+
+    # Initialize logging
+    log_path = os.path.dirname(__file__)
+    if log_path == "":
+        log_path = os.getcwd()
+    log_path = log_path + "/Logs"
+    if not os.path.isdir(log_path):
+        os.mkdir(log_path)
+
+    # Initialize scan error logging
+    frame_alignment_checker_log_fullpath = log_path + "/frame_alignment_checker." + time.strftime("%Y%m%d") + ".log"
+
+def main (argv):
+    global result_text, progress_bar, stop_button, root, spinbox, film_type_var
+
+    # Main window setup
+    root = tk.Tk()
+    root.title(f"ALT-Scann8 utility - Standalone Frame Alignment Checker (v{__version__})")
+
+    # Button to select folder
+    select_button = tk.Button(root, text="Select Folder", command=select_folder)
+    select_button.pack(pady=5)
+
+    # Frame for aligning threshold label
+    threshold_frame = tk.Frame(root)
+    threshold_frame.pack(pady=5)
+
+    # Label and Spinbox for selecting a threshold
+    tk.Label(threshold_frame, text="Threshold:").pack(side=tk.LEFT, padx=(20, 5), pady=5)
+    spinbox = Spinbox(threshold_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'))
+    spinbox.pack(side=tk.LEFT, pady=5)
+
+    # Frame for aligning radio buttons horizontally
+    radio_frame = tk.Frame(root)
+    radio_frame.pack(pady=5)
+    film_type_var = tk.StringVar(value='S8')  # Default value
+    tk.Radiobutton(radio_frame, text='S8', variable=film_type_var, value='S8').pack(side=tk.LEFT)
+    tk.Radiobutton(radio_frame, text='R8', variable=film_type_var, value='R8').pack(side=tk.LEFT)
+
+    # Scrolled text widget for displaying results
+    result_text = scrolledtext.ScrolledText(root, width=40, height=10)
+    result_text.pack(fill=tk.BOTH, expand=True)
+    # Bind the '<Key>' event to the prevent_input function
+    result_text.bind("<Key>", prevent_input)
+    # Bind the left mouse button click event to our function
+    result_text.bind("<Button-1>", on_mouse_click)
+    # Configure the highlight tag for appearance
+    result_text.tag_configure("highlight", background="yellow", foreground="black")
+
+    # Progress bar
+    progress_bar = ttk.Progressbar(root, length=200, mode='determinate')
+    progress_bar.pack(pady=5)
+
+    # Frame for aligning stop and close buttons horizontally
+    button_frame = tk.Frame(root)
+    button_frame.pack(pady=5)
+    stop_button = tk.Button(button_frame, text="Stop", command=stop_processing, state=tk.DISABLED)
+    stop_button.pack(side=tk.LEFT, padx=5)
+    close_button = tk.Button(button_frame, text="Close", command=on_closing)
+    close_button.pack(side=tk.LEFT, padx=5)
+
+    # Initialize logging
+    init_logging()
+
+    # Set up window close protocol
+    root.protocol("WM_DELETE_WINDOW", on_closing)
+
+    # Function to update the widget size on window resize
+    def on_resize(event):
+        # We'll resize the frame and the text widget will follow
+        root.update_idletasks()
+
+    # Bind the resize event to the update function
+    root.bind("<Configure>", on_resize)
+
+    # Start the GUI
+    root.mainloop()
+
+
+if __name__ == '__main__':
+    main(sys.argv[1:])
