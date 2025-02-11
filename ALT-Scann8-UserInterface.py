@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.14"
-__date__ = "2025-02-10"
-__version_highlight__ = "New method to detect misaligned frames, handling both S8/R8, with tolerance setting"
+__version__ = "1.11.15"
+__date__ = "2025-02-11"
+__version_highlight__ = "Integrate latest version of is_frame_centered function, same as in FrameAlignmentCheck"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1581,31 +1581,32 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
-def is_frame_centered(image_path, film_type ='S8', threshold=8, slice_width=10):
+def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
     # Read the image
     img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
     if img is None:
         raise ValueError("Could not read the image")
 
-    # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(img, 200, 255, cv2.THRESH_BINARY)
-
     # Get dimensions of the binary image
-    height, width = binary_img.shape
+    height, width = img.shape
 
     # Slice only the left part of the image
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    sliced_image = binary_img[:, :slice_width]
+    sliced_image = img[:, :slice_width]
+
+    # Convert to pure black and white (binary image)
+    _, binary_img = cv2.threshold(sliced_image, 200, 255, cv2.THRESH_BINARY)
+    # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
     middle = height // 2
 
     # Calculate margin
-    margin = height*threshold/100
+    margin = height*threshold//100
 
     # Sum along the width to get a 1D array representing white pixels at each height
-    height_profile = np.sum(sliced_image, axis=1)
+    height_profile = np.sum(binary_img, axis=1)
     
     # Find where the sum is non-zero (white areas)
     if film_type == 'S8':
@@ -1619,7 +1620,7 @@ def is_frame_centered(image_path, film_type ='S8', threshold=8, slice_width=10):
     for i in white_heights:
         if start is None:
             start = i
-        if previous is not None and i-previous != 1:
+        if previous is not None and i-previous > 20:    # 20 is minimum number of consecutive pixels to skip small gaps
             if start is not None:
                 areas.append((start, previous - 1))
             start = i
@@ -1627,15 +1628,25 @@ def is_frame_centered(image_path, film_type ='S8', threshold=8, slice_width=10):
     if start is not None:  # Add the last area if it exists
         areas.append((start, white_heights[-1]))
     
-    results = []
+    result = 0
+    bigger = 0
+    area_count = 0
     for start, end in areas:
-        center = (start + end) // 2
-        results.append(center)
-    
-    if len(results) == 1 and results[0] >= middle - margin and results[0] <= middle + margin:
-        return True
-    else:
-        return False
+        area_count += 1
+        if area_count > 2:
+            break
+        if end-start > bigger:
+            bigger = end-start
+            center = (start + end) // 2
+            result = center
+    if result != 0:
+        if result >= middle - margin and result <= middle + margin:
+            return True, 0
+        elif result < middle - margin:
+            return False, (middle - margin) - result
+        elif result > middle + margin:
+            return False, result - (middle + margin)
+    return False, -1
 
 
 def convert_dng_to_tiff(dng_path, tiff_path):
@@ -1727,7 +1738,7 @@ def capture_save_thread(queue, event, id):
                           str(round((time.time() - curtime) * 1000, 1)))
             if check_dng_frames_for_misalignment and DetectMisalignedFrames and hdr_idx <= 1:   # If checking HDR, onyl first frame
                 convert_dng_to_tiff(FrameFilenamePattern % (frame_idx, FileType), 'alignment.tiff')
-                if not is_frame_centered('alignment.tiff', FilmType, MisalignedFrameTolerance):
+                if not is_frame_centered('alignment.tiff', FilmType, MisalignedFrameTolerance)[0]:
                     scan_error_counter += 1
                     scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     with open(scan_error_log_fullpath, 'a') as f:
@@ -1753,7 +1764,7 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(FrameFilenamePattern % (frame_idx, FileType), FilmType, MisalignedFrameTolerance):
+            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(FrameFilenamePattern % (frame_idx, FileType), FilmType, MisalignedFrameTolerance)[0]:
                 scan_error_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
