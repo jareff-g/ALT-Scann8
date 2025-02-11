@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.15"
+__version__ = "1.11.16"
 __date__ = "2025-02-11"
 __version_highlight__ = "Integrate latest version of is_frame_centered function, same as in FrameAlignmentCheck"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -1616,16 +1616,17 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     
     areas = []
     start = None
+    min_gap_size = int(height*0.08)  # minimum hole height is around 8% of the frame height
     previous = None
     for i in white_heights:
         if start is None:
             start = i
-        if previous is not None and i-previous > 20:    # 20 is minimum number of consecutive pixels to skip small gaps
-            if start is not None:
+        if previous is not None and i-previous > 1: # end of first ares, check size
+            if previous-start > min_gap_size:  # min_gap_size is minimum number of consecutive pixels to skip small gaps
                 areas.append((start, previous - 1))
             start = i
         previous = i
-    if start is not None:  # Add the last area if it exists
+    if start is not None and white_heights[-1]-start > min_gap_size:  # Add the last area if it exists
         areas.append((start, white_heights[-1]))
     
     result = 0
@@ -1643,9 +1644,9 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
         if result >= middle - margin and result <= middle + margin:
             return True, 0
         elif result < middle - margin:
-            return False, (middle - margin) - result
+            return False, -(middle - result)
         elif result > middle + margin:
-            return False, result - (middle + margin)
+            return False, result - middle
     return False, -1
 
 
