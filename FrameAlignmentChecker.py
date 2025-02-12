@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.4"
-__date__ = "2025-02-11"
-__version_highlight__ = "More bugfixes and improvements"
+__version__ = "1.0.5"
+__date__ = "2025-02-12"
+__version_highlight__ = "Add support for DNG files - Needs rawpy library"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -28,7 +28,11 @@ import cv2
 import numpy as np
 import time
 import sys
-
+try:
+    import rawpy
+    check_dng_frames_for_misalignment = True
+except ImportError:
+    check_dng_frames_for_misalignment = False
 
 # Flag to control the processing loop
 processing = False
@@ -37,14 +41,14 @@ stop_processing_requested = False
 # log path
 frame_alignment_checker_log_fullpath = ''
 
+# Zoom factor for image display
+zoom_factor = 1
+
+# Image display active flag
+image_being_displayed = False
 
 
-def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
-    # Read the image
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError("Could not read the image")
-
+def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
     height, width = img.shape
 
@@ -109,7 +113,16 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
 
 
 def display_image(image_path, bw=False):
-    img = cv2.imread(image_path)
+    global zoom_factor, image_being_displayed
+
+    if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
+        with rawpy.imread(image_path) as raw:
+            rgb = raw.postprocess()
+            # Convert the numpy array to something OpenCV can work with
+            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+    else:
+        img = cv2.imread(image_path)
+
     if img is None:
         raise ValueError("Could not read the image")
     if bw:
@@ -122,9 +135,9 @@ def display_image(image_path, bw=False):
     window_name = "Press Esc to exit, +/- to resize"    
     cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
     cv2.imshow(window_name, img)
-    cv2.resizeWindow(window_name, 400, 300)
+    cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
     cv2_window_opened = True
-    zoom_factor = 1
+    image_being_displayed = True
     # Loop to keep the window open
     while True:
         # Wait for key event, but only for 1 millisecond to keep the loop fast
@@ -147,7 +160,26 @@ def display_image(image_path, bw=False):
                 zoom_factor -= 1
             cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
     if cv2_window_opened:
+        cv2_window_opened = False
         cv2.destroyAllWindows()
+    image_being_displayed = False
+
+
+def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
+    # Read the image
+    if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
+        with rawpy.imread(image_path) as raw:
+            rgb = raw.postprocess()
+            # Convert the numpy array to something OpenCV can work with
+            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    else:
+        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        
+    if img is None:
+        raise ValueError("Could not read the image")
+    
+    # Call is_frame_centered with the image
+    return is_frame_centered(img, film_type, threshold, slice_width)
 
 
 def format_duration(seconds):
@@ -197,8 +229,10 @@ def select_folder():
 def process_images_in_folder(folder_path, film_type, threshold):
     global processing, stop_processing_requested
     sorted_filenames = sorted(os.listdir(folder_path))
+
+    file_set = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.dng') if check_dng_frames_for_misalignment else ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
     
-    total_files = len([f for f in sorted_filenames if f.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp'))])
+    total_files = len([f for f in sorted_filenames if f.lower().endswith(file_set)])
     processed_files = 0
     misaligned_counter = 0
     empty_counter = 0
@@ -209,9 +243,9 @@ def process_images_in_folder(folder_path, film_type, threshold):
     for filename in sorted_filenames:
         if stop_processing_requested:  # Check if processing was stopped            
             break
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.bmp')):
+        if filename.lower().endswith(file_set):
             image_path = os.path.join(folder_path, filename)
-            centered, gap = is_frame_centered(image_path, film_type, threshold)
+            centered, gap = is_frame_in_file_centered(image_path, film_type, threshold)
             if not centered:
                 if gap == -1:
                     status = "possibly empty" 
@@ -308,9 +342,10 @@ def on_resize(event):
 
 
 def on_mouse_click(event):
-    global processing
+    global processing, image_being_displayed
 
-    if processing:
+    if processing or image_being_displayed:
+        print(f"Processing {processing} or displaying an image {image_being_displayed}, ignoring click")
         return
 
     # Get the index of the click position
