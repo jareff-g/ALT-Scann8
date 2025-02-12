@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.5"
+__version__ = "1.0.6"
 __date__ = "2025-02-12"
-__version_highlight__ = "Add support for DNG files - Needs rawpy library"
+__version_highlight__ = "Image viewer: Replace opencv imshow with a tkinter popup window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -22,7 +22,8 @@ __status__ = "Development"
 # ######### Imports section ##########
 
 import tkinter as tk
-from tkinter import filedialog, scrolledtext, Spinbox, ttk
+from tkinter import filedialog, scrolledtext, Spinbox, ttk, Label, Toplevel
+import PIL.Image, PIL.ImageTk
 import os
 import cv2
 import numpy as np
@@ -41,12 +42,9 @@ stop_processing_requested = False
 # log path
 frame_alignment_checker_log_fullpath = ''
 
-# Zoom factor for image display
-zoom_factor = 1
 
-# Image display active flag
-image_being_displayed = False
-
+# Use a dictionary to store window size
+window_size = {'width': 640, 'height': 480}
 
 def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
@@ -112,9 +110,66 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     return False, -1
 
 
-def display_image(image_path, bw=False):
-    global zoom_factor, image_being_displayed
 
+def show_image_popup(image):
+    global window_size
+    
+    popup = Toplevel()
+    popup.title("Image Viewer")
+
+    # Convert the OpenCV image from BGR to RGB
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    
+    # Convert the image to a format Tkinter can display
+    pil_image = PIL.Image.fromarray(image_rgb)
+    photo = PIL.ImageTk.PhotoImage(image=pil_image)
+
+    # Use a Label to display the image
+    label = Label(popup, image=photo)
+    label.image = photo  # Keep a reference
+    label.pack(fill="both", expand=True)
+
+    # Set initial size from saved size
+    popup.geometry(f"{window_size['width']}x{window_size['height']}")
+
+    # Make window resizable
+    popup.resizable(width=True, height=True)
+
+    # Function to save size and close the popup window
+    def on_closing():
+        window_size['width'] = popup.winfo_width()
+        window_size['height'] = popup.winfo_height()
+        popup.destroy()
+
+    popup.protocol("WM_DELETE_WINDOW", on_closing)
+    popup.bind('<Escape>', lambda e: on_closing())
+
+    # Update label when window size changes, maintaining aspect ratio
+    def on_resize(event):
+        # Calculate the new size while maintaining aspect ratio
+        img_width, img_height = pil_image.size
+        aspect_ratio = img_width / img_height
+        if event.width / event.height > aspect_ratio:
+            # If window is wider than the image aspect ratio
+            new_height = event.height
+            new_width = int(new_height * aspect_ratio)
+        else:
+            # If window is taller than the image aspect ratio
+            new_width = event.width
+            new_height = int(new_width / aspect_ratio)
+
+        # Resize the image
+        resized_image = pil_image.resize((new_width, new_height), PIL.Image.LANCZOS)
+        new_photo = PIL.ImageTk.PhotoImage(resized_image)
+        
+        # Update the label with the new image
+        label.configure(image=new_photo)
+        label.image = new_photo  # Update reference
+
+    popup.bind('<Configure>', on_resize)
+
+
+def display_image(image_path, bw=False):
     if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
         with rawpy.imread(image_path) as raw:
             rgb = raw.postprocess()
@@ -131,38 +186,8 @@ def display_image(image_path, bw=False):
         # Convert to pure black and white (binary image)
         _, img = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
 
-    # Name for the window
-    window_name = "Press Esc to exit, +/- to resize"    
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.imshow(window_name, img)
-    cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
-    cv2_window_opened = True
-    image_being_displayed = True
-    # Loop to keep the window open
-    while True:
-        # Wait for key event, but only for 1 millisecond to keep the loop fast
-        key = cv2.waitKey(1) & 0xFF
-        
-        # Check if the window is closed
-        if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
-            cv2_window_opened = False
-            break
-        
-        # If 'q' key is pressed, exit the loop
-        if key == 27:   # Esc
-            break
-        elif key == 43: # '+' key
-            if zoom_factor < 4: 
-                zoom_factor += 1
-            cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
-        elif key == 45: # '-' key
-            if zoom_factor > 1: 
-                zoom_factor -= 1
-            cv2.resizeWindow(window_name, zoom_factor*400, zoom_factor*300)
-    if cv2_window_opened:
-        cv2_window_opened = False
-        cv2.destroyAllWindows()
-    image_being_displayed = False
+    # Display image
+    show_image_popup(img)
 
 
 def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
@@ -342,10 +367,10 @@ def on_resize(event):
 
 
 def on_mouse_click(event):
-    global processing, image_being_displayed
+    global processing
 
-    if processing or image_being_displayed:
-        print(f"Processing {processing} or displaying an image {image_being_displayed}, ignoring click")
+    if processing:
+        print(f"Processing files, ignoring click")
         return
 
     # Get the index of the click position
