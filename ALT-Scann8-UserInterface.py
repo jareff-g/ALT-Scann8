@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.16"
-__date__ = "2025-02-11"
-__version_highlight__ = "Integrate latest version of is_frame_centered function, same as in FrameAlignmentCheck"
+__version__ = "1.11.17"
+__date__ = "2025-02-12"
+__version_highlight__ = "Allow Frame Alignment Check for DNG files"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -97,10 +97,9 @@ from rolling_average import RollingAverage
 
 try:
     import rawpy
-    import imageio
-    check_dng_frames_for_misalignment = True
+    can_check_dng_frames_for_misalignment = True
 except ImportError:
-    check_dng_frames_for_misalignment = False
+    can_check_dng_frames_for_misalignment = False
 
 #  ######### Global variable definition ##########
 win = None
@@ -762,8 +761,18 @@ def cmd_set_new_folder():
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
     DetectMisalignedFrames = detect_misaligned_frames.get()
-    misaligned_tolerance_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
-    misaligned_tolerance_spinbox.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+    widget_enable(misaligned_tolerance_label, DetectMisalignedFrames)
+    widget_enable(misaligned_tolerance_spinbox, DetectMisalignedFrames)
+
+
+def cmd_select_file_type(selected):
+    global FileType
+    FileType = file_type_dropdown_selected.get()
+    if not can_check_dng_frames_for_misalignment:
+        widget_enable(misaligned_tolerance_label, FileType != "dng")
+        widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
+        widget_enable(detect_misaligned_frames_btn, FileType != "dng")
+
 
 
 def cmd_settings_popup_dismiss():
@@ -886,6 +895,11 @@ def cmd_settings_popup_accept():
     if FileType != file_type_dropdown_selected.get():
         FileType = file_type_dropdown_selected.get()
         ConfigData["FileType"] = FileType
+        if not can_check_dng_frames_for_misalignment:
+            widget_enable(misaligned_tolerance_label, FileType != "dng")
+            widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
+            widget_enable(detect_misaligned_frames_btn, FileType != "dng")
+
 
     if refresh_ui:
         create_main_window()
@@ -917,7 +931,7 @@ def cmd_settings_popup():
     global base_folder_btn
     global BaseFolderBackup, CurrentDirBackup
     global CapstanDiameter, capstan_diameter_float
-    global misaligned_tolerance_label, misaligned_tolerance_spinbox
+    global misaligned_tolerance_label, misaligned_tolerance_spinbox, detect_misaligned_frames_btn
 
     # Save folders in case settings dialog is dismissed
     BaseFolderBackup = BaseFolder
@@ -997,13 +1011,9 @@ def cmd_settings_popup():
     as_tooltips.add(misaligned_tolerance_label, "Tolerance for frame misalignment detection (8% default)")
     misaligned_tolerance_int = tk.IntVar(value=MisalignedFrameTolerance)
     misaligned_tolerance_spinbox = DynamicSpinbox(options_dlg, width=2, from_=0, to=100,
-                                      textvariable=misaligned_tolerance_int, increment=1, font=("Arial", FontSize - 2))
+                                      textvariable=misaligned_tolerance_int, increment=1, font=("Arial", FontSize - 1))
     misaligned_tolerance_spinbox.grid(row=options_row, column=1, sticky='W')
     options_row += 1
-
-    if not DetectMisalignedFrames:
-        misaligned_tolerance_label.config(state=DISABLED)
-        misaligned_tolerance_spinbox.config(state=DISABLED)
 
     # Font Size
     font_size_label = tk.Label(options_dlg, text="Main UI font size:", font=("Arial", FontSize-1))
@@ -1012,7 +1022,7 @@ def cmd_settings_popup():
     font_size_int = tk.IntVar(value=12)
     font_size_int.set(FontSize)
     font_size_spinbox = DynamicSpinbox(options_dlg, width=2, from_=6, to=20,
-                                      textvariable=font_size_int, increment=1, font=("Arial", FontSize - 2))
+                                      textvariable=font_size_int, increment=1, font=("Arial", FontSize - 1))
     font_size_spinbox.grid(row=options_row, column=1, sticky='W')
     options_row += 1
 
@@ -1024,11 +1034,10 @@ def cmd_settings_popup():
     capstan_diameter_frame.grid(row=options_row, column=1, sticky='W')
 
     capstan_diameter_float = tk.DoubleVar(value=CapstanDiameter)
-    logging.debug(f"Settings popup: capstan_diameter_float = {CapstanDiameter} ({capstan_diameter_float.get()})")
     capstan_diameter_spinbox = DynamicSpinbox(capstan_diameter_frame, width=4, from_=8, to=30,
-                                      format="%.1f", textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 2))
+                                      format="%.1f", textvariable=capstan_diameter_float, increment=0.1, font=("Arial", FontSize - 1))
     capstan_diameter_spinbox.pack(side=LEFT)
-    capstan_diameter_mm_label = tk.Label(capstan_diameter_frame, text="mm", font=("Arial", FontSize-2))
+    capstan_diameter_mm_label = tk.Label(capstan_diameter_frame, text="mm", font=("Arial", FontSize-1))
     capstan_diameter_mm_label.pack(side=LEFT)
     options_row += 1
 
@@ -1037,10 +1046,10 @@ def cmd_settings_popup():
     # Dropdown menu options
     resolution_list = camera_resolutions.get_list()
     resolution_dropdown_selected = tk.StringVar()
-    resolution_label = Label(options_dlg, text='Resolution:', font=("Arial", FontSize))
+    resolution_label = Label(options_dlg, text='Resolution:', font=("Arial", FontSize-1))
     resolution_label.grid(row=options_row, column=0, sticky="W", padx=(2*FontSize,0))
     resolution_dropdown = OptionMenu(options_dlg, resolution_dropdown_selected, *resolution_list)
-    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
+    resolution_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
     resolution_dropdown_selected.set(CaptureResolution)
     resolution_dropdown.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(resolution_label, "Select the resolution to use when capturing the frames. Modes flagged with "
@@ -1054,12 +1063,11 @@ def cmd_settings_popup():
     file_type_dropdown_selected = tk.StringVar()
 
     # Target file type
-    file_type_label = Label(options_dlg, text='Type:', font=("Arial", FontSize))
+    file_type_label = Label(options_dlg, text='Type:', font=("Arial", FontSize-1))
     file_type_label.grid(row=options_row, column=0, sticky="W", padx=(2*FontSize,0))
-    file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list)
-    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
+    file_type_dropdown = OptionMenu(options_dlg, file_type_dropdown_selected, *file_type_list, command=cmd_select_file_type)
+    file_type_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
     file_type_dropdown_selected.set(FileType)  # Set the initial value
-    logging.debug(f"Settings popup: FileType = {FileType} ({file_type_dropdown_selected.get()})")
     file_type_dropdown.grid(row=options_row, column=1, sticky='W')
     # file_type_dropdown.config(state=DISABLED)
     as_tooltips.add(file_type_label, "Select format to safe film frames (JPG or PNG)")
@@ -1067,10 +1075,10 @@ def cmd_settings_popup():
     options_row += 1
 
     # Base ALT-Scann8 folder
-    base_folder_label = Label(options_dlg, text='Base folder:', font=("Arial", FontSize))
+    base_folder_label = Label(options_dlg, text='Base folder:', font=("Arial", FontSize-1))
     base_folder_label.grid(row=options_row, column=0, sticky="W", padx=(2*FontSize,0))
     base_folder_btn = Button(options_dlg, text=BaseFolder, command=set_base_folder,
-                                 activebackground='#f0f0f0', font=("Arial", FontSize-2))
+                                 activebackground='#f0f0f0', font=("Arial", FontSize-1))
     base_folder_btn.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(base_folder_label, "Select existing folder as base folder for ALT-Scann8.")
 
@@ -1082,7 +1090,7 @@ def cmd_settings_popup():
     debug_level_label = Label(options_dlg, text='Debug level:', font=("Arial", FontSize-1))
     debug_level_label.grid(row=options_row, column=0, sticky='W', padx=(2*FontSize,0))
     debug_level_dropdown = OptionMenu(options_dlg, debug_level_selected, *debug_level_list)
-    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-2))
+    debug_level_dropdown.config(takefocus=1, font=("Arial", FontSize-1))
     debug_level_selected.set(logging.getLevelName(LogLevel))  # Set the initial value
     debug_level_dropdown.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(debug_level_label, "Select logging level, for troubleshooting. Use DEBUG when reporting an issue in Github.")
@@ -1095,6 +1103,22 @@ def cmd_settings_popup():
     options_ok_btn = tk.Button(options_dlg, text="OK", command=cmd_settings_popup_accept, width=8,
                                font=("Arial", FontSize))
     options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='E')
+
+    # arrange status for multidependent widgets. Initially enabled, increase counter for each disable condition   
+    detect_misaligned_frames_btn.disabled_counter = 0
+    misaligned_tolerance_label.disabled_counter = 0
+    misaligned_tolerance_spinbox.disabled_counter = 0
+
+    detect_misaligned_frames_btn.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
+    misaligned_tolerance_label.disabled_counter += 1 if not DetectMisalignedFrames else 0
+    misaligned_tolerance_spinbox.disabled_counter += 1 if not DetectMisalignedFrames else 0
+
+    misaligned_tolerance_label.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
+    misaligned_tolerance_spinbox.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
+
+    widget_refresh(detect_misaligned_frames_btn)
+    widget_refresh(misaligned_tolerance_label)
+    widget_refresh(misaligned_tolerance_spinbox)
 
     options_dlg.protocol("WM_DELETE_WINDOW", cmd_settings_popup_dismiss)  # intercept close button
     options_dlg.transient(win)  # dialog window is related to main
@@ -1581,12 +1605,7 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
-def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
-    # Read the image
-    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-    if img is None:
-        raise ValueError("Could not read the image")
-
+def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
     height, width = img.shape
 
@@ -1650,10 +1669,21 @@ def is_frame_centered(image_path, film_type ='S8', threshold=10, slice_width=10)
     return False, -1
 
 
-def convert_dng_to_tiff(dng_path, tiff_path):
-    with rawpy.imread(dng_path) as raw:
-        rgb = raw.postprocess()
-    imageio.imwrite(tiff_path, rgb)
+def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
+    # Read the image
+    if image_path.lower().endswith('.dng'):
+        with rawpy.imread(image_path) as raw:
+            rgb = raw.postprocess()
+            # Convert the numpy array to something OpenCV can work with
+            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+    else:
+        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+        
+    if img is None:
+        raise ValueError("Could not read the image")
+    
+    # Call is_frame_centered with the image
+    return is_frame_centered(img, film_type, threshold, slice_width)
 
 
 def reverse_image(image):
@@ -1734,16 +1764,17 @@ def capture_save_thread(queue, event, id):
                 request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
             else:  # Non HDR
                 request.save_dng(FrameFilenamePattern % (frame_idx, FileType))
-            request.release()
-            logging.debug("Thread %i saved request DNG image: %s ms", id,
-                          str(round((time.time() - curtime) * 1000, 1)))
-            if check_dng_frames_for_misalignment and DetectMisalignedFrames and hdr_idx <= 1:   # If checking HDR, onyl first frame
-                convert_dng_to_tiff(FrameFilenamePattern % (frame_idx, FileType), 'alignment.tiff')
-                if not is_frame_centered('alignment.tiff', FilmType, MisalignedFrameTolerance)[0]:
+                if DetectMisalignedFrames and can_check_dng_frames_for_misalignment:
+                    captured_image = request.make_array('main')[:,:,0]
+            request.release()   # Release request ASAP (delay frame alignment check)
+            if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
+                if not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
                     scan_error_counter += 1
                     scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     with open(scan_error_log_fullpath, 'a') as f:
                         f.write(f"Misaligned frame, {CurrentFrame}\n")
+            logging.debug("Thread %i saved request DNG image: %s ms", id,
+                          str(round((time.time() - curtime) * 1000, 1)))
         else:
             # If not is_dng AND negative_image AND request: Convert to image now, and do a PIL save
             if not NegativeImage and type == REQUEST_TOKEN:
@@ -1752,6 +1783,8 @@ def capture_save_thread(queue, event, id):
                                  HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
                 else:  # Non HDR
                     request.save('main', FrameFilenamePattern % (frame_idx, FileType))
+                    if DetectMisalignedFrames:
+                        captured_image = request.make_array('main')[:,:,0]
                 request.release()
                 logging.debug("Thread %i saved request image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -1765,7 +1798,7 @@ def capture_save_thread(queue, event, id):
                                         quality=95)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(FrameFilenamePattern % (frame_idx, FileType), FilmType, MisalignedFrameTolerance)[0]:
+            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
                 scan_error_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
@@ -3747,6 +3780,7 @@ def init_multidependent_widgets():
         hdr_max_exp_label.disabled_counter = 1
         hdr_min_exp_spinbox.disabled_counter = 1
         hdr_max_exp_spinbox.disabled_counter = 1
+
         widget_list_refresh([id_HdrBracketAuto])
 
 
@@ -3881,8 +3915,8 @@ def tscann8_init():
     else:
         logging.info("Running on Raspberry Pi")
 
-    if not check_dng_frames_for_misalignment:
-        logging.warning("Frame alignment for DNG files is disabled. To enable it please install libraries rawpy and imageio")
+    if not can_check_dng_frames_for_misalignment:
+        logging.warning("Frame alignment for DNG files is disabled. To enable it please install rawpy library")
 
     CurrentDir = BaseFolder
     logging.debug("BaseFolder=%s", BaseFolder)
