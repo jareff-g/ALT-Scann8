@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.17"
-__date__ = "2025-02-12"
-__version_highlight__ = "Allow Frame Alignment Check for DNG files"
+__version__ = "1.11.18"
+__date__ = "2025-02-13"
+__version_highlight__ = "Bugfix: ALT-Scann8 locks when switching capture from DNG to JPG"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -760,14 +760,14 @@ def cmd_set_new_folder():
 
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
-    DetectMisalignedFrames = detect_misaligned_frames.get()
+    # DetectMisalignedFrames = detect_misaligned_frames.get() # DetectMisalignedFrames to be update only if user clicks on OK
     widget_enable(misaligned_tolerance_label, DetectMisalignedFrames)
     widget_enable(misaligned_tolerance_spinbox, DetectMisalignedFrames)
 
 
 def cmd_select_file_type(selected):
     global FileType
-    FileType = file_type_dropdown_selected.get()
+    # FileType = file_type_dropdown_selected.get()  # FileType to be update only if user clicks on OK
     if not can_check_dng_frames_for_misalignment:
         widget_enable(misaligned_tolerance_label, FileType != "dng")
         widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
@@ -799,6 +799,7 @@ def cmd_settings_popup_accept():
     global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
+    global ConfigData
 
     ConfigData["PopupPos"] = options_dlg.geometry()
 
@@ -1796,6 +1797,8 @@ def capture_save_thread(queue, event, id):
                 else:
                     captured_image.save(FrameFilenamePattern % (frame_idx, FileType),
                                         quality=95)
+                    # Once the PIL Image has been saved, convert it to an array, as expected by is_frame_centered
+                    captured_image = np.array(captured_image.convert('L'))
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
             if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
@@ -1803,6 +1806,7 @@ def capture_save_thread(queue, event, id):
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
                     f.write(f"Misaligned frame, {CurrentFrame}\n")
+            logging.debug("Thread %i after checking misaligned frames", id)
         aux = time.time() - curtime
         total_wait_time_save_image += aux
         time_save_image.add_value(aux)
@@ -3867,6 +3871,15 @@ def create_main_window():
     WinInitDone = True
 
 
+# Define a custom exception hook to log uncaught exceptions
+def exception_hook(exctype, value, tb):
+    logging.exception(f"Uncaught exception {repr(value)}", exc_info=(exctype, value, tb))
+
+
+def log_thread_exception(args):
+    logging.exception(f"Thread exception occurred: {args.exc_type.__name__}: {args.exc_value}", exc_info=(args.exc_type, args.exc_value, args.exc_traceback))
+
+
 def init_logging():
     global scan_error_log_fullpath
 
@@ -3889,12 +3902,14 @@ def init_logging():
     # Initialize scan error logging
     scan_error_log_fullpath = log_path + "/ScanErrors." + time.strftime("%Y%m%d") + ".log"
 
+    # Override Python's default exception hook with our custom one
+    sys.excepthook = exception_hook
+    threading.excepthook = log_thread_exception
+
     logging.info("ALT-Scann8 %s (%s)", __version__, __date__)
     logging.info("Log file: %s", log_file_fullpath)
     logging.info("Scan error log file: %s", scan_error_log_fullpath)
     logging.info("Config file: %s", ConfigurationDataFilename)
-
-
 
 
 def tscann8_init():
