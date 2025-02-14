@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.18"
-__date__ = "2025-02-13"
-__version_highlight__ = "Bugfix: ALT-Scann8 locks when switching capture from DNG to JPG"
+__version__ = "1.11.19"
+__date__ = "2025-02-14"
+__version_highlight__ = "Fix remaining bugs in settings popup"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -117,8 +117,7 @@ FreeWheelActive = False
 ManualUvLedOn = False
 BaseFolder = os.environ['HOME']
 CurrentDir = BaseFolder
-BaseFolderBackup = BaseFolder
-CurrentDirBackup = BaseFolder
+NewBaseFolder = ''
 saved_locale = locale.getlocale(locale.LC_NUMERIC)   # Save current locale to restore it after displaying preview
 
 FrameFilenamePattern = "picture-%05d.%s"
@@ -760,14 +759,12 @@ def cmd_set_new_folder():
 
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
-    # DetectMisalignedFrames = detect_misaligned_frames.get() # DetectMisalignedFrames to be update only if user clicks on OK
     widget_enable(misaligned_tolerance_label, DetectMisalignedFrames)
     widget_enable(misaligned_tolerance_spinbox, DetectMisalignedFrames)
 
 
 def cmd_select_file_type(selected):
     global FileType
-    # FileType = file_type_dropdown_selected.get()  # FileType to be update only if user clicks on OK
     if not can_check_dng_frames_for_misalignment:
         widget_enable(misaligned_tolerance_label, FileType != "dng")
         widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
@@ -778,14 +775,6 @@ def cmd_select_file_type(selected):
 def cmd_settings_popup_dismiss():
     global options_dlg
     global BaseFolder, CurrentDir
-    global BaseFolderBackup, CurrentDirBackup
-
-    BaseFolder = BaseFolderBackup
-    ConfigData["BaseFolder"] = str(BaseFolder)
-    base_folder_btn.config(text=BaseFolder)
-    CurrentDir = CurrentDirBackup
-    ConfigData["CurrentDir"] = str(CurrentDir)
-    folder_frame_target_dir.config(text=CurrentDir)
 
     options_dlg.grab_release()
     options_dlg.destroy()
@@ -799,7 +788,7 @@ def cmd_settings_popup_accept():
     global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
-    global ConfigData
+    global ConfigData, BaseFolder
 
     ConfigData["PopupPos"] = options_dlg.geometry()
 
@@ -900,7 +889,9 @@ def cmd_settings_popup_accept():
             widget_enable(misaligned_tolerance_label, FileType != "dng")
             widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
             widget_enable(detect_misaligned_frames_btn, FileType != "dng")
-
+    if NewBaseFolder != BaseFolder:
+        BaseFolder = NewBaseFolder
+        ConfigData["BaseFolder"] = str(BaseFolder)
 
     if refresh_ui:
         create_main_window()
@@ -930,13 +921,12 @@ def cmd_settings_popup():
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
-    global BaseFolderBackup, CurrentDirBackup
+    global NewBaseFolder
     global CapstanDiameter, capstan_diameter_float
     global misaligned_tolerance_label, misaligned_tolerance_spinbox, detect_misaligned_frames_btn
 
-    # Save folders in case settings dialog is dismissed
-    BaseFolderBackup = BaseFolder
-    CurrentDirBackup = CurrentDir
+    # Make working copy of base folder
+    NewBaseFolder = BaseFolder
 
     options_row = 0
 
@@ -1078,7 +1068,7 @@ def cmd_settings_popup():
     # Base ALT-Scann8 folder
     base_folder_label = Label(options_dlg, text='Base folder:', font=("Arial", FontSize-1))
     base_folder_label.grid(row=options_row, column=0, sticky="W", padx=(2*FontSize,0))
-    base_folder_btn = Button(options_dlg, text=BaseFolder, command=set_base_folder,
+    base_folder_btn = Button(options_dlg, text=NewBaseFolder, command=set_base_folder,
                                  activebackground='#f0f0f0', font=("Arial", FontSize-1))
     base_folder_btn.grid(row=options_row, column=1, sticky='W')
     as_tooltips.add(base_folder_label, "Select existing folder as base folder for ALT-Scann8.")
@@ -1280,17 +1270,14 @@ def refresh_qr_code():
         qr_code_canvas.create_text(10, 10, anchor=tk.NW, text=data, font=f"Helvetica {7}")
 
 def set_base_folder():
-    global BaseFolder, CurrentDir
+    global BaseFolder, CurrentDir, NewBaseFolder
     options_dlg.withdraw()  # Hide the root window
-    BaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", parent=None)
-    if not os.path.isdir(BaseFolder):
-        tk.messagebox.showerror("Error!", f"Folder {BaseFolder} does not exist. Please specify an existing folder name.")
+    TmpBaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", parent=None)
+    if not os.path.isdir(TmpBaseFolder):
+        tk.messagebox.showerror("Error!", f"Folder {TmpBaseFolder} does not exist. Please specify an existing folder name.")
     else:
-        ConfigData["BaseFolder"] = str(BaseFolder)
-        base_folder_btn.config(text=BaseFolder)
-        CurrentDir = BaseFolder
-        ConfigData["CurrentDir"] = str(CurrentDir)
-        folder_frame_target_dir.config(text=CurrentDir)
+        NewBaseFolder = TmpBaseFolder
+        base_folder_btn.config(text=NewBaseFolder)
 
     options_dlg.deiconify()
 
