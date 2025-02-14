@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.19"
+__version__ = "1.11.20"
 __date__ = "2025-02-14"
-__version_highlight__ = "Fix remaining bugs in settings popup"
+__version_highlight__ = "Adjust font size of 'Frame Errors' label. Tune behavior of 'Existing' button on first start."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -116,7 +116,7 @@ FocusZoomFactorY = 0.2
 FreeWheelActive = False
 ManualUvLedOn = False
 BaseFolder = os.environ['HOME']
-CurrentDir = BaseFolder
+CurrentDir = ''
 NewBaseFolder = ''
 saved_locale = locale.getlocale(locale.LC_NUMERIC)   # Save current locale to restore it after displaying preview
 
@@ -759,16 +759,15 @@ def cmd_set_new_folder():
 
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
-    widget_enable(misaligned_tolerance_label, DetectMisalignedFrames)
-    widget_enable(misaligned_tolerance_spinbox, DetectMisalignedFrames)
+    misaligned_tolerance_label.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
 
 def cmd_select_file_type(selected):
     global FileType
-    if not can_check_dng_frames_for_misalignment:
-        widget_enable(misaligned_tolerance_label, FileType != "dng")
-        widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
-        widget_enable(detect_misaligned_frames_btn, FileType != "dng")
+    detect_misaligned_frames_btn.config(state = NORMAL if file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment else DISABLED) 
+    misaligned_tolerance_label.config(state = NORMAL if detect_misaligned_frames.get() and (file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
 
 
@@ -902,6 +901,9 @@ def cmd_settings_popup_accept():
                                 id_ExposureWbAdaptPause])
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
+
+    scan_error_counter_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -1096,20 +1098,9 @@ def cmd_settings_popup():
     options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='E')
 
     # arrange status for multidependent widgets. Initially enabled, increase counter for each disable condition   
-    detect_misaligned_frames_btn.disabled_counter = 0
-    misaligned_tolerance_label.disabled_counter = 0
-    misaligned_tolerance_spinbox.disabled_counter = 0
-
-    detect_misaligned_frames_btn.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
-    misaligned_tolerance_label.disabled_counter += 1 if not DetectMisalignedFrames else 0
-    misaligned_tolerance_spinbox.disabled_counter += 1 if not DetectMisalignedFrames else 0
-
-    misaligned_tolerance_label.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
-    misaligned_tolerance_spinbox.disabled_counter += 1 if not can_check_dng_frames_for_misalignment and FileType == "dng" else 0
-
-    widget_refresh(detect_misaligned_frames_btn)
-    widget_refresh(misaligned_tolerance_label)
-    widget_refresh(misaligned_tolerance_spinbox)
+    detect_misaligned_frames_btn.config(state = NORMAL if FileType != "dng" or can_check_dng_frames_for_misalignment else DISABLED) 
+    misaligned_tolerance_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    misaligned_tolerance_spinbox.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
     options_dlg.protocol("WM_DELETE_WINDOW", cmd_settings_popup_dismiss)  # intercept close button
     options_dlg.transient(win)  # dialog window is related to main
@@ -1161,7 +1152,6 @@ def generate_qr_code_info():
             f"File:{FileType}\n"
             f"Font:{FontSize}\n"
             f"Cpst:{CapstanDiameter}\n")
-    logging.debug(data)
     return data
 
 
@@ -1277,6 +1267,8 @@ def set_base_folder():
         tk.messagebox.showerror("Error!", f"Folder {TmpBaseFolder} does not exist. Please specify an existing folder name.")
     else:
         NewBaseFolder = TmpBaseFolder
+        if CurrentDir == '':
+            CurrentDir = NewBaseFolder
         base_folder_btn.config(text=NewBaseFolder)
 
     options_dlg.deiconify()
@@ -1285,6 +1277,9 @@ def set_base_folder():
 def cmd_set_existing_folder():
     global CurrentDir, CurrentFrame
     global scan_error_counter, scan_error_total_frames_counter, scan_error_counter_value
+
+    if CurrentDir == '':
+        CurrentDir = BaseFolder
 
     if not SimulatedRun:
         NewDir = filedialog.askdirectory(initialdir=CurrentDir, title="Select existing folder for capture")
@@ -3097,7 +3092,7 @@ def widget_list_update(cmd, category_list):
         id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
                           []],
         id_AutoStopEnabled: [[autostop_no_film_rb, autostop_counter_zero_rb],
-                             []],
+                             []]
     }
     if ExpertMode:
         dependent_widget_dict[id_AutoExpEnabled] = [[ae_constraint_mode_label, AeConstraintMode_dropdown,
@@ -3645,6 +3640,8 @@ def load_session_data_post_init():
 
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
+        scan_error_counter_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+        scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
     # Initialize camera resolution with value set, whether default or from configuration
     PiCam2_change_resolution()
@@ -3920,7 +3917,7 @@ def tscann8_init():
     if not can_check_dng_frames_for_misalignment:
         logging.warning("Frame alignment for DNG files is disabled. To enable it please install rawpy library")
 
-    CurrentDir = BaseFolder
+    ### CurrentDir = BaseFolder
     logging.debug("BaseFolder=%s", BaseFolder)
 
     if not SimulatedRun:
@@ -5419,13 +5416,13 @@ def create_widgets():
         frame_align_row += 1
 
         # Scan error counter
-        scan_error_counter_label = Label(frame_alignment_frame, text="Frame errors:", font=("Arial", FontSize-2),
+        scan_error_counter_label = Label(frame_alignment_frame, text="Frame errors:", font=("Arial", FontSize-1),
                                  name='scan_error_counter_label')
         scan_error_counter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
 
         scan_error_counter_value = tk.StringVar(value="0 (0%)")
         scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
-                                  font=("Arial", FontSize-2), justify="right", name='scan_error_counter_value_label')
+                                  font=("Arial", FontSize-1), justify="right", name='scan_error_counter_value_label')
         scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(scan_error_counter_value_label, "Number of frames missed or misaligned during scanning.")
         frame_align_row += 1
@@ -5874,6 +5871,11 @@ def main(argv):
     ALT_scann_init_done = True
 
     refresh_qr_code()
+
+    # Write environment info to log
+    print("Logging env info")
+    data = generate_qr_code_info()
+    logging.info(data)
 
     # *** ALT-Scann8 load complete ***
     if hw_panel_installed:
