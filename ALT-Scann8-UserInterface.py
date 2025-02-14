@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.20"
+__version__ = "1.11.21"
 __date__ = "2025-02-14"
-__version_highlight__ = "Adjust font size of 'Frame Errors' label. Tune behavior of 'Existing' button on first start."
+__version_highlight__ = "Fixed regresion introduced by 1.11.20: ALT-Scann freezed upon first action (even clicking on 'exit')"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3917,7 +3917,7 @@ def tscann8_init():
     if not can_check_dng_frames_for_misalignment:
         logging.warning("Frame alignment for DNG files is disabled. To enable it please install rawpy library")
 
-    ### CurrentDir = BaseFolder
+    CurrentDir = BaseFolder     # Current dir needs a value at this point, otherwise thigs go south
     logging.debug("BaseFolder=%s", BaseFolder)
 
     if not SimulatedRun:
@@ -5873,7 +5873,6 @@ def main(argv):
     refresh_qr_code()
 
     # Write environment info to log
-    print("Logging env info")
     data = generate_qr_code_info()
     logging.info(data)
 
