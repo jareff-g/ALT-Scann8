@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.22"
+__version__ = "1.11.23"
 __date__ = "2025-02-15"
-__version_highlight__ = "Move misaligned frame detection checkbox to main UI"
+__version_highlight__ = "Fix behavior of Base Folder/'Existing' button upon first run"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1695,12 +1695,6 @@ def capture_save_thread(queue, event, id):
     global scan_error_counter, scan_error_total_frames_counter, DetectMisalignedFrames, MisalignedFrameTolerance
     global FilmType
 
-    if os.path.isdir(CurrentDir):
-        os.chdir(CurrentDir)
-    else:
-        logging.error("Target dir %s unmounted: Stop scan session", CurrentDir)
-        ScanStopRequested = True  # If target dir does not exist, stop scan
-        return
     logging.debug("Started capture_save_thread n.%i", id)
     while not event.is_set() or not queue.empty():
         message = queue.get()
@@ -2579,8 +2573,7 @@ def start_scan():
         ScanStopRequested = True  # Ending the scan process will be handled in the next (or ongoing) capture loop
     else:
         if BaseFolder == CurrentDir or not os.path.isdir(CurrentDir):
-            tk.messagebox.showerror("Error!", "Please specify a folder where to store the "
-                                              "captured images.")
+            tk.messagebox.showerror("Error!", "Please specify target folder where captured frames will be stored.")
             return
 
         start_btn.config(text="STOP Scan", bg='red', fg='white', relief=SUNKEN)
@@ -3218,7 +3211,7 @@ def validate_config_folders():
                                                           'Do you want to proceed using the current user home folder? '
                                                           'Otherwise ALT-Scann8 startup will be aborted.')
         if retvalue and 'CurrentDir' in ConfigData:
-            if not os.path.isdir(ConfigData["CurrentDir"]):
+            if CurrentDir != '' and not os.path.isdir(ConfigData["CurrentDir"]):
                 retvalue = tk.messagebox.askyesno(title='Drive not mounted?',
                                                   message='Target folder used in previous session is not accessible. '
                                                           'Do you want to proceed using the current user home folder? '
@@ -3333,12 +3326,13 @@ def load_session_data_post_init():
                 logging.debug(f"Retrieved from config: FileType = {FileType} ({ConfigData['FileType']})")
             if 'CurrentDir' in ConfigData:
                 CurrentDir = ConfigData["CurrentDir"]
-                # If directory in configuration does not exist we set the current working dir
-                if not os.path.isdir(CurrentDir):
-                    CurrentDir = os.getcwd()
-                folder_frame_target_dir.config(text=CurrentDir)
-                with open(scan_error_log_fullpath, 'a') as f:
-                    f.write(f"Starting scan error log for {CurrentDir}\n")
+                if CurrentDir != '':    # Respect empty currentdir in case no tyet set after very first run
+                    # If directory in configuration does not exist we set the current working dir
+                    if not os.path.isdir(CurrentDir):
+                        CurrentDir = os.getcwd()
+                    folder_frame_target_dir.config(text=CurrentDir)
+                    with open(scan_error_log_fullpath, 'a') as f:
+                        f.write(f"Starting scan error log for {CurrentDir}\n")
 
             if ExperimentalMode:
                 if 'HdrCaptureActive' in ConfigData:
@@ -3902,7 +3896,6 @@ def tscann8_init():
     if not can_check_dng_frames_for_misalignment:
         logging.warning("Frame alignment for DNG files is disabled. To enable it please install rawpy library")
 
-    CurrentDir = BaseFolder     # Current dir needs a value at this point, otherwise thigs go south
     logging.debug("BaseFolder=%s", BaseFolder)
 
     if not SimulatedRun:
