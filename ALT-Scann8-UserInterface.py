@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.23"
+__version__ = "1.11.24"
 __date__ = "2025-02-15"
-__version_highlight__ = "Fix behavior of Base Folder/'Existing' button upon first run"
+__version_highlight__ = "Fix focus view issue (capture resolution changes after focus view enabled)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1911,7 +1911,7 @@ def cmd_set_negative_image():
 #  - Exposure adjustment
 def cmd_set_real_time_display():
     global RealTimeDisplay
-    global camera
+    global camera, ZoomSize
     global saved_locale
     RealTimeDisplay = real_time_display.get()
     if RealTimeDisplay:
@@ -1920,6 +1920,8 @@ def cmd_set_real_time_display():
         logging.debug("Real time display disabled")
     if not SimulatedRun and not CameraDisabled:
         if RealTimeDisplay:
+            ZoomSize = camera.capture_metadata()['ScalerCrop']
+            time.sleep(0.1)
             if camera._preview:
                 camera.stop_preview()
             time.sleep(0.1)
@@ -1933,6 +1935,8 @@ def cmd_set_real_time_display():
             camera.start()
             time.sleep(0.1)
             camera.switch_mode(capture_config)
+            time.sleep(0.1)
+            camera.set_controls({"ScalerCrop": ZoomSize})
             # Restore the saved locale
             locale.setlocale(locale.LC_NUMERIC, saved_locale)
 
