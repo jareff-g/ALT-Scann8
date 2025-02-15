@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.21"
-__date__ = "2025-02-14"
-__version_highlight__ = "Fixed regresion introduced by 1.11.20: ALT-Scann freezed upon first action (even clicking on 'exit')"
+__version__ = "1.11.22"
+__date__ = "2025-02-15"
+__version_highlight__ = "Move misaligned frame detection checkbox to main UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -758,14 +758,13 @@ def cmd_set_new_folder():
 
 
 def cmd_detect_misaligned_frames():
-    global DetectMisalignedFrames, misaligned_tolerance_spinbox, misaligned_tolerance_label
-    misaligned_tolerance_label.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
-    misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    global DetectMisalignedFrames, misaligned_tolerance_label
+    DetectMisalignedFrames = detect_misaligned_frames.get()
+    scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
 
 def cmd_select_file_type(selected):
     global FileType
-    detect_misaligned_frames_btn.config(state = NORMAL if file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment else DISABLED) 
     misaligned_tolerance_label.config(state = NORMAL if detect_misaligned_frames.get() and (file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
     misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (file_type_dropdown_selected.get() != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
@@ -829,9 +828,6 @@ def cmd_settings_popup_accept():
         refresh_ui = True
         UIScrollbars = ui_scrollbars.get()
         ConfigData["UIScrollbars"] = UIScrollbars
-    if DetectMisalignedFrames != detect_misaligned_frames.get():
-        DetectMisalignedFrames = detect_misaligned_frames.get()
-        ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
     if MisalignedFrameTolerance != misaligned_tolerance_int.get():
         MisalignedFrameTolerance = misaligned_tolerance_int.get()
         ConfigData["MisalignedFrameTolerance"] = MisalignedFrameTolerance
@@ -884,10 +880,6 @@ def cmd_settings_popup_accept():
     if FileType != file_type_dropdown_selected.get():
         FileType = file_type_dropdown_selected.get()
         ConfigData["FileType"] = FileType
-        if not can_check_dng_frames_for_misalignment:
-            widget_enable(misaligned_tolerance_label, FileType != "dng")
-            widget_enable(misaligned_tolerance_spinbox, FileType != "dng")
-            widget_enable(detect_misaligned_frames_btn, FileType != "dng")
     if NewBaseFolder != BaseFolder:
         BaseFolder = NewBaseFolder
         ConfigData["BaseFolder"] = str(BaseFolder)
@@ -902,8 +894,9 @@ def cmd_settings_popup_accept():
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
 
-    scan_error_counter_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    detect_misaligned_frames_btn.config(state = NORMAL if (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
     scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -919,7 +912,7 @@ def cmd_settings_popup():
     global ExpertMode, ExperimentalMode, PlotterEnabled, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType
-    global simplified_mode, ui_scrollbars, detect_misaligned_frames, misaligned_tolerance_int, font_size_int, disable_tooltips
+    global simplified_mode, ui_scrollbars, misaligned_tolerance_int, font_size_int, disable_tooltips
     global widgets_enabled_while_scanning, debug_level_selected, color_coded_buttons, temp_in_fahrenheit
     global resolution_dropdown_selected, file_type_dropdown_selected
     global base_folder_btn
@@ -990,14 +983,6 @@ def cmd_settings_popup():
     as_tooltips.add(ui_scrollbars_btn, "Display scrollbars in main window (useful for lower resolutions)")
     options_row += 1
 
-    # Detect misaligned frames (as it impacts speed)
-    detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
-    detect_misaligned_frames_btn = tk.Checkbutton(options_dlg, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
-                                       font=("Arial", FontSize - 1), text="Detect misaligned frames", command=cmd_detect_misaligned_frames)
-    detect_misaligned_frames_btn.grid(row=options_row, column=0, columnspan=3, sticky="W")
-    as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
-    options_row += 1
-
     # Misaligned frame detection tolerance (percentage, 5 by default)
     misaligned_tolerance_label = tk.Label(options_dlg, text="Misalign tolerance:", font=("Arial", FontSize-1))
     misaligned_tolerance_label.grid(row=options_row, column=0, columnspan=1, sticky='W', padx=(2*FontSize,0))
@@ -1063,7 +1048,7 @@ def cmd_settings_popup():
     file_type_dropdown_selected.set(FileType)  # Set the initial value
     file_type_dropdown.grid(row=options_row, column=1, sticky='W')
     # file_type_dropdown.config(state=DISABLED)
-    as_tooltips.add(file_type_label, "Select format to safe film frames (JPG or PNG)")
+    as_tooltips.add(file_type_label, "Select format to safe film frames (JPG, PNG, DNG)")
 
     options_row += 1
 
@@ -3640,7 +3625,7 @@ def load_session_data_post_init():
 
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
-        scan_error_counter_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+        detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
         scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
     # Initialize camera resolution with value set, whether default or from configuration
@@ -4527,7 +4512,7 @@ def create_widgets():
     global match_wait_margin_spinbox
     global qr_code_canvas, qr_code_frame
     global uv_brightness_value, uv_brightness_spinbox
-    global scan_error_counter_value, scan_error_counter_label, scan_error_counter_value_label
+    global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5416,10 +5401,11 @@ def create_widgets():
         frame_align_row += 1
 
         # Scan error counter
-        scan_error_counter_label = Label(frame_alignment_frame, text="Frame errors:", font=("Arial", FontSize-1),
-                                 name='scan_error_counter_label')
-        scan_error_counter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-
+        detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
+        detect_misaligned_frames_btn = tk.Checkbutton(frame_alignment_frame, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
+                                        font=("Arial", FontSize - 1), text="Detect misaligned frames", command=cmd_detect_misaligned_frames)
+        detect_misaligned_frames_btn.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
         scan_error_counter_value = tk.StringVar(value="0 (0%)")
         scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
                                   font=("Arial", FontSize-1), justify="right", name='scan_error_counter_value_label')
