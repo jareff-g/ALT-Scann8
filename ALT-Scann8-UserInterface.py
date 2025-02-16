@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.11.25"
-__date__ = "2025-02-15"
-__version_highlight__ = "Integrate new version of rolling average"
+__version__ = "1.12.00"
+__date__ = "2025-02-16"
+__version_highlight__ = "UI redesign"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -487,13 +487,18 @@ ConfigData = {
     "FramesToGo": FramesToGo
 }
 
+Simulated_PT_Levels = [(58, 371),(18, 371),(41, 371),(49, 371),(169, 375),(336, 374),(385, 373),(421, 373),(546, 373),(382, 373),(52, 373),(14, 373),(59, 373),(41, 373),(151, 373),(269, 371),(371, 370),(408, 370),(548, 370),(420, 370),(37, 370),(31, 370),(43, 370),(26, 370),(94, 380),(291, 378),(395, 377),(465, 377),(546, 377),(313, 377),(39, 377),(6, 377),(33, 377),(37, 377),(68, 375),(283, 373),(380, 372),(432, 372),(548, 372),(356, 372),(41, 372),(8, 372),(31, 372),(33, 372),(189, 370),(370, 368),(458, 368),(544, 368),(323, 368),(34, 368),(52, 368),(24, 368),(25, 368),(248, 384),(400, 383),(467, 383),(548, 383),(342, 383),(41, 383),(16, 383),(39, 383),(18, 383),(196, 368),(358, 367),(369, 367),(425, 367),(561, 367),(376, 367),(42, 367),(31, 367),(33, 367),(47, 367),(190, 376),(393, 375),(533, 375),(504, 375),(119, 375),(16, 375),(53, 375),(35, 375),(26, 375),(249, 363),(483, 408),(544, 408),(528, 408),(300, 408),(51, 408),(12, 408),(71, 408),(34, 408),(167, 369),(367, 368),(401, 368),(434, 368),(551, 368),(385, 368),(68, 368),(15, 368),(53, 368),(24, 368),(64, 373),(216, 371),(299, 370),(370, 369),(408, 369),(542, 369),(376, 369),(27, 369),(22, 369)]
+Simulated_PT_Levels_idx = 0
 
 # ********************************************************
 # ALT-Scann8 code
 # ********************************************************
 
 def cmd_app_emergency_exit():
-    exit_app(False)
+    confirm = tk.messagebox.askyesno(title='Exit without saving',
+                                        message=f"Are you sure you want to exit ALT-Scann8 without saving your current settings?")
+    if confirm:
+        exit_app(False)
 
 
 def cmd_app_standard_exit():
@@ -1419,10 +1424,10 @@ def cmd_advance_movie(from_arduino=False):
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='Stop movie', bg='red',
+        AdvanceMovie_btn.config(text='■', bg='red',
                                 fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='Movie forward', bg=save_bg,
+        AdvanceMovie_btn.config(text='▶', bg=save_bg,
                                 fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
@@ -1438,10 +1443,10 @@ def cmd_retreat_movie():
 
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
-        retreat_movie_btn.config(text='Stop movie', bg='red',
+        retreat_movie_btn.config(text='■', bg='red',
                                 fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        retreat_movie_btn.config(text='Movie backward', bg=save_bg,
+        retreat_movie_btn.config(text='◀', bg=save_bg,
                                 fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
     RetreatMovieActive = not RetreatMovieActive
     # Send instruction to Arduino
@@ -1464,7 +1469,7 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        rewind_btn.config(text='Stop\n<<', bg='red', fg='white',
+        rewind_btn.config(text='◀◀ ■', bg='red', fg='white',
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1486,7 +1491,7 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
+        rewind_btn.config(text='◀◀', bg=save_bg, fg=save_fg,
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1524,7 +1529,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         FastForwardActive = True
         # Update button text
-        fast_forward_btn.config(text='Stop\n>>', bg='red', fg='white', relief=SUNKEN)
+        fast_forward_btn.config(text='▶▶■', bg='red', fg='white', relief=SUNKEN)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
@@ -1545,7 +1550,7 @@ def cmd_fast_forward_movie():
         FastForwardActive = False
 
     if not FastForwardActive:
-        fast_forward_btn.config(text='>>', bg=save_bg, fg=save_fg, relief=RAISED)
+        fast_forward_btn.config(text='▶▶', bg=save_bg, fg=save_fg, relief=RAISED)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
 
@@ -2381,6 +2386,18 @@ def capture(mode):
     ConfigData["CurrentDate"] = str(datetime.now())
     ConfigData["CurrentFrame"] = str(CurrentFrame)
 
+def simulate_pt():
+    global Simulated_PT_Levels_idx
+    if ScanOngoing:
+        # Retrieve the current item using the current index
+        pt_value = Simulated_PT_Levels[Simulated_PT_Levels_idx]
+        if PlotterEnabled:
+            UpdatePlotterWindow(pt_value[0], 150 + pt_value[1]*FrameFineTuneValue//100)
+        
+        # Move to the next item, wrapping around to 0 when we reach the end
+        Simulated_PT_Levels_idx = (Simulated_PT_Levels_idx + 1) % len(Simulated_PT_Levels)
+        win.after(15, simulate_pt)
+
 
 def cmd_start_scan_simulated():
     global win
@@ -2414,6 +2431,8 @@ def cmd_start_scan_simulated():
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
 
+        capture_info_str.set(f"{FileType} - {CaptureResolution}")
+
         ScanOngoing = True
         custom_spinboxes_kbd_lock(win)
         last_frame_time = time.time() + 3
@@ -2444,7 +2463,7 @@ def cmd_start_scan_simulated():
                 ScanStopRequested = True
             # Invoke capture_loop  a first time shen scan starts
             win.after(500, capture_loop_simulated)
-
+            win.after(10, simulate_pt)
 
 def stop_scan_simulated():
     global win
@@ -2586,6 +2605,8 @@ def start_scan():
         ConfigData["CurrentFrame"] = str(CurrentFrame)
         CurrentScanStartTime = datetime.now()
         CurrentScanStartFrame = CurrentFrame
+
+        capture_info_str.set(f"{FileType} - {CaptureResolution}")
 
         is_dng = FileType == 'dng'
         is_png = FileType == 'png'
@@ -4510,6 +4531,7 @@ def create_widgets():
     global qr_code_canvas, qr_code_frame
     global uv_brightness_value, uv_brightness_spinbox
     global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
+    global capture_info_str
 
     # Global value for separations between widgets
     y_pad = 2
@@ -4581,14 +4603,26 @@ def create_widgets():
                               bg='white', fg='white')
     film_hole_label_2.pack(side=TOP)
 
-    # Advance movie button (slow forward through filmgate)
+    # Set initial positions for widgets in this frame
     bottom_area_column = 0
     bottom_area_row = 0
-    AdvanceMovie_btn = Button(top_left_area_frame, text="Movie Forward", command=cmd_advance_movie,
-                              activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize),
+
+    # Retreat movie button (slow backward through filmgate)
+    retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
+                                activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
+                                name='retreat_movie_btn')
+    retreat_movie_btn.widget_type = "general"
+    retreat_movie_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad,
+                          sticky='NSEW')
+    as_tooltips.add(retreat_movie_btn, "Moves the film backwards. BEWARE!!!: Requires manually rotating the source "
+                                        "reels in left position in order to avoid film jamming at film gate.")
+
+    # Advance movie button (slow forward through filmgate)
+    AdvanceMovie_btn = Button(top_left_area_frame, text="▶", command=cmd_advance_movie,
+                              activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
                               name='advanceMovie_btn')
     AdvanceMovie_btn.widget_type = "general"
-    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
+    AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column + 1, padx=x_pad, pady=y_pad,
                           sticky='NSEW')
     as_tooltips.add(AdvanceMovie_btn, "Advance film (can be used with real-time view enabled).")
     bottom_area_row += 1
@@ -4610,32 +4644,18 @@ def create_widgets():
     snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
+    rewind_btn = Button(top_left_area_frame, text="◀◀", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
                         activebackground='#f0f0f0', relief=RAISED, name='rewind_btn')
     rewind_btn.widget_type = "general"
     rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    fast_forward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize + 3), height=2,
+    fast_forward_btn = Button(top_left_area_frame, text="▶▶", font=("Arial", FontSize + 3), height=2,
                              command=cmd_fast_forward_movie, activebackground='#f0f0f0', relief=RAISED,
                              name='fast_forward_btn')
     fast_forward_btn.widget_type = "general"
     fast_forward_btn.grid(row=bottom_area_row, column=bottom_area_column + 1, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(fast_forward_btn, "Fast-forward film. Make sure film is routed via upper rolls.")
-    bottom_area_row += 1
-
-    # Switch Positive/negative modes
-    negative_image = tk.BooleanVar(value=NegativeImage)
-    negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film',
-                                             variable=negative_image, onvalue=True, offvalue=False,
-                                             font=("Arial", FontSize), command=cmd_set_negative_image,
-                                             indicatoron=False, name='negative_image_checkbox')
-    negative_image_checkbox.widget_type = "general"
-    if ColorCodedButtons:
-        negative_image_checkbox.config(selectcolor="pale green")
-    negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
-                                 sticky='NSEW')
-    as_tooltips.add(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
     bottom_area_row += 1
 
     # Real time view to allow focus
@@ -4677,62 +4697,55 @@ def create_widgets():
     Focus_btn_grid_frame.pack(padx=x_pad, pady=y_pad)
 
     # focus zoom displacement buttons, to further facilitate focusing the camera
-    focus_plus_btn = Button(Focus_btn_grid_frame, text="+", height=1, command=cmd_set_focus_plus, state='disabled',
+    focus_plus_btn = Button(Focus_btn_grid_frame, text="➕", height=1, command=cmd_set_focus_plus, state='disabled',
                             activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_plus_btn')
     focus_plus_btn.grid(row=0, column=2, sticky='NSEW')
     as_tooltips.add(focus_plus_btn, "Increase zoom level.")
-    focus_minus_btn = Button(Focus_btn_grid_frame, text="-", height=1, command=cmd_set_focus_minus, state='disabled',
+    focus_minus_btn = Button(Focus_btn_grid_frame, text="➖", height=1, command=cmd_set_focus_minus, state='disabled',
                              activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_minus_btn')
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="←", height=1, command=cmd_set_focus_left, state='disabled',
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="◀", height=1, command=cmd_set_focus_left, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_lf_btn')
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="↑", height=1, command=cmd_set_focus_up, state='disabled',
-                          activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_up_btn')
+    focus_up_btn = Button(Focus_btn_grid_frame, text="▲", height=1, command=cmd_set_focus_up, state='disabled',
+                          activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_up_btn')
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="↓", height=1, command=cmd_set_focus_down, state='disabled',
-                          activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_dn_btn')
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="▼", height=1, command=cmd_set_focus_down, state='disabled',
+                          activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_dn_btn')
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="→", height=1, command=cmd_set_focus_right, state='disabled',
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="▶", height=1, command=cmd_set_focus_right, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_rt_btn')
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
     bottom_area_row += 1
 
-    # Frame for automatic stop & methods
-    autostop_frame = Frame(top_left_area_frame, name='autostop_frame')
-    autostop_frame.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
-                        sticky='WE')
+    # Switch Positive/negative modes
+    negative_image = tk.BooleanVar(value=NegativeImage)
+    negative_image_checkbox = tk.Checkbutton(top_left_area_frame, text='Negative film',
+                                             variable=negative_image, onvalue=True, offvalue=False,
+                                             font=("Arial", FontSize), command=cmd_set_negative_image,
+                                             indicatoron=False, name='negative_image_checkbox')
+    negative_image_checkbox.widget_type = "general"
+    if ColorCodedButtons:
+        negative_image_checkbox.config(selectcolor="pale green")
+    negative_image_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad, pady=y_pad,
+                                 sticky='NSEW')
+    as_tooltips.add(negative_image_checkbox, "Enable negative film capture (untested with real negative film)")
+    bottom_area_row += 1
 
-    # Activate focus zoom, to facilitate focusing the camera
-    auto_stop_enabled = tk.BooleanVar(value=AutoStopEnabled)
-    auto_stop_enabled_checkbox = tk.Checkbutton(autostop_frame, text='Auto-stop if', height=1,
-                                                variable=auto_stop_enabled, onvalue=True, offvalue=False,
-                                                font=("Arial", FontSize), command=cmd_set_auto_stop_enabled,
-                                                name='auto_stop_enabled_checkbox')
-    auto_stop_enabled_checkbox.pack(side=TOP, anchor=W)
-    as_tooltips.add(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
-
-    # Radio buttons to select auto-stop method
-    autostop_type = tk.StringVar()
-    autostop_type.set('No_film')
-    autostop_no_film_rb = tk.Radiobutton(autostop_frame, text="No film", variable=autostop_type,
-                                         value='No_film', font=("Arial", FontSize), command=cmd_set_auto_stop_enabled,
-                                         name='autostop_no_film_rb', state='disabled')
-    autostop_no_film_rb.pack(side=TOP, anchor=W, padx=(10, 0))
-    as_tooltips.add(autostop_no_film_rb, "Stop when film is not detected by PT")
-    autostop_counter_zero_rb = tk.Radiobutton(autostop_frame, text="Count zero", variable=autostop_type,
-                                              value='counter_to_zero', font=("Arial", FontSize),
-                                              command=cmd_set_auto_stop_enabled, name='autostop_counter_zero_rb',
-                                              state='disabled')
-    autostop_counter_zero_rb.pack(side=TOP, anchor=W, padx=(10, 0))
-    as_tooltips.add(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
-
-
+    # Create frame to display RPi temperature
+    rpi_temp_frame = LabelFrame(top_left_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize - 2),
+                                name='rpi_temp_frame')
+    rpi_temp_frame.grid(row=bottom_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
+    temp_str = str(RPiTemp) + 'º'
+    rpi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize + 4),
+                                 name='rpi_temp_value_label')
+    rpi_temp_value_label.pack(side=TOP)
+    as_tooltips.add(rpi_temp_value_label, "Raspberry Pi Temperature.")
     bottom_area_row += 1
 
     # Toggle UI size & stats only in expert mode
@@ -4813,11 +4826,19 @@ def create_widgets():
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
-    exit_btn = Button(top_right_area_frame, text="Exit", height=4, command=cmd_app_standard_exit, activebackground='red',
-                      activeforeground='white', font=("Arial", FontSize), name='exit_btn')
+    exit_btn = Button(top_right_area_frame, text="Exit", height=2, command=cmd_app_standard_exit, activebackground='#f0f0f0',
+                      font=("Arial", FontSize), name='exit_btn')
     exit_btn.widget_type = "general"
-    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='EW')
+    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
     as_tooltips.add(exit_btn, "Exit ALT-Scann8.")
+
+    # Emergency exit (exit without saving)
+    emergency_exit_btn = Button(top_right_area_frame, text="Exit (do not save)", height=1, command=cmd_app_emergency_exit, 
+                                activebackground='red', activeforeground='white', relief=RAISED,
+                                font=("Arial", FontSize - 1), name='emergency_exit_btn')
+    emergency_exit_btn.widget_type = "general"
+    emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='SEW')
+    as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
 
     # Start scan button
     if SimulatedRun:
@@ -4832,13 +4853,13 @@ def create_widgets():
     top_right_area_row += 1
 
     # Create frame to select target folder
-    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', height=8, font=("Arial", FontSize - 2),
+    folder_frame = LabelFrame(top_right_area_frame, text='Target Folder', height=4, font=("Arial", FontSize - 2),
                               name='folder_frame')
     folder_frame.grid(row=top_right_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='EW')
     # Bind the frame's resize event to the function that updates the wraplength
     folder_frame.bind("<Configure>", update_target_dir_wraplength)
 
-    folder_frame_target_dir = Label(folder_frame, text=CurrentDir, wraplength=150, height=3,
+    folder_frame_target_dir = Label(folder_frame, text=CurrentDir, wraplength=150, height=2,
                                     font=("Arial", FontSize - 2), name='folder_frame_target_dir')
     folder_frame_target_dir.pack(side=TOP)
 
@@ -4860,7 +4881,6 @@ def create_widgets():
     scanned_images_frame = LabelFrame(top_right_area_frame, text='Done', height=4,
                                       font=("Arial", FontSize - 2), name='scanned_images_frame')
     scanned_images_frame.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NSEW')
-
     scanned_Images_label = Label(scanned_images_frame, text="Frames:", font=("Arial", FontSize-2),
                                  name='scanned_Images_label')
     scanned_Images_label.grid(row=0, column=0, sticky="W")
@@ -4894,30 +4914,66 @@ def create_widgets():
     # Create frame to display number of frames to go, and estimated time to finish
     frames_to_go_frame = LabelFrame(top_right_area_frame, text='Pending', height=4,
                                     font=("Arial", FontSize - 2), name='frames_to_go_frame')
-    frames_to_go_frame.grid(row=top_right_area_row, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
+    frames_to_go_frame.grid(row=top_right_area_row, rowspan = 2, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
+
     top_right_area_row += 1
+
+    frames_to_go_area_row = 0
 
     frames_to_go_label = Label(frames_to_go_frame, text="Frames:", font=("Arial", FontSize-2),
                                  name='frames_to_go_label')
-    frames_to_go_label.grid(row=0, column=0, sticky="W")
+    frames_to_go_label.grid(row=frames_to_go_area_row, column=0, sticky="W")
 
     frames_to_go_str = tk.StringVar(value='' if FramesToGo <= 0 else str(FramesToGo))
     frames_to_go_entry = tk.Entry(frames_to_go_frame, textvariable=frames_to_go_str, width=5,
                                   font=("Arial", FontSize-2), justify="right", name='frames_to_go_entry')
     # Bind the KeyRelease event to the entry widget
     frames_to_go_entry.bind("<KeyPress>", frames_to_go_key_press)
-    frames_to_go_entry.grid(row=0, column=1, sticky="E")
+    frames_to_go_entry.grid(row=frames_to_go_area_row, column=1, sticky="E")
     as_tooltips.add(frames_to_go_entry, "Enter estimated number of frames to scan in order to get an estimation of "
                                         "remaining time to finish.")
 
+    frames_to_go_area_row += 1
+
     time_to_go_label = Label(frames_to_go_frame, text="Time:", font=("Arial", FontSize-2),
                                  name='time_to_go_label')
-    time_to_go_label.grid(row=1, column=0, sticky="W")
+    time_to_go_label.grid(row=frames_to_go_area_row, column=0, sticky="W")
 
     frames_to_go_time_str = tk.StringVar(value='')
     frames_to_go_time = Label(frames_to_go_frame, textvariable=frames_to_go_time_str,  width=8,
                               font=("Arial", FontSize - 2), name='frames_to_go_time')
-    frames_to_go_time.grid(row=1, column=1, sticky="E")
+    frames_to_go_time.grid(row=frames_to_go_area_row, column=1, sticky="E")
+
+    frames_to_go_area_row += 1
+
+    # Automatic stop at the end of the scan
+    auto_stop_enabled = tk.BooleanVar(value=AutoStopEnabled)
+    auto_stop_enabled_checkbox = tk.Checkbutton(frames_to_go_frame, text='Auto-stop if', height=1,
+                                                variable=auto_stop_enabled, onvalue=True, offvalue=False,
+                                                font=("Arial", FontSize - 2), command=cmd_set_auto_stop_enabled,
+                                                name='auto_stop_enabled_checkbox')
+    auto_stop_enabled_checkbox.grid(row=frames_to_go_area_row, column=0, columnspan = 2, sticky="W")
+    as_tooltips.add(auto_stop_enabled_checkbox, "Stop scanning when end of film detected")
+
+    frames_to_go_area_row += 1
+
+    # Radio buttons to select auto-stop method
+    autostop_type = tk.StringVar()
+    autostop_type.set('No_film')
+    autostop_no_film_rb = tk.Radiobutton(frames_to_go_frame, text="No film", variable=autostop_type,
+                                         value='No_film', font=("Arial", FontSize - 2), command=cmd_set_auto_stop_enabled,
+                                         name='autostop_no_film_rb', state='disabled')
+    autostop_no_film_rb.grid(row=frames_to_go_area_row, column=0, columnspan = 2, sticky="W") # , padx=(10, 0))
+    as_tooltips.add(autostop_no_film_rb, "Stop when film is not detected by PT")
+    
+    frames_to_go_area_row += 1
+
+    autostop_counter_zero_rb = tk.Radiobutton(frames_to_go_frame, text="Count zero", variable=autostop_type,
+                                              value='counter_to_zero', font=("Arial", FontSize - 2),
+                                              command=cmd_set_auto_stop_enabled, name='autostop_counter_zero_rb',
+                                              state='disabled')
+    autostop_counter_zero_rb.grid(row=frames_to_go_area_row, column=0, columnspan = 2, sticky="W") # , padx=(10, 0))
+    as_tooltips.add(autostop_counter_zero_rb, "Stop scan when frames-to-go counter reaches zero")
 
     # Create frame to select S8/R8 film
     film_type_frame = LabelFrame(top_right_area_frame, text='Film type', height=1, font=("Arial", FontSize - 2),
@@ -4927,7 +4983,7 @@ def create_widgets():
     # Radio buttons to select R8/S8. Required to select adequate pattern, and match position
     film_type = tk.StringVar(value=FilmType)
     film_type_S8_rb = tk.Radiobutton(film_type_frame, text="S8", variable=film_type, command=cmd_set_s8,
-                                     value='S8', font=("Arial", FontSize), indicatoron=0, width=5, height=2,
+                                     value='S8', font=("Arial", FontSize), indicatoron=0, width=5, height=1,
                                      compound='left', relief="raised", borderwidth=3, name='film_type_S8_rb')
     film_type_S8_rb.widget_type = "general"
     if ColorCodedButtons:
@@ -4935,7 +4991,7 @@ def create_widgets():
     film_type_S8_rb.pack(side=LEFT, padx=2, pady=2, expand=True, fill="both")
     as_tooltips.add(film_type_S8_rb, "Handle as Super 8 film")
     film_type_R8_rb = tk.Radiobutton(film_type_frame, text="R8", variable=film_type, command=cmd_set_r8,
-                                     value='R8', font=("Arial", FontSize), indicatoron=0, width=5, height=2,
+                                     value='R8', font=("Arial", FontSize), indicatoron=0, width=5, height=1,
                                      compound='left', relief="raised", borderwidth=3, name='film_type_R8_rb')
     film_type_R8_rb.widget_type = "general"
     if ColorCodedButtons:
@@ -4943,15 +4999,16 @@ def create_widgets():
     film_type_R8_rb.pack(side=RIGHT, padx=2, pady=2, expand=True, fill="both")
     as_tooltips.add(film_type_R8_rb, "Handle as 8mm (Regular 8) film")
 
-    # Create frame to display RPi temperature
-    rpi_temp_frame = LabelFrame(top_right_area_frame, text='RPi Temp.', height=1, font=("Arial", FontSize - 2),
-                                name='rpi_temp_frame')
-    rpi_temp_frame.grid(row=top_right_area_row, column=1, padx=x_pad, pady=y_pad, sticky='NSEW')
-    temp_str = str(RPiTemp) + 'º'
-    rpi_temp_value_label = Label(rpi_temp_frame, text=temp_str, font=("Arial", FontSize + 4),
-                                 name='rpi_temp_value_label')
-    rpi_temp_value_label.pack(side=TOP)
-    as_tooltips.add(rpi_temp_value_label, "Raspberry Pi Temperature.")
+    top_right_area_row += 1
+
+    # Create frame to display capture resolution & file type
+    capture_info_frame = LabelFrame(top_right_area_frame, text='Capture info', height=1, font=("Arial", FontSize - 2),
+                                 name='capture_info_frame')
+    capture_info_frame.grid(row=top_right_area_row, column=0, columnspan = 2, padx=x_pad, pady=y_pad, sticky='NSEW')
+    capture_info_str = tk.StringVar(value='')
+    capture_info_label = Label(capture_info_frame, textvariable=capture_info_str,
+                              font=("Arial", FontSize), name='capture_info_label')
+    capture_info_label.pack(anchor='center')
 
     top_right_area_row += 1
 
@@ -4968,6 +5025,7 @@ def create_widgets():
         # Bind the mouse click event to the canvas widget
         plotter_canvas.bind("<Button-1>", cmd_plotter_canvas_click)
     top_right_area_row += 1
+
 
     # Create extended frame for expert and experimental areas
     if ExpertMode or ExperimentalMode:
@@ -5645,16 +5703,6 @@ def create_widgets():
         # No need to validate on FocusOut, since no keyboard entry is allowed in this one
         experimental_row += 1
 
-        # Retreat movie button (slow backward through filmgate)
-        retreat_movie_btn = Button(experimental_miscellaneous_frame, text="Movie Backward", command=cmd_retreat_movie,
-                                  activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1),
-                                  name='retreat_movie_btn')
-        retreat_movie_btn.widget_type = "experimental"
-        retreat_movie_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
-        as_tooltips.add(retreat_movie_btn, "Moves the film backwards. BEWARE: Requires manually rotating the source "
-                                          "reels in left position in order to avoid film jamming at film gate.")
-        experimental_row += 1
-
         # Unlock reels button (to load film, rewind, etc.)
         free_btn = Button(experimental_miscellaneous_frame, text="Unlock Reels", command=cmd_set_free_mode,
                           activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1), name='free_btn')
@@ -5662,15 +5710,6 @@ def create_widgets():
         free_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
         as_tooltips.add(free_btn, "Used to be a standard button in ALT-Scann8, removed since now motors are always "
                                   "unlocked when not performing any specific operation.")
-        experimental_row += 1
-
-        # Emergency exit (exit without saving)
-        emergency_exit_btn = Button(experimental_miscellaneous_frame, text="Emergency Exit",
-                                    command=cmd_app_emergency_exit, activebackground='#f0f0f0', relief=RAISED,
-                                    font=("Arial", FontSize - 1), name='emergency_exit_btn')
-        emergency_exit_btn.widget_type = "experimental"
-        emergency_exit_btn.grid(row=experimental_row, column=0, columnspan=2, padx=x_pad, pady=y_pad)
-        as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
         experimental_row += 1
 
         # Spinbox to select Preview module
