@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.00"
-__date__ = "2025-02-16"
-__version_highlight__ = "UI redesign"
+__version__ = "1.12.01"
+__date__ = "2025-02-17"
+__version_highlight__ = "Few bugfixes (exceptions due to referencing unaccesible widgets)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -914,9 +914,9 @@ def cmd_settings_popup_accept():
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
 
-    detect_misaligned_frames_btn.config(state = NORMAL if (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
-    scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
-    misaligned_tolerance_spinbox.config(state = NORMAL if detect_misaligned_frames.get() and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+    if not SimplifiedMode:
+        detect_misaligned_frames_btn.config(state = NORMAL if (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
+        scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -1103,7 +1103,6 @@ def cmd_settings_popup():
     options_ok_btn.grid(row=options_row, column=1, padx=10, pady=5, sticky='E')
 
     # arrange status for multidependent widgets. Initially enabled, increase counter for each disable condition   
-    detect_misaligned_frames_btn.config(state = NORMAL if FileType != "dng" or can_check_dng_frames_for_misalignment else DISABLED) 
     misaligned_tolerance_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
     misaligned_tolerance_spinbox.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
@@ -3664,8 +3663,9 @@ def load_session_data_post_init():
 
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
-        detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
-        scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+        if not SimplifiedMode:
+            detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+            scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
     # Initialize camera resolution with value set, whether default or from configuration
     PiCam2_change_resolution()
