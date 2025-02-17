@@ -2413,7 +2413,7 @@ def simulate_pt():
             capture_loop_simulated()
             Simulated_Frame_displayed = True
         if PlotterEnabled:
-            UpdatePlotterWindow(uv_level, pt_level)
+            UpdatePlotterWindow(uv_level, pt_level, (10-ScanSpeedValue)//2)
         if not Simulated_Frame_detected and uv_level > pt_level:
             Simulated_Frame_detected = True # Display in next slot, to allow plotter to update correctly
         elif Simulated_Frame_detected  and uv_level < pt_level:
@@ -2869,7 +2869,7 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
 
 
 
-def UpdatePlotterWindow(PTValue, ThresholdLevel):
+def UpdatePlotterWindow(PTValue, ThresholdLevel, extra_shift = 0):
     global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel, PlotterScroll, PlotterWindowPos
 
     if plotter_canvas == None:
@@ -2894,7 +2894,7 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
     if PlotterScroll:
         # Shift the graph to the left
         for item in plotter_canvas.find_all():
-            plotter_canvas.move(item, -5, 0)
+            plotter_canvas.move(item, -(5 + extra_shift), 0)
 
     usable_height = plotter_height - 15
     if PlotterScroll:
@@ -2903,20 +2903,19 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
             plotter_canvas.delete(item)
     else:
         # Delete lines we are about to overwrite
-        for item in plotter_canvas.find_overlapping(PlotterWindowPos+1, 0, PlotterWindowPos+6, plotter_height-1):
+        for item in plotter_canvas.find_overlapping(PlotterWindowPos+1, 0, PlotterWindowPos+6+extra_shift, plotter_height-1):
             plotter_canvas.delete(item)
-
     if PlotterScroll:
         # Draw the new line segment for PT Level
-        plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
+        plotter_canvas.create_line(plotter_width - (6 + extra_shift), 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
                                    plotter_width - 1, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
                                    fill="blue")
     else:
         plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevPTValue / (MaxPT / usable_height)),
-                                PlotterWindowPos + 5, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
+                                PlotterWindowPos + 5 + extra_shift, 15 + usable_height - (PTValue / (MaxPT / usable_height)), width=1,
                                 fill="blue")
-        plotter_canvas.create_line(PlotterWindowPos+6, 0,
-                                PlotterWindowPos + 6, 15 + usable_height,
+        plotter_canvas.create_line(PlotterWindowPos + 6 + extra_shift, 0,
+                                PlotterWindowPos + 6 + extra_shift, 15 + usable_height,
                                 fill="black")
 
     # Draw the new line segment for threshold
@@ -2926,17 +2925,17 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel):
         ThresholdLevel = PrevThresholdLevel
 
     if PlotterScroll:
-        plotter_canvas.create_line(plotter_width - 6, 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
+        plotter_canvas.create_line(plotter_width - (6 + extra_shift), 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
                                    plotter_width - 1, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
                                    width=1, fill="red")
     else:
         plotter_canvas.create_line(PlotterWindowPos, 15 + usable_height - (PrevThresholdLevel / (MaxPT / usable_height)),
-                                PlotterWindowPos + 5, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
+                                PlotterWindowPos + 5 + extra_shift, 15 + usable_height - (ThresholdLevel / (MaxPT / usable_height)),
                                 width=1, fill="red")
     PrevPTValue = PTValue
     PrevThresholdLevel = ThresholdLevel
     if not PlotterScroll:
-        PlotterWindowPos = (PlotterWindowPos + 5) % plotter_width
+        PlotterWindowPos = (PlotterWindowPos + 5 + extra_shift) % plotter_width
 
 
 # send_arduino_command: No response expected
