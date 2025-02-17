@@ -68,6 +68,7 @@ try:
     SimulatedRun = False
 except ImportError:
     SimulatedRun = True
+    SimulatedArduinoVersion = None
 
 try:
     import qrcode
@@ -487,8 +488,7 @@ ConfigData = {
     "FramesToGo": FramesToGo
 }
 
-Simulated_PT_Levels = [(58, 371),(18, 371),(41, 371),(49, 371),(169, 375),(336, 374),(385, 373),(421, 373),
-                        (546, 373),(382, 373),(52, 373),(14, 373),(59, 373),(41, 373),(151, 373),(269, 371),
+Simulated_PT_Levels = [(546, 373),(382, 373),(52, 373),(14, 373),(59, 373),(41, 373),(151, 373),(269, 371),
                         (371, 370),(408, 370),(548, 370),(420, 370),(37, 370),(31, 370),(43, 370),(26, 370),
                         (94, 380),(291, 378),(395, 377),(465, 377),(546, 377),(313, 377),(39, 377),(6, 377),
                         (33, 377),(37, 377),(68, 375),(283, 373),(380, 372),(432, 372),(548, 372),(356, 372),
@@ -502,6 +502,8 @@ Simulated_PT_Levels = [(58, 371),(18, 371),(41, 371),(49, 371),(169, 375),(336, 
                         (68, 368),(15, 368),(53, 368),(24, 368),(64, 373),(216, 371),(299, 370),(370, 369),
                         (408, 369),(542, 369),(376, 369),(27, 369),(22, 369)]
 Simulated_PT_Levels_idx = 0
+Simulated_Frame_detected = False
+Simulated_Frame_displayed = False
 
 # ********************************************************
 # ALT-Scann8 code
@@ -2400,13 +2402,23 @@ def capture(mode):
     ConfigData["CurrentFrame"] = str(CurrentFrame)
 
 def simulate_pt():
-    global Simulated_PT_Levels_idx
+    global Simulated_PT_Levels_idx, Simulated_Frame_detected, Simulated_Frame_displayed
     if ScanOngoing:
         # Retrieve the current item using the current index
         pt_value = Simulated_PT_Levels[Simulated_PT_Levels_idx]
+        uv_level = pt_value[0]*uv_brightness_value.get()//255
+        pt_level = (150 + pt_value[1]*FrameFineTuneValue//100) * uv_brightness_value.get()//255
+        if Simulated_Frame_detected and not Simulated_Frame_displayed:
+            # Call simulated scan
+            capture_loop_simulated()
+            Simulated_Frame_displayed = True
         if PlotterEnabled:
-            UpdatePlotterWindow(pt_value[0], 150 + pt_value[1]*FrameFineTuneValue//100)
-        
+            UpdatePlotterWindow(uv_level, pt_level)
+        if not Simulated_Frame_detected and uv_level > pt_level:
+            Simulated_Frame_detected = True # Display in next slot, to allow plotter to update correctly
+        elif Simulated_Frame_detected  and uv_level < pt_level:
+            Simulated_Frame_detected = False
+            Simulated_Frame_displayed = False
         # Move to the next item, wrapping around to 0 when we reach the end
         Simulated_PT_Levels_idx = (Simulated_PT_Levels_idx + 1) % len(Simulated_PT_Levels)
         win.after(15, simulate_pt)
@@ -2474,8 +2486,7 @@ def cmd_start_scan_simulated():
                 logging.error("No frames exist in folder, cannot simulate scan.")
                 tk.messagebox.showerror("Error!", "Folder " + CurrentDir + " does not contain any frames to simulate scan.")
                 ScanStopRequested = True
-            # Invoke capture_loop  a first time shen scan starts
-            win.after(500, capture_loop_simulated)
+            # Invoke simulate pt to start simulation
             win.after(10, simulate_pt)
 
 def stop_scan_simulated():
@@ -2569,9 +2580,6 @@ def capture_loop_simulated():
         else:
             FramesPerMinute = FPM_CalculatedValue
             scanned_Images_fps_value.set(f"{FPM_CalculatedValue / 60:.2f}")
-
-        # Invoke capture_loop one more time, as long as scan is ongoing
-        win.after(100, capture_loop_simulated)
 
         # display rolling averages
         if ExpertMode:
@@ -2999,7 +3007,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
             logging.info("Raspberry Pi Pico controller detected")
             Controller_version = "Pico "
         Controller_version += f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
-        win.title(f"ALT-Scann8 v{__version__} ({Controller_version})")  # setting title of the window
+        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
         refresh_qr_code()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
@@ -3808,9 +3816,12 @@ def create_main_window():
         destroy_widgets(win)
         win.deiconify()
     if SimulatedRun:
-        win.wm_title(string='ALT-Scann8 v' + __version__ + ' ***  SIMULATED RUN, NOT OPERATIONAL ***')
+        if SimulatedArduinoVersion == None:
+            win.title(f'ALT-Scann8 v{__version__} ***  SIMULATED RUN, NOT OPERATIONAL ***')
+        else:
+            win.title(f"ALT-Scann8 v{__version__} (Nano {SimulatedArduinoVersion})") # Real title for snapshots
     else:
-        win.title(f"ALT-Scann8 v{__version__} ({Controller_version})")  # setting title of the window
+        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
     screen_width = win.winfo_screenwidth()
     screen_height = win.winfo_screenheight()
@@ -5811,7 +5822,7 @@ def reset_controller():
 
 
 def main(argv):
-    global SimulatedRun
+    global SimulatedRun, SimulatedArduinoVersion
     global ExpertMode, ExperimentalMode, PlotterEnabled
     global LogLevel, LoggingMode
     global ALT_scann_init_done
@@ -5823,7 +5834,7 @@ def main(argv):
 
     DisableToolTips = False
 
-    opts, args = getopt.getopt(argv, "sexl:phntwf:b")
+    opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -5836,6 +5847,8 @@ def main(argv):
             CameraDisabled = True
         elif opt == '-l':
             LoggingMode = arg
+        elif  opt == '-a':
+            SimulatedArduinoVersion = arg
         elif opt == '-f':
             FontSize = int(arg)
         elif opt == '-b':
