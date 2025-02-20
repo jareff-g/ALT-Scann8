@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.02"
+__version__ = "1.12.03"
 __date__ = "2025-02-20"
-__version_highlight__ = "Few bugfixes (exceptions due to referencing unaccesible widgets)"
+__version_highlight__ = "Fix a couple of minor bugs reported on 1.12.02"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -909,8 +909,6 @@ def cmd_settings_popup_accept():
         BaseFolder = NewBaseFolder
         ConfigData["BaseFolder"] = str(BaseFolder)
 
-    capture_info_str.set(f"{FileType} - {CaptureResolution}")
-
     if refresh_ui:
         create_main_window()
         refresh_qr_code()
@@ -920,6 +918,8 @@ def cmd_settings_popup_accept():
                                 id_ExposureWbAdaptPause])
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
+
+    capture_info_str.set(f"{FileType} - {CaptureResolution}")
 
     if not SimplifiedMode:
         detect_misaligned_frames_btn.config(state = NORMAL if (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
@@ -5489,7 +5489,7 @@ def create_widgets():
         # Scan error counter
         detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
         detect_misaligned_frames_btn = tk.Checkbutton(frame_alignment_frame, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
-                                        font=("Arial", FontSize - 1), text="Detect misaligned frames", command=cmd_detect_misaligned_frames)
+                                        font=("Arial", FontSize - 1), text="Bad frames", command=cmd_detect_misaligned_frames)
         detect_misaligned_frames_btn.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
         scan_error_counter_value = tk.StringVar(value="0 (0%)")
