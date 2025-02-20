@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.01"
-__date__ = "2025-02-17"
+__version__ = "1.12.02"
+__date__ = "2025-02-20"
 __version_highlight__ = "Few bugfixes (exceptions due to referencing unaccesible widgets)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -48,7 +48,12 @@ import logging
 import sys
 import getopt
 
-import numpy as np
+try:
+    import numpy as np
+    numpy_loaded = True
+except ImportError:
+    numpy_loaded = False
+
 
 try:
     import psutil
@@ -904,6 +909,8 @@ def cmd_settings_popup_accept():
         BaseFolder = NewBaseFolder
         ConfigData["BaseFolder"] = str(BaseFolder)
 
+    capture_info_str.set(f"{FileType} - {CaptureResolution}")
+
     if refresh_ui:
         create_main_window()
         refresh_qr_code()
@@ -1378,7 +1385,7 @@ def manual_scan_advance_frame_fraction(steps):
     if not SimulatedRun:
         send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
         time.sleep(0.2)
-        capture('preview')
+        capture('normal')
         time.sleep(0.2)
 
 
@@ -1398,7 +1405,7 @@ def cmd_manual_scan_take_snap():
         time.sleep(0.2)
         send_arduino_command(CMD_ADVANCE_FRAME)
         time.sleep(0.2)
-        capture('preview')
+        capture('normal')
         time.sleep(0.2)
 
 
@@ -1438,10 +1445,10 @@ def cmd_advance_movie(from_arduino=False):
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='■', bg='red',
+        AdvanceMovie_btn.config(text='>|', bg='red',
                                 fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='▶', bg=save_bg,
+        AdvanceMovie_btn.config(text='>', bg=save_bg,
                                 fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
@@ -1457,10 +1464,10 @@ def cmd_retreat_movie():
 
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
-        retreat_movie_btn.config(text='■', bg='red',
+        retreat_movie_btn.config(text='|<', bg='red',
                                 fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        retreat_movie_btn.config(text='◀', bg=save_bg,
+        retreat_movie_btn.config(text='<', bg=save_bg,
                                 fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
     RetreatMovieActive = not RetreatMovieActive
     # Send instruction to Arduino
@@ -1483,7 +1490,7 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        rewind_btn.config(text='◀◀ ■', bg='red', fg='white',
+        rewind_btn.config(text='|<<', bg='red', fg='white',
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1505,7 +1512,7 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        rewind_btn.config(text='◀◀', bg=save_bg, fg=save_fg,
+        rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1543,7 +1550,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         FastForwardActive = True
         # Update button text
-        fast_forward_btn.config(text='▶▶■', bg='red', fg='white', relief=SUNKEN)
+        fast_forward_btn.config(text='>>|', bg='red', fg='white', relief=SUNKEN)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
@@ -1564,7 +1571,7 @@ def cmd_fast_forward_movie():
         FastForwardActive = False
 
     if not FastForwardActive:
-        fast_forward_btn.config(text='▶▶', bg=save_bg, fg=save_fg, relief=RAISED)
+        fast_forward_btn.config(text='>>', bg=save_bg, fg=save_fg, relief=RAISED)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
 
@@ -1725,6 +1732,7 @@ def capture_save_thread(queue, event, id):
             break
         # Invert image if button selected
         is_dng = FileType == 'dng'
+        is_png = FileType == 'png'
         # Extract info from message
         type = message[0]
         if type == REQUEST_TOKEN:
@@ -1740,11 +1748,11 @@ def capture_save_thread(queue, event, id):
         frame_idx = message[2]
         hdr_idx = message[3]
         if is_dng:
-            # Saving DNG implies passing a request, not an image, therefore no additional checks (no negative allowed)
+            # Saving DNG/PNG implies passing a request, not an image, therefore no additional checks (no negative allowed)
             if hdr_idx > 1:  # Hdr frame 1 has standard filename
                 request.save_dng(HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
             else:  # Non HDR
-                request.save_dng(FrameFilenamePattern % (frame_idx, FileType))
+                request.save_dng(FrameFilenamePattern % (frame_idx, FileType))                    
                 if DetectMisalignedFrames and can_check_dng_frames_for_misalignment:
                     captured_image = request.make_array('main')[:,:,0]
             request.release()   # Release request ASAP (delay frame alignment check)
@@ -1758,7 +1766,9 @@ def capture_save_thread(queue, event, id):
                           str(round((time.time() - curtime) * 1000, 1)))
         else:
             # If not is_dng AND negative_image AND request: Convert to image now, and do a PIL save
-            if not NegativeImage and type == REQUEST_TOKEN:
+            if type == REQUEST_TOKEN:
+                if NegativeImage:   # Warning  case
+                    logging.warning("Cannot reverse a PiCamera2 request, saving as captured.")
                 if hdr_idx > 1:  # Hdr frame 1 has standard filename
                     request.save('main',
                                  HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
@@ -3207,6 +3217,8 @@ def custom_spinboxes_kbd_lock(widget):
 def except_widget_global_enable(except_button, enabled):
     global win
     except_widget_global_enable_aux(except_button, enabled, win)
+    widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
+                        id_HdrCaptureActive, id_HdrBracketAuto])
 
 
 def except_widget_global_enable_aux(except_button, enabled, widget):
@@ -3667,6 +3679,9 @@ def load_session_data_post_init():
             detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
             scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
+        # Display current capture settings as loaded from file
+        capture_info_str.set(f"{FileType} - {CaptureResolution}")
+
     # Initialize camera resolution with value set, whether default or from configuration
     PiCam2_change_resolution()
 
@@ -3805,9 +3820,8 @@ def create_main_window():
     global WinInitDone, as_tooltips
     global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
     global screen_width, screen_height
-    resolution_font = [(629, 6), (677, 7), (728, 8), (785, 9), (831, 10), (895, 11), (956, 12), (1005, 13), (1045, 14),
-                       (1103, 15),
-                       (1168, 16), (1220, 17), (1273, 18)]
+    resolution_font = [(590, 6), (628, 7), (672, 8), (718, 9), (771, 10), (823, 11), (882, 12), (932, 13), (974, 14),
+                       (1022, 15), (1087, 16), (1149, 17), (1195, 18)]
 
     if win is None:
         win = tkinter.Tk()  # creating the main window and storing the window object in 'win'
@@ -4488,13 +4502,10 @@ def create_widgets():
     global rpi_temp_value_label
     global start_btn
     global folder_frame_target_dir
-    global exposure_frame
     global film_type_S8_rb, film_type_R8_rb, film_type
     global save_bg, save_fg
-    global PreviewStatus
     global auto_exp_wb_change_pause
     global auto_exp_wb_wait_btn
-    global decrease_exp_btn, increase_exp_btn
     global film_hole_frame_top, film_hole_frame_bottom
     global FilmHoleHeightTop, FilmHoleHeightBottom, FilmHoleY_Top, FilmHoleY_Bottom
     global real_time_display_checkbox, real_time_display
@@ -4502,7 +4513,6 @@ def create_widgets():
     global auto_stop_enabled_checkbox, auto_stop_enabled
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas
-    global hdr_btn
     global steps_per_frame_value, frame_fine_tune_value
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
@@ -4527,13 +4537,10 @@ def create_widgets():
     global hdr_bracket_auto, hdr_merge_in_place, hdr_bracket_width_auto_checkbox, hdr_merge_in_place_checkbox
     global frames_to_go_str, FramesToGo, frames_to_go_time_str
     global retreat_movie_btn, manual_scan_checkbox
-    global file_type_dropdown, file_type_dropdown_selected
-    global resolution_dropdown
+    global file_type_dropdown_selected
     global Scanned_Images_number, scanned_Images_time_value, scanned_Images_fps_value, scanned_images_number_label
-    global resolution_label, file_type_label
     global existing_folder_btn, new_folder_btn
     global autostop_no_film_rb, autostop_counter_zero_rb, autostop_type
-    global full_ui_checkbox
     global AE_enabled, AWB_enabled
     global extended_frame, expert_frame, experimental_frame
     global time_save_image_value, time_preview_display_value, time_awb_value, time_autoexp_value
@@ -4631,7 +4638,7 @@ def create_widgets():
     bottom_area_row = 0
 
     # Retreat movie button (slow backward through filmgate)
-    retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
+    retreat_movie_btn = Button(top_left_area_frame, text="<", command=cmd_retreat_movie,
                                 activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
                                 name='retreat_movie_btn')
     retreat_movie_btn.widget_type = "general"
@@ -4641,7 +4648,7 @@ def create_widgets():
                                         "reels in left position in order to avoid film jamming at film gate.")
 
     # Advance movie button (slow forward through filmgate)
-    AdvanceMovie_btn = Button(top_left_area_frame, text="▶", command=cmd_advance_movie,
+    AdvanceMovie_btn = Button(top_left_area_frame, text=">", command=cmd_advance_movie,
                               activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
                               name='advanceMovie_btn')
     AdvanceMovie_btn.widget_type = "general"
@@ -4667,13 +4674,13 @@ def create_widgets():
     snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    rewind_btn = Button(top_left_area_frame, text="◀◀", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
+    rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
                         activebackground='#f0f0f0', relief=RAISED, name='rewind_btn')
     rewind_btn.widget_type = "general"
     rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    fast_forward_btn = Button(top_left_area_frame, text="▶▶", font=("Arial", FontSize + 3), height=2,
+    fast_forward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize + 3), height=2,
                              command=cmd_fast_forward_movie, activebackground='#f0f0f0', relief=RAISED,
                              name='fast_forward_btn')
     fast_forward_btn.widget_type = "general"
@@ -4728,19 +4735,19 @@ def create_widgets():
                              activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_minus_btn')
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="◀", height=1, command=cmd_set_focus_left, state='disabled',
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="⇐", height=1, command=cmd_set_focus_left, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_lf_btn')
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="▲", height=1, command=cmd_set_focus_up, state='disabled',
+    focus_up_btn = Button(Focus_btn_grid_frame, text="⇑", height=1, command=cmd_set_focus_up, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_up_btn')
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="▼", height=1, command=cmd_set_focus_down, state='disabled',
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="⇓", height=1, command=cmd_set_focus_down, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_dn_btn')
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="▶", height=1, command=cmd_set_focus_right, state='disabled',
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="⇒", height=1, command=cmd_set_focus_right, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_rt_btn')
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
@@ -4849,19 +4856,20 @@ def create_widgets():
     # Create vertical button column at right *************************************
     # Application Exit button
     top_right_area_row = 0
-    exit_btn = Button(top_right_area_frame, text="Exit", height=2, command=cmd_app_standard_exit, activebackground='#f0f0f0',
-                      font=("Arial", FontSize), name='exit_btn')
-    exit_btn.widget_type = "general"
-    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
-    as_tooltips.add(exit_btn, "Exit ALT-Scann8.")
 
     # Emergency exit (exit without saving)
     emergency_exit_btn = Button(top_right_area_frame, text="Exit (do not save)", height=1, command=cmd_app_emergency_exit, 
                                 activebackground='red', activeforeground='white', relief=RAISED,
                                 font=("Arial", FontSize - 1), name='emergency_exit_btn')
     emergency_exit_btn.widget_type = "general"
-    emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='SEW')
+    emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
     as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
+
+    exit_btn = Button(top_right_area_frame, text="Exit", height=2, command=cmd_app_standard_exit, activebackground='#f0f0f0',
+                      font=("Arial", FontSize), name='exit_btn')
+    exit_btn.widget_type = "general"
+    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='SEW')
+    as_tooltips.add(exit_btn, "Exit ALT-Scann8.")
 
     # Start scan button
     if SimulatedRun:
@@ -5879,6 +5887,10 @@ def main(argv):
         init_logging()
 
     ALT_scann_init_done = False
+
+    if not numpy_loaded:
+        logging.error("Numpy library could no tbe loaded.\r\nPlease install it with this command 'sudo apt install python3-numpy'.")
+        return
 
     win = tkinter.Tk()  # Create temporary main window to support popups before main window is created
     win.withdraw()  # Hide temporary main window

@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.5"
-#define  __date__       "2025-02-08"
-#define  __version_highlight__  "Report PT level when passing new frame response (RSP_FRAME_AVAILABLE)"
+#define __version__     "1.1.6"
+#define  __date__       "2025-02-20"
+#define  __version_highlight__  "Call CollectOutgoingFilm also when not scanning (may be manual scan being used)"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -594,6 +594,7 @@ void loop() {
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
+                        CollectOutgoingFilmNow();
                         SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
@@ -602,6 +603,7 @@ void loop() {
                         // Parameter validation (can be 5 or 20, but we allow a bit more). Mainly to avoid crazy values
                         if (param >=1 and param <= 40)
                             capstan_advance(param);
+                        CollectOutgoingFilmNow();
                         SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                 }
@@ -784,8 +786,6 @@ boolean FastForwardFilm(int UI_Command) {
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(void) {
-    static boolean CollectOngoing = true;
-
     static unsigned long TimeToCollect = 0;
     unsigned long CurrentTime = millis();
 
@@ -804,6 +804,20 @@ void CollectOutgoingFilm(void) {
             TimeToCollect = CurrentTime + collect_timer;
         else
             TimeToCollect = CurrentTime + 3;
+    }
+}
+
+// Function required to collect the film when usign manual scan
+// Since there is no dedicated step, and we do not want to lock motor C, 
+// we collect all pending film in a single loop, with a 3ms delay to mimick the standard collect
+void CollectOutgoingFilmNow(void) {
+    TractionSwitchActive = digitalRead(TractionStopPin);
+    while (!TractionSwitchActive) {  //Motor allowed to turn
+        digitalWrite(MotorC_Stepper, LOW);
+        digitalWrite(MotorC_Stepper, HIGH);
+        // digitalWrite(MotorC_Stepper, LOW);
+        TractionSwitchActive = digitalRead(TractionStopPin);
+        delay(10);
     }
 }
 
