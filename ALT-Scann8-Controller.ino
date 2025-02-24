@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.6"
-#define  __date__       "2025-02-20"
-#define  __version_highlight__  "Call CollectOutgoingFilm also when not scanning (may be manual scan being used)"
+#define __version__     "1.1.7"
+#define  __date__       "2025-02-24"
+#define  __version_highlight__  "Modify capstan_advance to perform progressive acceleration/deceleration when more then 20 steps or so"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -153,7 +153,7 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8;                  // R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
-int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP))); // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
@@ -595,16 +595,16 @@ void loop() {
                         else
                             capstan_advance(MinFrameStepsR8);
                         CollectOutgoingFilmNow();
-                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                        ///SetReelsAsNeutral(HIGH, LOW, LOW);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
                         // Parameter validation (can be 5 or 20, but we allow a bit more). Mainly to avoid crazy values
-                        if (param >=1 and param <= 40)
+                        if (param >=1 and param <= 400)
                             capstan_advance(param);
                         CollectOutgoingFilmNow();
-                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                        ///SetReelsAsNeutral(HIGH, LOW, LOW); // Was all HIGH, changed for VFD
                         break;
                 }
                 break;
@@ -702,7 +702,7 @@ void loop() {
 
 void AdjustMinFrameStepsFromCapstanDiameter(float diameter) {
     MinFrameStepsR8 = R8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
-    MinFrameStepsS8 = S8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+    MinFrameStepsS8 = S8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for S8 (286 aprox)
 }
 
 void SetReelsAsNeutral(boolean ReelA, boolean ReelB, boolean ReelC) {
@@ -730,7 +730,7 @@ boolean RewindFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            SetReelsAsNeutral(HIGH, LOW, LOW);
+            ///SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_REWIND_ENDED, 0, 0);
         }
@@ -764,7 +764,7 @@ boolean FastForwardFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            SetReelsAsNeutral(HIGH, LOW, LOW);
+            ///SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
         }
@@ -1014,12 +1014,22 @@ boolean IsHoleDetected() {
     return(hole_detected);
 }
 
+// 24/02/2025: Modify to do progressive acceleration deceleration when more than 20 steps or so
+// For the moment we do it inside the function, but maybe should be spllit in slices in the main loop
 void capstan_advance(int steps) {
+    int middle, delay_factor;
+
+    if (steps > 20) 
+        middle = int(steps/2);
     for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
-        if (steps > 1)
-            delayMicroseconds(500 + (10-ScanSpeed)*50);
+        if (steps > 20) {
+            delay_factor = (x < middle) ? int(middle - x) : (steps - x);
+            delayMicroseconds(500 + delay_factor*50);
+        }
+        else if (steps > 1)
+            delayMicroseconds(500 + (10-ScanSpeed)*50);        
     }
     digitalWrite(MotorB_Stepper, LOW);
 }

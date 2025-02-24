@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.03"
-__date__ = "2025-02-20"
-__version_highlight__ = "Fix a couple of minor bugs reported on 1.12.02"
+__version__ = "1.12.04"
+__date__ = "2025-02-24"
+__version_highlight__ = "Visual Frame Detection"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -47,6 +47,7 @@ from datetime import datetime
 import logging
 import sys
 import getopt
+import math
 
 try:
     import numpy as np
@@ -145,6 +146,7 @@ FastForwardActive = False
 FastForwardErrorOutstanding = False
 FastForwardEndOutstanding = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
+FrameDetectMode = 'PFD'    # By default scanner works in traditional mode, with Phototransistor Frame Detection (vs VFD)
 ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
 ScanProcessError = False  # To be set to true upon reception of Arduino event
@@ -165,6 +167,14 @@ max_inactivity_delay = reference_inactivity_delay
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 CapstanDiameter = 14.3
+# Need to replicate here the steps per frame done in arduino, for VFD mode
+S8_HEIGHT = 4.01
+R8_HEIGHT = 3.3
+NEMA_STEP_DEGREES = 1.8
+NEMA_MICROSTEPS_IN_STEP = 16
+FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
+FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
+steps_to_next = 0
 # Phototransistor reported level when hole is detected
 PTLevelS8 = 80
 PTLevelR8 = 120
@@ -810,7 +820,7 @@ def cmd_settings_popup_accept():
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
-    global CapstanDiameter, capstan_diameter_float
+    global CapstanDiameter, capstan_diameter_float, FrameStepsR8, FrameStepsS8
     global ConfigData, BaseFolder
 
     ConfigData["PopupPos"] = options_dlg.geometry()
@@ -869,6 +879,8 @@ def cmd_settings_popup_accept():
     if CapstanDiameter != capstan_diameter_float.get():
         CapstanDiameter = capstan_diameter_float.get()
         ConfigData["CapstanDiameter"] = CapstanDiameter
+        FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
+        FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
@@ -1389,6 +1401,11 @@ def manual_scan_advance_frame_fraction(steps):
         time.sleep(0.2)
 
 
+def scan_advance_steps(steps):
+    if not SimulatedRun:
+        send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
+
+
 def cmd_manual_scan_advance_frame_fraction_5():
     manual_scan_advance_frame_fraction(5)
 
@@ -1601,7 +1618,7 @@ def fast_forward_loop():
 # *******************************************************************
 def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
-    height, width = img.shape
+    height, width, _ = img.shape
 
     # Slice only the left part of the image
     if slice_width > width:
@@ -1609,7 +1626,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     sliced_image = img[:, :slice_width]
 
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(sliced_image, 200, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(sliced_image, 220, 255, cv2.THRESH_BINARY)
     # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
@@ -1653,6 +1670,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
             bigger = end-start
             center = (start + end) // 2
             result = center
+
     if result != 0:
         if result >= middle - margin and result <= middle + margin:
             return True, 0
@@ -2738,6 +2756,42 @@ def capture_loop():
                                       "Please delete some files before continuing current scan.")
             disk_space_error_to_notify = False
     elif ScanOngoing:
+        if FrameDetectMode == 'VFD':
+            # If we are in Visual Frame Detection mode, we need to:
+            #   - Capture a snap
+            #   - Check alignment
+            #   - If alignment OK, save it, otherwise perform additional steps until OK
+            time.sleep(0.2) # wait for film to settle
+            sample_image = camera.capture_image("main")
+            # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
+            image_np = np.array(sample_image)  # PIL gives RGB by default
+            image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
+            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 1, slice_width = 10)
+            pixels_per_step = sample_image.size[1] // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
+            if not centered and offset > 0: # If not centered and offset < 0 it is too late, film cannot go back, so capture as is (at most flag it as bad)
+                #draw_preview_image(sample_image, 0, 0)
+                if (offset > 100):
+                    steps_to_advance = abs((offset-50)//pixels_per_step)
+                elif offset > 30:
+                    steps_to_advance = 5
+                else:
+                    steps_to_advance = 1
+                if steps_to_advance > 0:
+                    scan_advance_steps(steps_to_advance)
+                    time.sleep(0.1)
+                    logging.debug(f"VFD: Advancing frame {CurrentFrame} by {steps_to_advance} steps, @{pixels_per_step} pixels per step = ({pixels_per_step*steps_to_advance} pixels)")
+                    win.after(100, capture_loop)
+                    return # loog again to see if next attempt is OK
+                else:
+                    logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
+            else:
+                NewFrameAvailable = True
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) - abs(offset//pixels_per_step) - 10 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                if centered:
+                    logging.info(f"VFD: {CurrentFrame} was captured within {offset} pixels of the right position.")
+                else:
+                    logging.warning(f"VFD: {CurrentFrame} was captured past the correct position (by {offset} pixels), it might not be correct.")
+            # If centered, or gone too far, or offset too small to handle, let the code flow in the standar dflow to do the normal capture
         if NewFrameAvailable:
             # Update remaining time
             aux = frames_to_go_str.get()
@@ -2760,21 +2814,26 @@ def capture_loop():
             register_frame()
             CurrentStill = 1
             capture('normal')
-            if not SimulatedRun:
-                try:
-                    # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
-                    NewFrameAvailable = False
-                    logging.debug("Frame %i captured.", CurrentFrame)
-                    send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
-                except IOError:
-                    CurrentFrame -= 1
-                    NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
-                    # Log error to console
-                    logging.warning("Error while telling Arduino to move to next Frame.")
-                    logging.warning("Frame %i capture to be tried again.", CurrentFrame)
-                    win.after(5, capture_loop)
-                    return
-
+            if FrameDetectMode == 'PFD':
+                if not SimulatedRun:
+                    try:
+                        # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
+                        NewFrameAvailable = False
+                        logging.debug("Frame %i captured.", CurrentFrame)
+                        send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
+                    except IOError:
+                        CurrentFrame -= 1
+                        NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
+                        # Log error to console
+                        logging.warning("Error while telling Arduino to move to next Frame.")
+                        logging.warning("Frame %i capture to be tried again.", CurrentFrame)
+                        win.after(5, capture_loop)
+                        return
+            else:   # VFD
+                logging.debug(f"VFD: Frame {CurrentFrame-1} captured, advancing {steps_to_next} steps to next one")
+                scan_advance_steps(steps_to_next)
+                time.sleep(1)
+                NewFrameAvailable = False
             ConfigData["CurrentDate"] = str(datetime.now())
             ConfigData["CurrentDir"] = CurrentDir
             ConfigData["CurrentFrame"] = str(CurrentFrame)
@@ -2993,7 +3052,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
                 logging.warning(
                     f"Non-critical IOError ({e}) while checking incoming event from Arduino. Will check again.")
 
-    if ScanOngoing and time.time() > last_frame_time:
+    if ScanOngoing and FrameDetectMode == 'PFD' and time.time() > last_frame_time:  # Do not force new event in case of VFD - Arduino only asked to move the C motor
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
@@ -3349,6 +3408,7 @@ def load_session_data_post_init():
     global FileType, FilmType, CapstanDiameter
     global CaptureResolution
     global AutoExpEnabled, AutoWbEnabled
+    global FrameDetectMode
 
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
@@ -3430,6 +3490,12 @@ def load_session_data_post_init():
                 if 'HdrBracketShift' in ConfigData:
                     HdrBracketShift = ConfigData["HdrBracketShift"]
                     hdr_bracket_shift_value.set(HdrBracketShift)
+                if 'VFD' in ConfigData:
+                    if ConfigData["VFD"]:
+                        FrameDetectMode = 'VFD'
+                    else:
+                        FrameDetectMode = 'PFD'
+                    vfd_mode_value.set(ConfigData["VFD"])
         else:   # If not loading previous session status, restore to default
             ConfigData["NegativeCaptureActive"] = NegativeImage
             ConfigData["FilmType"] = FilmType
@@ -3481,6 +3547,11 @@ def load_session_data_post_init():
                 aux = int(ConfigData["UVBrightness"])
                 send_arduino_command(CMD_SET_UV_LEVEL, aux)
                 uv_brightness_value.set(aux)
+            if 'VFD' in ConfigData:
+                if ConfigData['VFD']:
+                    FrameDetectMode = 'VFD'
+                else:
+                    FrameDetectMode = 'PFD'
         # Expert mode options
         if ExpertMode:
             if 'ExposureWbAdaptPause' in ConfigData:
@@ -4287,6 +4358,16 @@ def uv_brightness_validation(new_value):
     return value_validation(new_value, uv_brightness_spinbox, 1, 255, 255)
 
 
+def cmd_vfd_mode():
+    global FrameDetectMode
+    if vfd_mode_value.get():
+        ConfigData['VFD'] = True
+        FrameDetectMode = 'VFD'
+    else:
+        ConfigData['VFD'] = False
+        FrameDetectMode = 'PFD'
+
+
 def cmd_stabilization_delay_selection():
     global StabilizationDelayValue
     StabilizationDelayValue = value_normalize(stabilization_delay_value, 0, 1000, 150)
@@ -4562,6 +4643,7 @@ def create_widgets():
     global uv_brightness_value, uv_brightness_spinbox
     global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
     global capture_info_str
+    global vfd_mode_value
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5782,6 +5864,14 @@ def create_widgets():
         as_tooltips.add(manual_uv_btn, "Manually switch UV led (to allow tunning using plotter)")
         experimental_row += 1
 
+        # VFD (Visual Frame Detection)
+        vfd_mode_value = tk.BooleanVar(value=FrameDetectMode=='VFD')
+        vfd_mode_btn = tk.Checkbutton(experimental_miscellaneous_frame, variable=vfd_mode_value, onvalue=True, offvalue=False,
+                                        font=("Arial", FontSize - 1), text="VFD", command=cmd_vfd_mode)
+        vfd_mode_btn.widget_type = "experimental"
+        vfd_mode_btn.grid(row=experimental_row, column=0, columnspan=2,padx=x_pad, pady=y_pad)
+        as_tooltips.add(vfd_mode_btn, "Activat eVFD mode (Visual Frame Detection)")
+
     # Adjust plotter size based on right  frames
     win.update_idletasks()
     if PlotterEnabled:
@@ -5840,7 +5930,7 @@ def main(argv):
     global win
 
     DisableToolTips = False
-
+    return
     opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
 
     for opt, arg in opts:
