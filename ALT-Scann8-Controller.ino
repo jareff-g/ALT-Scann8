@@ -74,6 +74,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SINGLE_STEP 40
 #define CMD_ADVANCE_FRAME 41
 #define CMD_ADVANCE_FRAME_FRACTION 42
+#define CMD_RUN_FILM_COLLECTION 43
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
@@ -594,17 +595,18 @@ void loop() {
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
-                        CollectOutgoingFilmNow();
-                        ///SetReelsAsNeutral(HIGH, LOW, LOW);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
-                        // Parameter validation (can be 5 or 20, but we allow a bit more). Mainly to avoid crazy values
+                        // Parameter validation: Can be 5 or 20 for manual scan, allow 400 for VFD)
                         if (param >=1 and param <= 400)
                             capstan_advance(param);
+                        break;
+                    case CMD_RUN_FILM_COLLECTION:   // Used by manual scan
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
+                        DebugPrint(">Collect film", param);
                         CollectOutgoingFilmNow();
-                        ///SetReelsAsNeutral(HIGH, LOW, LOW); // Was all HIGH, changed for VFD
                         break;
                 }
                 break;
@@ -1026,7 +1028,7 @@ void capstan_advance(int steps) {
         digitalWrite(MotorB_Stepper, HIGH);
         if (steps > 20) {
             delay_factor = (x < middle) ? int(middle - x) : (steps - x);
-            delayMicroseconds(500 + delay_factor*50);
+            delayMicroseconds(50 + min(500, delay_factor*50));
         }
         else if (steps > 1)
             delayMicroseconds(500 + (10-ScanSpeed)*50);        

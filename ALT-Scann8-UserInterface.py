@@ -131,6 +131,10 @@ FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
+vfd_CurrentFrame_previous = 0   # Used by VFD for automatic CapstanDiameter adjustment
+vfd_offset_previous = 0             # Used by VFD to calculate statistics
+vfd_steps_to_advance_previous = 0    # Used by VFD to calculate statistics
+vfd_attempts_on_same_frame = 0      # Used by VFD to calculate statistics
 frames_to_go_key_press_time = 0
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
@@ -172,8 +176,8 @@ S8_HEIGHT = 4.01
 R8_HEIGHT = 3.3
 NEMA_STEP_DEGREES = 1.8
 NEMA_MICROSTEPS_IN_STEP = 16
-FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
-FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
+FrameStepsR8 = 0
+FrameStepsS8 = 0
 steps_to_next = 0
 # Phototransistor reported level when hole is detected
 PTLevelS8 = 80
@@ -243,6 +247,7 @@ CMD_FILM_BACKWARD = 31
 CMD_SINGLE_STEP = 40
 CMD_ADVANCE_FRAME = 41
 CMD_ADVANCE_FRAME_FRACTION = 42
+CMD_RUN_FILM_COLLECTION = 43
 CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
 CMD_SET_FRAME_FINE_TUNE = 54
@@ -412,6 +417,7 @@ time_save_image = None
 time_preview_display = None
 time_awb = None
 time_autoexp = None
+vfd_pixels_per_step_roll_avg = None
 session_start_time = 0
 session_frames = 0
 max_wait_time = 5000
@@ -820,7 +826,7 @@ def cmd_settings_popup_accept():
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
     global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
-    global CapstanDiameter, capstan_diameter_float, FrameStepsR8, FrameStepsS8
+    global CapstanDiameter, capstan_diameter_float
     global ConfigData, BaseFolder
 
     ConfigData["PopupPos"] = options_dlg.geometry()
@@ -879,8 +885,7 @@ def cmd_settings_popup_accept():
     if CapstanDiameter != capstan_diameter_float.get():
         CapstanDiameter = capstan_diameter_float.get()
         ConfigData["CapstanDiameter"] = CapstanDiameter
-        FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
-        FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
+        adjust_default_frame_steps()
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
@@ -1383,6 +1388,14 @@ def cmd_set_auto_wb():
             camera.set_controls({"ColourGains": camera_colour_gains})
 
 
+# ********************************************************
+# Manual Scan & VFD related functions
+# ********************************************************
+def adjust_default_frame_steps():
+    global FrameStepsR8, FrameStepsS8
+    FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
+    FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
+
 def cmd_Manual_scan_activated_selection():
     global ManualScanEnabled
     ManualScanEnabled = Manual_scan_activated.get()
@@ -1399,11 +1412,17 @@ def manual_scan_advance_frame_fraction(steps):
         time.sleep(0.2)
         capture('normal')
         time.sleep(0.2)
+        run_film_collection()
 
 
 def scan_advance_steps(steps):
     if not SimulatedRun:
         send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
+
+
+def run_film_collection():
+    if not SimulatedRun:
+        send_arduino_command(CMD_RUN_FILM_COLLECTION)
 
 
 def cmd_manual_scan_advance_frame_fraction_5():
@@ -1424,7 +1443,7 @@ def cmd_manual_scan_take_snap():
         time.sleep(0.2)
         capture('normal')
         time.sleep(0.2)
-
+        run_film_collection()
 
 def rwnd_speed_down():
     global rwnd_speed_delay
@@ -2728,6 +2747,9 @@ def capture_loop():
     global session_frames, CurrentStill
     global disk_space_error_to_notify
     global AutoStopEnabled
+    global CapstanDiameter  # Temporary, check if it is a good idea to dynamically modify capstan diameter according to results
+    global vfd_attempts_on_same_frame, vfd_CurrentFrame_previous
+    global vfd_offset_previous, vfd_steps_to_advance_previous
 
     if ScanStopRequested:
         stop_scan()
@@ -2759,7 +2781,7 @@ def capture_loop():
         if FrameDetectMode == 'VFD':
             # If we are in Visual Frame Detection mode, we need to:
             #   - Capture a snap
-            #   - Check alignment
+            #   - Check alignment 
             #   - If alignment OK, save it, otherwise perform additional steps until OK
             time.sleep(0.2) # wait for film to settle
             sample_image = camera.capture_image("main")
@@ -2768,15 +2790,30 @@ def capture_loop():
             image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
             centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 1, slice_width = 10)
             pixels_per_step = sample_image.size[1] // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
+            if vfd_steps_to_advance_previous != 0 and vfd_offset_previous != -1:
+                vfd_pixels_per_step_roll_avg.add_value((vfd_offset_previous-offset)//vfd_steps_to_advance_previous)
+                print(f"Stats: Adding to rollign average: {vfd_offset_previous}-{offset} = {vfd_offset_previous-offset} // {vfd_steps_to_advance_previous} = {(vfd_offset_previous-offset)//vfd_steps_to_advance_previous}")
+            if vfd_pixels_per_step_roll_avg.get_average() != None:
+                print(f"Stats: pixels/step avg: {vfd_pixels_per_step_roll_avg.get_average():.1f}, min {vfd_pixels_per_step_roll_avg.get_min()}, max {vfd_pixels_per_step_roll_avg.get_max()}")
+            vfd_CurrentFrame_previous = CurrentFrame
             if not centered and offset > 0: # If not centered and offset < 0 it is too late, film cannot go back, so capture as is (at most flag it as bad)
+                if CurrentFrame == vfd_CurrentFrame_previous:
+                    vfd_attempts_on_same_frame += 1
                 #draw_preview_image(sample_image, 0, 0)
                 if (offset > 100):
-                    steps_to_advance = abs((offset-50)//pixels_per_step)
+                    steps_to_advance = min(20, abs((offset-50)//pixels_per_step))
+                elif offset > 50:
+                    steps_to_advance = 10
                 elif offset > 30:
                     steps_to_advance = 5
                 else:
                     steps_to_advance = 1
+                if vfd_attempts_on_same_frame > 1:
+                    print(f"VFD attempts on same frame {CurrentFrame} = {vfd_attempts_on_same_frame}, offset = {offset}, steps = {steps_to_advance}")
                 if steps_to_advance > 0:
+                    # Collect info to calculate (in practive) the number of pixels per step
+                    vfd_offset_previous = offset
+                    vfd_steps_to_advance_previous = steps_to_advance
                     scan_advance_steps(steps_to_advance)
                     time.sleep(0.1)
                     logging.debug(f"VFD: Advancing frame {CurrentFrame} by {steps_to_advance} steps, @{pixels_per_step} pixels per step = ({pixels_per_step*steps_to_advance} pixels)")
@@ -2786,12 +2823,21 @@ def capture_loop():
                     logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
             else:
                 NewFrameAvailable = True
-                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) - abs(offset//pixels_per_step) - 10 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 25 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
                 if centered:
                     logging.info(f"VFD: {CurrentFrame} was captured within {offset} pixels of the right position.")
+                    if vfd_attempts_on_same_frame > 10:
+                        CapstanDiameter +=0.1
+                        print(f"VFD frame {CurrentFrame} took too many attempts, increasing capstan diameter to  {CapstanDiameter:.1f}")
+                    else:
+                        print(f"VFD frame {CurrentFrame} capture OK !!!")
                 else:
-                    logging.warning(f"VFD: {CurrentFrame} was captured past the correct position (by {offset} pixels), it might not be correct.")
-            # If centered, or gone too far, or offset too small to handle, let the code flow in the standar dflow to do the normal capture
+                    logging.warning(f"VFD: Frame {CurrentFrame} was captured past the correct position (by {abs(offset)} pixels), it might not be correct.")
+                    if abs(offset) > 20:
+                        CapstanDiameter -=0.1
+                        print(f"VFD frame {CurrentFrame} captured past position, reducing capstan diameter to  {CapstanDiameter:.1f}")
+                vfd_attempts_on_same_frame = 0
+            # If centered, or gone too far, or offset too small to handle, let the code flow in the standard flow to do the normal capture
         if NewFrameAvailable:
             # Update remaining time
             aux = frames_to_go_str.get()
@@ -2830,9 +2876,11 @@ def capture_loop():
                         win.after(5, capture_loop)
                         return
             else:   # VFD
+                vfd_offset_previous = -1  # Set previous offset to -1 to prevent calculation of offset difference between different frames
                 logging.debug(f"VFD: Frame {CurrentFrame-1} captured, advancing {steps_to_next} steps to next one")
+                print(f"Advancing to next frame {steps_to_next} steps")
                 scan_advance_steps(steps_to_next)
-                time.sleep(1)
+                time.sleep(0.1)
                 NewFrameAvailable = False
             ConfigData["CurrentDate"] = str(datetime.now())
             ConfigData["CurrentDir"] = CurrentDir
@@ -4018,7 +4066,7 @@ def tscann8_init():
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
     global active_threads
-    global time_save_image, time_preview_display, time_awb, time_autoexp
+    global time_save_image, time_preview_display, time_awb, time_autoexp, vfd_pixels_per_step_roll_avg
     global hw_panel, hw_panel_installed
 
     if SimulatedRun:
@@ -4053,6 +4101,7 @@ def tscann8_init():
     time_preview_display = RollingAverage(50)
     time_awb = RollingAverage(50)
     time_autoexp = RollingAverage(50)
+    vfd_pixels_per_step_roll_avg = RollingAverage(50)
 
     create_main_window()
 
@@ -4064,6 +4113,9 @@ def tscann8_init():
         hw_panel = HwPanel(win, i2c)
     else:
         hw_panel = None
+
+    # Init default steps per frame (used by manual scan and VFD)
+    adjust_default_frame_steps()
 
     # Init HDR variables
     hdr_init()
@@ -5930,7 +5982,7 @@ def main(argv):
     global win
 
     DisableToolTips = False
-    return
+
     opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
 
     for opt, arg in opts:
