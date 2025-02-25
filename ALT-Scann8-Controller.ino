@@ -103,6 +103,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REPORT_PLOTTER_INFO 87
 #define RSP_SCAN_ENDED 88
 #define RSP_FILM_FORWARD_ENDED 89
+#define RSP_ADVANCE_FRAME_FRACTION 90
+
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -453,15 +455,17 @@ void loop() {
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
-                        ScanState = Sts_Scan;
+                        if (!param) {   // Traditional mode with phototransistor detection, go to dedicated state
+                            ScanState = Sts_Scan;
+                            StartFrameTime = micros();
+                            FilmDetectedTime = millis() + MaxFilmStallTime;
+                            NoFilmDetected = false;
+                            ScanSpeedDelay = OriginalScanSpeedDelay;
+                        }
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
                         scan_process_ongoing = true;
                         delay(50);     // Wait for PT to stabilize after switching UV led on
-                        StartFrameTime = micros();
-                        FilmDetectedTime = millis() + MaxFilmStallTime;
-                        NoFilmDetected = false;
-                        ScanSpeedDelay = OriginalScanSpeedDelay;
                         collect_timer = scan_collect_timer;
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -1028,12 +1032,13 @@ void capstan_advance(int steps) {
         digitalWrite(MotorB_Stepper, HIGH);
         if (steps > 20) {
             delay_factor = (x < middle) ? int(middle - x) : (steps - x);
-            delayMicroseconds(50 + min(500, delay_factor*50));
+            delayMicroseconds(50 + min(500, delay_factor*10));
         }
-        else if (steps > 1)
-            delayMicroseconds(500 + (10-ScanSpeed)*50);        
+        else if (steps >= 1)
+            delayMicroseconds(100);        
     }
     digitalWrite(MotorB_Stepper, LOW);
+    SendToRPi(RSP_ADVANCE_FRAME_FRACTION, steps, 0);
 }
 
 // ----- This is the function to "ScanFilm" -----

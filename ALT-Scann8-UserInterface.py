@@ -132,9 +132,9 @@ HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard fil
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
 vfd_CurrentFrame_previous = 0   # Used by VFD for automatic CapstanDiameter adjustment
-vfd_offset_previous = 0             # Used by VFD to calculate statistics
-vfd_steps_to_advance_previous = 0    # Used by VFD to calculate statistics
 vfd_attempts_on_same_frame = 0      # Used by VFD to calculate statistics
+steps_completed = False
+steps_submitted = False
 frames_to_go_key_press_time = 0
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
@@ -276,6 +276,7 @@ RSP_REPORT_AUTO_LEVELS = 86
 RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
 RSP_FILM_FORWARD_ENDED = 89
+RSP_ADVANCE_FRAME_FRACTION = 90
 
 # Options variables
 ExpertMode = True
@@ -801,6 +802,7 @@ def cmd_set_new_folder():
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_label
     DetectMisalignedFrames = detect_misaligned_frames.get()
+    ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
     scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
 
@@ -1416,7 +1418,10 @@ def manual_scan_advance_frame_fraction(steps):
 
 
 def scan_advance_steps(steps):
+    global steps_completed, steps_submitted
     if not SimulatedRun:
+        steps_completed = False
+        steps_submitted = True
         send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
 
 
@@ -1637,7 +1642,8 @@ def fast_forward_loop():
 # *******************************************************************
 def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
-    height, width, _ = img.shape
+    height = img.shape[0]
+    width = img.shape[1]
 
     # Slice only the left part of the image
     if slice_width > width:
@@ -1645,7 +1651,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     sliced_image = img[:, :slice_width]
 
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(sliced_image, 220, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(sliced_image, 250, 255, cv2.THRESH_BINARY)
     # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
@@ -2074,8 +2080,8 @@ def register_frame():
 
     # Get current time
     frame_time = time.time()
-    # Determine if we should start new count (last capture older than 5 seconds)
-    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 5:
+    # Determine if we should start new count (last capture older than 10 seconds) (increased from 5 due to VFD)
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 10:
         FPM_StartTime = frame_time
         FPM_LastMinuteFrameTimes.clear()
         FPM_CalculatedValue = -1
@@ -2710,7 +2716,7 @@ def start_scan():
             if not AutoExpEnabled:
                 camera.set_controls({"ExposureTime": int(int(exposure_value.get() * 1000))})
             logging.debug("Sending CMD_START_SCAN")
-            send_arduino_command(CMD_START_SCAN)
+            send_arduino_command(CMD_START_SCAN, FrameDetectMode == 'VFD')       # Pass first parameter as True if in VFD mode
 
         refresh_qr_code()
 
@@ -2749,7 +2755,8 @@ def capture_loop():
     global AutoStopEnabled
     global CapstanDiameter  # Temporary, check if it is a good idea to dynamically modify capstan diameter according to results
     global vfd_attempts_on_same_frame, vfd_CurrentFrame_previous
-    global vfd_offset_previous, vfd_steps_to_advance_previous
+    global scan_error_counter, scan_error_total_frames_counter
+    global steps_submitted, steps_completed
 
     if ScanStopRequested:
         stop_scan()
@@ -2783,59 +2790,63 @@ def capture_loop():
             #   - Capture a snap
             #   - Check alignment 
             #   - If alignment OK, save it, otherwise perform additional steps until OK
-            time.sleep(0.2) # wait for film to settle
+            if steps_submitted:
+                if not steps_completed:
+                    logging.debug(f"VFD: Frame {CurrentFrame}, waiting for response from Arduino to complete required steps")
+                    win.after(10, capture_loop)
+                    return # loog again to see if next attempt is OK
+                else:
+                    logging.debug(f"VFD: Frame {CurrentFrame}, response received comfirming required steps done")
+                    steps_submitted = False
+                    steps_completed = False
+            # time.sleep(0.05) # wait for film to settle (50 ms is enough, this is not the captured imnage, just to determine position)
             sample_image = camera.capture_image("main")
             # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
             image_np = np.array(sample_image)  # PIL gives RGB by default
             image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
-            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 1, slice_width = 10)
-            pixels_per_step = sample_image.size[1] // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
-            if vfd_steps_to_advance_previous != 0 and vfd_offset_previous != -1:
-                vfd_pixels_per_step_roll_avg.add_value((vfd_offset_previous-offset)//vfd_steps_to_advance_previous)
-                print(f"Stats: Adding to rollign average: {vfd_offset_previous}-{offset} = {vfd_offset_previous-offset} // {vfd_steps_to_advance_previous} = {(vfd_offset_previous-offset)//vfd_steps_to_advance_previous}")
-            if vfd_pixels_per_step_roll_avg.get_average() != None:
-                print(f"Stats: pixels/step avg: {vfd_pixels_per_step_roll_avg.get_average():.1f}, min {vfd_pixels_per_step_roll_avg.get_min()}, max {vfd_pixels_per_step_roll_avg.get_max()}")
+            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 0.6, slice_width = 30)
+            img_height = sample_image.size[1]
+            pixels_per_step = img_height // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
             vfd_CurrentFrame_previous = CurrentFrame
             if not centered and offset > 0: # If not centered and offset < 0 it is too late, film cannot go back, so capture as is (at most flag it as bad)
                 if CurrentFrame == vfd_CurrentFrame_previous:
                     vfd_attempts_on_same_frame += 1
                 #draw_preview_image(sample_image, 0, 0)
-                if (offset > 100):
-                    steps_to_advance = min(20, abs((offset-50)//pixels_per_step))
-                elif offset > 50:
+                if offset > 200:
                     steps_to_advance = 10
-                elif offset > 30:
+                elif offset > 100:
                     steps_to_advance = 5
                 else:
                     steps_to_advance = 1
                 if vfd_attempts_on_same_frame > 1:
-                    print(f"VFD attempts on same frame {CurrentFrame} = {vfd_attempts_on_same_frame}, offset = {offset}, steps = {steps_to_advance}")
+                    logging.debug(f"VFD attempts on same frame {CurrentFrame} = {vfd_attempts_on_same_frame}, offset = {offset}, steps = {steps_to_advance}")
                 if steps_to_advance > 0:
-                    # Collect info to calculate (in practive) the number of pixels per step
-                    vfd_offset_previous = offset
-                    vfd_steps_to_advance_previous = steps_to_advance
                     scan_advance_steps(steps_to_advance)
-                    time.sleep(0.1)
                     logging.debug(f"VFD: Advancing frame {CurrentFrame} by {steps_to_advance} steps, @{pixels_per_step} pixels per step = ({pixels_per_step*steps_to_advance} pixels)")
-                    win.after(100, capture_loop)
+                    win.after(10, capture_loop)
                     return # loog again to see if next attempt is OK
                 else:
                     logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
             else:
                 NewFrameAvailable = True
-                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 25 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 30 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                scan_error_total_frames_counter += 1
+                scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 if centered:
                     logging.info(f"VFD: {CurrentFrame} was captured within {offset} pixels of the right position.")
                     if vfd_attempts_on_same_frame > 10:
                         CapstanDiameter +=0.1
-                        print(f"VFD frame {CurrentFrame} took too many attempts, increasing capstan diameter to  {CapstanDiameter:.1f}")
+                        logging.debug(f"VFD frame {CurrentFrame} took too many attempts, increasing capstan diameter to  {CapstanDiameter:.1f}")
                     else:
-                        print(f"VFD frame {CurrentFrame} capture OK !!!")
+                        logging.debug(f"VFD frame {CurrentFrame} capture OK !!! (with small shift of {offset} pixels)")
                 else:
+                    #if (abs(offset) > int(img_height*0.05)):    # Do not count small deviations
+                    scan_error_counter += 1  
+                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     logging.warning(f"VFD: Frame {CurrentFrame} was captured past the correct position (by {abs(offset)} pixels), it might not be correct.")
                     if abs(offset) > 20:
                         CapstanDiameter -=0.1
-                        print(f"VFD frame {CurrentFrame} captured past position, reducing capstan diameter to  {CapstanDiameter:.1f}")
+                        logging.debug(f"VFD frame {CurrentFrame} captured past position, reducing capstan diameter to  {CapstanDiameter:.1f}")
                 vfd_attempts_on_same_frame = 0
             # If centered, or gone too far, or offset too small to handle, let the code flow in the standard flow to do the normal capture
         if NewFrameAvailable:
@@ -2876,11 +2887,8 @@ def capture_loop():
                         win.after(5, capture_loop)
                         return
             else:   # VFD
-                vfd_offset_previous = -1  # Set previous offset to -1 to prevent calculation of offset difference between different frames
-                logging.debug(f"VFD: Frame {CurrentFrame-1} captured, advancing {steps_to_next} steps to next one")
-                print(f"Advancing to next frame {steps_to_next} steps")
+                logging.debug(f"Frame {CurrentFrame}: Advancing to next frame usign {steps_to_next} steps")
                 scan_advance_steps(steps_to_next)
-                time.sleep(0.1)
                 NewFrameAvailable = False
             ConfigData["CurrentDate"] = str(datetime.now())
             ConfigData["CurrentDir"] = CurrentDir
@@ -3083,15 +3091,14 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global arduino_after
     global PtLevelValue, StepsPerFrame
     global scan_error_counter, scan_error_total_frames_counter, scan_error_counter_value
-
+    global steps_completed, steps_submitted
 
     if not SimulatedRun:
         try:
             ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
-            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[
-                4]  # Sometimes this part arrives as 255, 255, no idea why
+            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]  # Sometimes this part arrives as 255, 255, no idea why
         except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
@@ -3170,6 +3177,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
         cmd_advance_movie(True)
+    elif ArduinoTrigger == RSP_ADVANCE_FRAME_FRACTION:  
+        logging.debug(f"Received confirmation of {ArduinoParam1} steps done from Arduino")
+        steps_completed = True
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
@@ -3795,7 +3805,7 @@ def load_session_data_post_init():
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
         if not SimplifiedMode:
-            detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+            ### detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
             scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
         # Display current capture settings as loaded from file
@@ -3850,7 +3860,7 @@ def PiCam2_change_resolution():
 
 
 def PiCam2_configure():
-    global capture_config, preview_config
+    global capture_config, preview_config, vfd_config
 
     camera.stop()
     capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_sensor_resolution()},
@@ -3859,6 +3869,7 @@ def PiCam2_configure():
                                                        transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
+    vfd_config = camera.create_preview_configuration({"size": (1332, 990)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     # WB controls
@@ -3996,7 +4007,7 @@ def create_main_window():
         win.geometry(f"+{ConfigData['WindowPos'].split('+', 1)[1]}")
 
     # Catch closing with 'X' button
-    win.protocol("WM_DELETE_WINDOW", cmd_app_standard_exit)
+    win.protocol("WM_DELETE_WINDOW", cmd_app_emergency_exit)
 
     # Init ToolTips
     as_tooltips = Tooltips(FontSize)
@@ -4996,14 +5007,15 @@ def create_widgets():
                                 activebackground='red', activeforeground='white', relief=RAISED,
                                 font=("Arial", FontSize - 1), name='emergency_exit_btn')
     emergency_exit_btn.widget_type = "general"
-    emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
+    #emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
+    emergency_exit_btn.grid_forget()
     as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
 
-    exit_btn = Button(top_right_area_frame, text="Exit", height=2, command=cmd_app_standard_exit, activebackground='#f0f0f0',
+    exit_btn = Button(top_right_area_frame, text="Exit", height=4, command=cmd_app_standard_exit, activebackground='#f0f0f0',
                       font=("Arial", FontSize), name='exit_btn')
     exit_btn.widget_type = "general"
-    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='SEW')
-    as_tooltips.add(exit_btn, "Exit ALT-Scann8.")
+    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='EW')
+    as_tooltips.add(exit_btn, "Exit ALT-Scann8. You can use the window close button ('x') to exit without saving changes")
 
     # Start scan button
     if SimulatedRun:
@@ -5982,7 +5994,7 @@ def main(argv):
     global win
 
     DisableToolTips = False
-
+    return
     opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
 
     for opt, arg in opts:
