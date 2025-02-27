@@ -20,8 +20,8 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.04"
-__date__ = "2025-02-24"
+__version__ = "1.12.05"
+__date__ = "2025-02-27"
 __version_highlight__ = "Visual Frame Detection"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -48,6 +48,14 @@ import logging
 import sys
 import getopt
 import math
+import hashlib
+import uuid
+
+try:
+    import requests
+    requests_loaded = True
+except ImportError:
+    requests_loaded = False
 
 try:
     import numpy as np
@@ -113,7 +121,7 @@ win = None
 as_tooltips = None
 ExitingApp = False
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
-Controller_version = "Unknown"
+Controller_full_version = "Unknown"
 FocusState = True
 lastFocus = True
 FocusZoomPosX = 0.35
@@ -159,6 +167,8 @@ ScanProcessError_LastTime = 0
 ScriptDir = os.path.dirname(os.path.realpath(__file__))
 ConfigurationDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 ConfigurationDataLoaded = False
+consent_filename = os.path.join(ScriptDir, "user_consent.txt")  # Adjust to your file’s location
+anonymous_user_filename = os.path.join(ScriptDir, "alt_scann8_id.txt")  # Adjust to your file’s location
 # Variables to deal with remaining disk space
 available_space_mb = 0
 disk_space_error_to_notify = False
@@ -225,6 +235,7 @@ ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
 simulated_images_in_list = 0
+preview_image_id_to_delete = None  # Image reference kept to clean up in next loop
 scan_error_counter = 0  # Number of RSP_SCAN_ERROR received
 scan_error_total_frames_counter = 0  # Number of frames received since error counter set to zero
 scan_error_log_fullpath = ''
@@ -418,7 +429,6 @@ time_save_image = None
 time_preview_display = None
 time_awb = None
 time_autoexp = None
-vfd_pixels_per_step_roll_avg = None
 session_start_time = 0
 session_frames = 0
 max_wait_time = 5000
@@ -1172,7 +1182,7 @@ def get_last_frame_popup(last_frame):
 
 def generate_qr_code_info():
     data = (f"ALT-Scann8:{__version__}\n"
-            f"Controller:{Controller_version}\n"
+            f"Controller:{Controller_full_version}\n"
             f"Python:{sys.version}\n"
             f"TkInter:{tk.TkVersion}\n"
             f"PIL:{PIL_Version}\n"
@@ -1486,11 +1496,11 @@ def cmd_advance_movie(from_arduino=False):
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='>|', bg='red',
-                                fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+        AdvanceMovie_btn.config(text='⏹', bg='red', fg='white', 
+                                relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='>', bg=save_bg,
-                                fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+        AdvanceMovie_btn.config(text='▶', bg=save_bg, fg=save_fg,
+                                relief=RAISED)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if not SimulatedRun and not from_arduino:  # Do not send Arduino command if triggered by Arduino response
@@ -1503,13 +1513,21 @@ def cmd_advance_movie(from_arduino=False):
 def cmd_retreat_movie():
     global RetreatMovieActive
 
+    if not RetreatMovieActive:
+        confirm = tk.messagebox.askyesno(title="Move film back",
+                                        message="This operation requires manually moving the source reel to collect film being moved back. "
+                                        "If you don't, film will probably end up jammed in the film gate."
+                                        "\r\nAre you sure you want to proceed?")
+        if not confirm:
+            return
+
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
-        retreat_movie_btn.config(text='|<', bg='red',
-                                fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+        retreat_movie_btn.config(text='⏹', bg='red', fg='white', 
+                                 relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        retreat_movie_btn.config(text='<', bg=save_bg,
-                                fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+        retreat_movie_btn.config(text='◀', bg=save_bg, fg=save_fg,
+                                 relief=RAISED)  # Otherwise change to default text to start the action
     RetreatMovieActive = not RetreatMovieActive
     # Send instruction to Arduino
     if not SimulatedRun:
@@ -1531,7 +1549,7 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        rewind_btn.config(text='|<<', bg='red', fg='white',
+        rewind_btn.config(text='⏹', bg='red', fg='white', font=("Arial", FontSize + 3), 
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1553,7 +1571,7 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
+        rewind_btn.config(text='⏪', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), 
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1591,7 +1609,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         FastForwardActive = True
         # Update button text
-        fast_forward_btn.config(text='>>|', bg='red', fg='white', relief=SUNKEN)
+        fast_forward_btn.config(text='⏹', bg='red', fg='white', font=("Arial", FontSize + 3), relief=SUNKEN)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
@@ -1612,7 +1630,7 @@ def cmd_fast_forward_movie():
         FastForwardActive = False
 
     if not FastForwardActive:
-        fast_forward_btn.config(text='>>', bg=save_bg, fg=save_fg, relief=RAISED)
+        fast_forward_btn.config(text='⏩', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), relief=RAISED)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
 
@@ -1849,6 +1867,7 @@ def capture_save_thread(queue, event, id):
 
 def draw_preview_image(preview_image, curframe, idx):
     global total_wait_time_preview_display, PreviewModuleValue
+    global preview_image_id_to_delete
 
     curtime = time.time()
 
@@ -1873,8 +1892,11 @@ def draw_preview_image(preview_image, curframe, idx):
         if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
             # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
             # next two lines to avoid flickering. However, they might cause memory problems
-            draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
+            aux = preview_image_id_to_delete
+            preview_image_id_to_delete = draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
             draw_capture_canvas.image = PreviewAreaImage
+            if aux is not None:
+                draw_capture_canvas.delete(aux) # Cleanup
 
             # The Pack geometry manager packs widgets in rows or columns.
             # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
@@ -2486,6 +2508,11 @@ def cmd_start_scan_simulated():
     global total_wait_time_save_image
     global session_frames
     global last_frame_time
+    global splash_id
+    
+    if splash_id != None:
+        draw_capture_canvas.delete(splash_id)
+        splash_id == None
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -2659,6 +2686,11 @@ def start_scan():
     global session_frames
     global last_frame_time
     global AutoExpEnabled, AutoWbEnabled
+    global splash_id
+
+    if splash_id != None:
+        draw_capture_canvas.delete(splash_id)
+        splash_id == None
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -2812,10 +2844,10 @@ def capture_loop():
                 if CurrentFrame == vfd_CurrentFrame_previous:
                     vfd_attempts_on_same_frame += 1
                 #draw_preview_image(sample_image, 0, 0)
-                if offset > 200:
-                    steps_to_advance = 10
-                elif offset > 100:
-                    steps_to_advance = 5
+                if offset > 100:
+                    steps_to_advance = pixels_per_step // 2
+                elif offset > 20:
+                    steps_to_advance = 4
                 else:
                     steps_to_advance = 1
                 if vfd_attempts_on_same_frame > 1:
@@ -2992,7 +3024,6 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
         onesec_after = win.after(1000, onesec_periodic_checks)
 
 
-
 def UpdatePlotterWindow(PTValue, ThresholdLevel, extra_shift = 0):
     global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel, PlotterScroll, PlotterWindowPos
 
@@ -3062,6 +3093,24 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel, extra_shift = 0):
         PlotterWindowPos = (PlotterWindowPos + 5 + extra_shift) % plotter_width
 
 
+def check_version(current_version, required_version):
+    """
+    Check if current_version is at least required_version.
+    Versions are in 'a.b.c' format (e.g., '1.2.3').
+    Returns True if current_version >= required_version.
+    """
+    # Split into components and convert to integers
+    curr_parts = [int(x) for x in current_version.split('.')]
+    req_parts = [int(x) for x in required_version.split('.')]
+
+    # Ensure both have 3 parts (pad with 0s if needed)
+    curr_parts += [0] * (3 - len(curr_parts))
+    req_parts += [0] * (3 - len(req_parts))
+
+    # Compare as tuples
+    return tuple(curr_parts) >= tuple(req_parts)
+
+
 # send_arduino_command: No response expected
 def send_arduino_command(cmd, param=0):
     if not SimulatedRun:
@@ -3086,7 +3135,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ArduinoTrigger
     global ScanProcessError
     global last_frame_time
-    global Controller_Id, Controller_version
+    global Controller_Id, Controller_full_version
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
@@ -3124,12 +3173,18 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         Controller_Id = ArduinoParam1%256
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
-            Controller_version = "Nano "
+            Controller_type = "Nano"
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
-            Controller_version = "Pico "
-        Controller_version += f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
-        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
+            Controller_type = "Pico"
+        Controller_version = f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
+        Controller_full_version = f"{Controller_type} {Controller_version}"
+        win.title(f"ALT-Scann8 v{__version__} ({Controller_full_version})")  # setting title of the window
+        required_controller_version = "1.1.8"
+        if check_version(Controller_version, required_controller_version):
+            tk.messagebox.showerror("Incompatible controller version", f"ALT-Scann8 {__version__} requires controller version {required_controller_version}, "
+                                    "you have {Controller_version} installed. Please upload it to your {Controller_type} and try again")
+            exit_app(False) # If Arduino version not OK exit without saving
         refresh_qr_code()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
@@ -3941,6 +3996,27 @@ def init_multidependent_widgets():
         widget_list_refresh([id_HdrBracketAuto])
 
 
+def display_splash():
+    global splash_id
+    splash_id = None
+    splash_path = os.path.join(ScriptDir, "ALT-Scann8.jpg")  # Adjust to your file’s location
+    if os.path.isfile(splash_path):
+        try:
+            # Load the splash image (third from the batch)
+            canvas_width = draw_capture_canvas.winfo_width()
+            canvas_height = draw_capture_canvas.winfo_height()
+            splash_img = Image.open(splash_path).resize((canvas_width, canvas_height), Image.LANCZOS)  # Match canvas size
+            splash_photo = ImageTk.PhotoImage(splash_img)
+
+            # Display splash on canvas
+            splash_id = draw_capture_canvas.create_image(canvas_width//2, canvas_height//2, image=splash_photo)  # Center at (width/2, height/2)
+            draw_capture_canvas.image = splash_photo  # Keep reference to avoid garbage collection
+        except Exception as e:
+            logging.error(f"Failed to load splash image: {e}")
+    else:
+        logging.warning(f"Splash image not found at {splash_path}, skipping.")    
+
+
 def create_main_window():
     global win
     global plotter_width, plotter_height
@@ -3964,7 +4040,7 @@ def create_main_window():
         else:
             win.title(f"ALT-Scann8 v{__version__} (Nano {SimulatedArduinoVersion})") # Real title for snapshots
     else:
-        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
+        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_full_version})")  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
     screen_width = win.winfo_screenwidth()
     screen_height = win.winfo_screenheight()
@@ -4013,6 +4089,8 @@ def create_main_window():
     as_tooltips = Tooltips(FontSize)
 
     create_widgets()
+
+    display_splash()
 
     logging.info(f"Window size: {app_width}x{app_height + 20}")
 
@@ -4077,7 +4155,7 @@ def tscann8_init():
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
     global active_threads
-    global time_save_image, time_preview_display, time_awb, time_autoexp, vfd_pixels_per_step_roll_avg
+    global time_save_image, time_preview_display, time_awb, time_autoexp
     global hw_panel, hw_panel_installed
 
     if SimulatedRun:
@@ -4112,7 +4190,6 @@ def tscann8_init():
     time_preview_display = RollingAverage(50)
     time_awb = RollingAverage(50)
     time_autoexp = RollingAverage(50)
-    vfd_pixels_per_step_roll_avg = RollingAverage(50)
 
     create_main_window()
 
@@ -4757,6 +4834,7 @@ def create_widgets():
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight,
                                  name='draw_capture_canvas')
     draw_capture_canvas.pack(padx=(20, 5), pady=5)
+
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
     top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
@@ -4783,8 +4861,8 @@ def create_widgets():
     bottom_area_row = 0
 
     # Retreat movie button (slow backward through filmgate)
-    retreat_movie_btn = Button(top_left_area_frame, text="<", command=cmd_retreat_movie,
-                                activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
+    retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
+                                activebackground='#f0f0f0', relief=RAISED, 
                                 name='retreat_movie_btn')
     retreat_movie_btn.widget_type = "general"
     retreat_movie_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad,
@@ -4793,8 +4871,8 @@ def create_widgets():
                                         "reels in left position in order to avoid film jamming at film gate.")
 
     # Advance movie button (slow forward through filmgate)
-    AdvanceMovie_btn = Button(top_left_area_frame, text=">", command=cmd_advance_movie,
-                              activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
+    AdvanceMovie_btn = Button(top_left_area_frame, text="▶", command=cmd_advance_movie,
+                              activebackground='#f0f0f0', relief=RAISED, 
                               name='advanceMovie_btn')
     AdvanceMovie_btn.widget_type = "general"
     AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column + 1, padx=x_pad, pady=y_pad,
@@ -4819,13 +4897,13 @@ def create_widgets():
     snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
+    rewind_btn = Button(top_left_area_frame, text="⏪", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
                         activebackground='#f0f0f0', relief=RAISED, name='rewind_btn')
     rewind_btn.widget_type = "general"
     rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    fast_forward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize + 3), height=2,
+    fast_forward_btn = Button(top_left_area_frame, text="⏩", font=("Arial", FontSize + 3), height=2,
                              command=cmd_fast_forward_movie, activebackground='#f0f0f0', relief=RAISED,
                              name='fast_forward_btn')
     fast_forward_btn.widget_type = "general"
@@ -4880,19 +4958,19 @@ def create_widgets():
                              activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_minus_btn')
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="⇐", height=1, command=cmd_set_focus_left, state='disabled',
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="◀", height=1, command=cmd_set_focus_left, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_lf_btn')
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="⇑", height=1, command=cmd_set_focus_up, state='disabled',
+    focus_up_btn = Button(Focus_btn_grid_frame, text="▲", height=1, command=cmd_set_focus_up, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_up_btn')
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="⇓", height=1, command=cmd_set_focus_down, state='disabled',
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="▼", height=1, command=cmd_set_focus_down, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_dn_btn')
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="⇒", height=1, command=cmd_set_focus_right, state='disabled',
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="▶", height=1, command=cmd_set_focus_right, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_rt_btn')
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
@@ -5969,7 +6047,6 @@ def create_widgets():
         cmd_set_s8()
 
 
-
 def get_controller_version():
     if Controller_Id == 0:
         logging.debug("Requesting controller version")
@@ -5980,6 +6057,35 @@ def reset_controller():
     logging.debug("Resetting controller")
     send_arduino_command(CMD_RESET_CONTROLLER)
     time.sleep(0.5)
+
+
+# Get or generate persistent user ID
+def get_user_id():
+    if os.path.exists(anonymous_user_filename):
+        with open(anonymous_user_filename, "r") as f:
+            return f.read().strip()
+    else:
+        user_id = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+        with open(anonymous_user_filename, "w") as f:
+            f.write(user_id)
+        return user_id
+
+
+# Ping server if requests is available (call once at startup)
+def report_usage():
+    if os.path.exists(consent_filename) and open(consent_filename).read() == "yes" and requests_loaded:
+        user_id = get_user_id()  # Reuse persistent ID
+        payload = {
+            "id": user_id,
+            "versions": {"ui": __version__, "controller": Controller_full_version}
+        }
+        try:
+            requests.post("http://jaun.ddns.net:5000/count", json=payload, timeout=1)
+            logging.debug("Usage reporting done.")
+        except requests.RequestException:
+            pass  # Silent fail if offline
+    elif not REQUESTS_AVAILABLE:
+        logging.warning("Usage reporting skipped—install 'python3-requests' to enable (optional).")
 
 
 def main(argv):
@@ -6046,6 +6152,16 @@ def main(argv):
         logging.error("Numpy library could no tbe loaded.\r\nPlease install it with this command 'sudo apt install python3-numpy'.")
         return
 
+    # Check reporting consent on first run
+    if requests_loaded:
+        if not os.path.exists(consent_filename):
+            consent = tk.messagebox.askyesno(
+                "ALT-Scann8 User Count",
+                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
+            )
+            with open(consent_filename, "w") as f:
+                f.write("yes" if consent else "no")
+
     win = tkinter.Tk()  # Create temporary main window to support popups before main window is created
     win.withdraw()  # Hide temporary main window
 
@@ -6057,6 +6173,9 @@ def main(argv):
     load_config_data_pre_init()
 
     tscann8_init()
+
+    if not SimulatedRun:
+        arduino_listen_loop()
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -6078,9 +6197,6 @@ def main(argv):
     if DisableThreads:
         logging.debug("Threads disabled.")
 
-    if not SimulatedRun:
-        arduino_listen_loop()
-
     ALT_scann_init_done = True
 
     refresh_qr_code()
@@ -6089,7 +6205,10 @@ def main(argv):
     data = generate_qr_code_info()
     logging.info(data)
 
+    report_usage()
+
     # *** ALT-Scann8 load complete ***
+
     if hw_panel_installed:
         hw_panel.ALT_Scann8_init_completed()
 

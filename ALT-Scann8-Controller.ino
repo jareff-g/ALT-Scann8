@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.7"
-#define  __date__       "2025-02-24"
-#define  __version_highlight__  "Modify capstan_advance to perform progressive acceleration/deceleration when more then 20 steps or so"
+#define __version__     "1.1.8"
+#define  __date__       "2025-02-27"
+#define  __version_highlight__  "Save scan mode to global var to prevent sending capstan advance message to RPi in PFD mode"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -199,6 +199,8 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 boolean AutoStopEnabled = false;
+
+boolean VFD_mode_active = false;
 
 // Collect outgoing film frequency
 int default_collect_timer = 1000;
@@ -455,7 +457,8 @@ void loop() {
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
-                        if (!param) {   // Traditional mode with phototransistor detection, go to dedicated state
+                        VFD_mode_active = param;
+                        if (!VFD_mode_active) {   // Traditional mode with phototransistor detection, go to dedicated state
                             ScanState = Sts_Scan;
                             StartFrameTime = micros();
                             FilmDetectedTime = millis() + MaxFilmStallTime;
@@ -1038,7 +1041,8 @@ void capstan_advance(int steps) {
             delayMicroseconds(100);        
     }
     digitalWrite(MotorB_Stepper, LOW);
-    SendToRPi(RSP_ADVANCE_FRAME_FRACTION, steps, 0);
+    if (VFD_mode_active)
+        SendToRPi(RSP_ADVANCE_FRAME_FRACTION, steps, 0);
 }
 
 // ----- This is the function to "ScanFilm" -----

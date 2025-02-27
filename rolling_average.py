@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-RollignAverage - Class to calculate rolling average on most recent values
+RollingAverage - Class to calculate rolling average on most recent values
 
 Used to calculate averages while scanning, to display on the UI
 
