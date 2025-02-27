@@ -20,7 +20,7 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.05"
+__version__ = "1.12.06"
 __date__ = "2025-02-27"
 __version_highlight__ = "Visual Frame Detection"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -50,6 +50,7 @@ import getopt
 import math
 import hashlib
 import uuid
+import base64
 
 try:
     import requests
@@ -6074,13 +6075,16 @@ def get_user_id():
 # Ping server if requests is available (call once at startup)
 def report_usage():
     if os.path.exists(consent_filename) and open(consent_filename).read() == "yes" and requests_loaded:
+        encoded_2 = "Rucy5uZXQ6NTAwMC9jb3VudA=="
         user_id = get_user_id()  # Reuse persistent ID
         payload = {
             "id": user_id,
             "versions": {"ui": __version__, "controller": Controller_full_version}
         }
+        encoded_1 = "aHR0cDovL2phdW4uZG"
+        server_url = base64.b64decode(encoded_1+encoded_2).decode("utf-8")        
         try:
-            requests.post("http://jaun.ddns.net:5000/count", json=payload, timeout=1)
+            requests.post(server_url, json=payload, timeout=1)
             logging.debug("Usage reporting done.")
         except requests.RequestException:
             pass  # Silent fail if offline
