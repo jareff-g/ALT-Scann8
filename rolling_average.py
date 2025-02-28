@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-RollignAverage - Class to calculate rolling average on most recent values
+RollingAverage - Class to calculate rolling average on most recent values
 
 Used to calculate averages while scanning, to display on the UI
 
@@ -30,6 +30,7 @@ class RollingAverage:
         self.window = deque(maxlen=window_size)
         self.sum = 0
 
+
     def add_value(self, value):
         # If the deque is full, subtract the element that will be dropped
         if len(self.window) == self.window_size:
@@ -37,11 +38,21 @@ class RollingAverage:
             self.sum -= self.window[0]  # Peek at the oldest value
         self.window.append(value)  # Append new value, oldest is auto-removed by maxlen
         self.sum += value
-        
+
+
     def get_average(self):
         if len(self.window) <= 25:  # Do not start returning averages until at least 25 elements collected
             return None
         return self.sum / len(self.window)
+
+
+    def get_min(self):
+        return min(self.window) if len(self.window) > 0 else 0
+
+
+    def get_max(self):
+        return max(self.window) if len(self.window) > 0 else 0
+
 
     def clear(self):
         self.window.clear()

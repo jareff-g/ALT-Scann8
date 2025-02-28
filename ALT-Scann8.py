@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.03"
-__date__ = "2025-02-20"
-__version_highlight__ = "Fix a couple of minor bugs reported on 1.12.02"
+__version__ = "1.12.07"
+__date__ = "2025-02-28"
+__version_highlight__ = "Visual Frame Detection - Restricted release"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -47,6 +47,16 @@ from datetime import datetime
 import logging
 import sys
 import getopt
+import math
+import hashlib
+import uuid
+import base64
+
+try:
+    import requests
+    requests_loaded = True
+except ImportError:
+    requests_loaded = False
 
 try:
     import numpy as np
@@ -112,7 +122,7 @@ win = None
 as_tooltips = None
 ExitingApp = False
 Controller_Id = 0  # 1 - Arduino, 2 - RPi Pico
-Controller_version = "Unknown"
+Controller_full_version = "Unknown"
 FocusState = True
 lastFocus = True
 FocusZoomPosX = 0.35
@@ -130,6 +140,10 @@ FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
 StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
+vfd_CurrentFrame_previous = 0   # Used by VFD for automatic CapstanDiameter adjustment
+vfd_attempts_on_same_frame = 0      # Used by VFD to calculate statistics
+steps_completed = False
+steps_submitted = False
 frames_to_go_key_press_time = 0
 CurrentStill = 1  # used to take several stills of same frame, for settings analysis
 CurrentScanStartTime = datetime.now()
@@ -145,6 +159,7 @@ FastForwardActive = False
 FastForwardErrorOutstanding = False
 FastForwardEndOutstanding = False
 ScanOngoing = False  # PlayState in original code from Torulf (opposite meaning)
+FrameDetectMode = 'PFD'    # By default scanner works in traditional mode, with Phototransistor Frame Detection (vs VFD)
 ScanStopRequested = False  # To handle stopping scan process asynchronously, with same button as start scan
 NewFrameAvailable = False  # To be set to true upon reception of Arduino event
 ScanProcessError = False  # To be set to true upon reception of Arduino event
@@ -153,6 +168,8 @@ ScanProcessError_LastTime = 0
 ScriptDir = os.path.dirname(os.path.realpath(__file__))
 ConfigurationDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 ConfigurationDataLoaded = False
+consent_filename = os.path.join(ScriptDir, "user_consent.txt")  # Adjust to your file’s location
+anonymous_user_filename = os.path.join(ScriptDir, "alt_scann8_id.txt")  # Adjust to your file’s location
 # Variables to deal with remaining disk space
 available_space_mb = 0
 disk_space_error_to_notify = False
@@ -165,6 +182,14 @@ max_inactivity_delay = reference_inactivity_delay
 MinFrameStepsS8 = 290
 MinFrameStepsR8 = 240
 CapstanDiameter = 14.3
+# Need to replicate here the steps per frame done in arduino, for VFD mode
+S8_HEIGHT = 4.01
+R8_HEIGHT = 3.3
+NEMA_STEP_DEGREES = 1.8
+NEMA_MICROSTEPS_IN_STEP = 16
+FrameStepsR8 = 0
+FrameStepsS8 = 0
+steps_to_next = 0
 # Phototransistor reported level when hole is detected
 PTLevelS8 = 80
 PTLevelR8 = 120
@@ -211,6 +236,7 @@ ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
 simulated_images_in_list = 0
+preview_image_id_to_delete = None  # Image reference kept to clean up in next loop
 scan_error_counter = 0  # Number of RSP_SCAN_ERROR received
 scan_error_total_frames_counter = 0  # Number of frames received since error counter set to zero
 scan_error_log_fullpath = ''
@@ -233,6 +259,7 @@ CMD_FILM_BACKWARD = 31
 CMD_SINGLE_STEP = 40
 CMD_ADVANCE_FRAME = 41
 CMD_ADVANCE_FRAME_FRACTION = 42
+CMD_RUN_FILM_COLLECTION = 43
 CMD_SET_PT_LEVEL = 50
 CMD_SET_MIN_FRAME_STEPS = 52
 CMD_SET_FRAME_FINE_TUNE = 54
@@ -261,6 +288,7 @@ RSP_REPORT_AUTO_LEVELS = 86
 RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
 RSP_FILM_FORWARD_ENDED = 89
+RSP_ADVANCE_FRAME_FRACTION = 90
 
 # Options variables
 ExpertMode = True
@@ -785,6 +813,7 @@ def cmd_set_new_folder():
 def cmd_detect_misaligned_frames():
     global DetectMisalignedFrames, misaligned_tolerance_label
     DetectMisalignedFrames = detect_misaligned_frames.get()
+    ConfigData["DetectMisalignedFrames"] = DetectMisalignedFrames
     scan_error_counter_value_label.config(state = NORMAL if DetectMisalignedFrames and (FileType != "dng" or can_check_dng_frames_for_misalignment) else DISABLED)
 
 
@@ -869,6 +898,7 @@ def cmd_settings_popup_accept():
     if CapstanDiameter != capstan_diameter_float.get():
         CapstanDiameter = capstan_diameter_float.get()
         ConfigData["CapstanDiameter"] = CapstanDiameter
+        adjust_default_frame_steps()
         send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter*10))
     if LoggingMode != debug_level_selected.get():
         LoggingMode = debug_level_selected.get()
@@ -1153,7 +1183,7 @@ def get_last_frame_popup(last_frame):
 
 def generate_qr_code_info():
     data = (f"ALT-Scann8:{__version__}\n"
-            f"Controller:{Controller_version}\n"
+            f"Controller:{Controller_full_version}\n"
             f"Python:{sys.version}\n"
             f"TkInter:{tk.TkVersion}\n"
             f"PIL:{PIL_Version}\n"
@@ -1371,6 +1401,14 @@ def cmd_set_auto_wb():
             camera.set_controls({"ColourGains": camera_colour_gains})
 
 
+# ********************************************************
+# Manual Scan & VFD related functions
+# ********************************************************
+def adjust_default_frame_steps():
+    global FrameStepsR8, FrameStepsS8
+    FrameStepsR8 = int(R8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for R8 (236 aprox)
+    FrameStepsS8 = int(S8_HEIGHT/((math.pi*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)))) # Default value for S8 (286 aprox)
+
 def cmd_Manual_scan_activated_selection():
     global ManualScanEnabled
     ManualScanEnabled = Manual_scan_activated.get()
@@ -1387,6 +1425,20 @@ def manual_scan_advance_frame_fraction(steps):
         time.sleep(0.2)
         capture('normal')
         time.sleep(0.2)
+        run_film_collection()
+
+
+def scan_advance_steps(steps):
+    global steps_completed, steps_submitted
+    if not SimulatedRun:
+        steps_completed = False
+        steps_submitted = True
+        send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
+
+
+def run_film_collection():
+    if not SimulatedRun:
+        send_arduino_command(CMD_RUN_FILM_COLLECTION)
 
 
 def cmd_manual_scan_advance_frame_fraction_5():
@@ -1407,7 +1459,7 @@ def cmd_manual_scan_take_snap():
         time.sleep(0.2)
         capture('normal')
         time.sleep(0.2)
-
+        run_film_collection()
 
 def rwnd_speed_down():
     global rwnd_speed_delay
@@ -1445,11 +1497,11 @@ def cmd_advance_movie(from_arduino=False):
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='>|', bg='red',
-                                fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+        AdvanceMovie_btn.config(text='■', bg='red', fg='white', 
+                                relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        AdvanceMovie_btn.config(text='>', bg=save_bg,
-                                fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+        AdvanceMovie_btn.config(text='▶', bg=save_bg, fg=save_fg,
+                                relief=RAISED)  # Otherwise change to default text to start the action
     AdvanceMovieActive = not AdvanceMovieActive
     # Send instruction to Arduino
     if not SimulatedRun and not from_arduino:  # Do not send Arduino command if triggered by Arduino response
@@ -1462,13 +1514,21 @@ def cmd_advance_movie(from_arduino=False):
 def cmd_retreat_movie():
     global RetreatMovieActive
 
+    if not RetreatMovieActive:
+        confirm = tk.messagebox.askyesno(title="Move film back",
+                                        message="This operation requires manually moving the source reel to collect film being moved back. "
+                                        "If you don't, film will probably end up jammed in the film gate."
+                                        "\r\nAre you sure you want to proceed?")
+        if not confirm:
+            return
+
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
-        retreat_movie_btn.config(text='|<', bg='red',
-                                fg='white', relief=SUNKEN)  # ...so now we propose to stop it in the button test
+        retreat_movie_btn.config(text='■', bg='red', fg='white', 
+                                 relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
-        retreat_movie_btn.config(text='<', bg=save_bg,
-                                fg=save_fg, relief=RAISED)  # Otherwise change to default text to start the action
+        retreat_movie_btn.config(text='◀', bg=save_bg, fg=save_fg,
+                                 relief=RAISED)  # Otherwise change to default text to start the action
     RetreatMovieActive = not RetreatMovieActive
     # Send instruction to Arduino
     if not SimulatedRun:
@@ -1490,7 +1550,7 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        rewind_btn.config(text='|<<', bg='red', fg='white',
+        rewind_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), 
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1512,7 +1572,7 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        rewind_btn.config(text='<<', bg=save_bg, fg=save_fg,
+        rewind_btn.config(text='◀◀', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), 
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1550,7 +1610,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         FastForwardActive = True
         # Update button text
-        fast_forward_btn.config(text='>>|', bg='red', fg='white', relief=SUNKEN)
+        fast_forward_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), relief=SUNKEN)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
@@ -1571,7 +1631,7 @@ def cmd_fast_forward_movie():
         FastForwardActive = False
 
     if not FastForwardActive:
-        fast_forward_btn.config(text='>>', bg=save_bg, fg=save_fg, relief=RAISED)
+        fast_forward_btn.config(text='▶▶', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), relief=RAISED)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
 
@@ -1601,7 +1661,8 @@ def fast_forward_loop():
 # *******************************************************************
 def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
-    height, width = img.shape
+    height = img.shape[0]
+    width = img.shape[1]
 
     # Slice only the left part of the image
     if slice_width > width:
@@ -1609,7 +1670,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     sliced_image = img[:, :slice_width]
 
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(sliced_image, 200, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(sliced_image, 250, 255, cv2.THRESH_BINARY)
     # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
@@ -1653,6 +1714,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
             bigger = end-start
             center = (start + end) // 2
             result = center
+
     if result != 0:
         if result >= middle - margin and result <= middle + margin:
             return True, 0
@@ -1804,8 +1866,24 @@ def capture_save_thread(queue, event, id):
     logging.debug("Exiting capture_save_thread n.%i", id)
 
 
+def disable_canvas(canvas):
+    """Disables the canvas by graying it out and preventing interaction."""
+    canvas.create_rectangle(0, 0, canvas.winfo_width(), canvas.winfo_height(),
+                            fill="gray", stipple="gray50", tags="disable_overlay")  # Overlay a gray rectangle
+    canvas.bind("<Button-1>", lambda event: None)  # Disable clicks
+    # Disable other relevant events (e.g., <Motion>, <B1-Motion>, etc.)
+
+
+def enable_canvas(canvas):
+    """Enables the canvas by removing the gray overlay and restoring interaction."""
+    canvas.delete("disable_overlay")  # Remove the gray rectangle
+    canvas.unbind("<Button-1>")  # Re-enable clicks
+    # Re-enable other relevant events
+
+
 def draw_preview_image(preview_image, curframe, idx):
     global total_wait_time_preview_display, PreviewModuleValue
+    global preview_image_id_to_delete
 
     curtime = time.time()
 
@@ -1830,8 +1908,11 @@ def draw_preview_image(preview_image, curframe, idx):
         if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
             # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
             # next two lines to avoid flickering. However, they might cause memory problems
-            draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
+            aux = preview_image_id_to_delete
+            preview_image_id_to_delete = draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
             draw_capture_canvas.image = PreviewAreaImage
+            if aux is not None:
+                draw_capture_canvas.delete(aux) # Cleanup
 
             # The Pack geometry manager packs widgets in rows or columns.
             # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
@@ -2037,8 +2118,8 @@ def register_frame():
 
     # Get current time
     frame_time = time.time()
-    # Determine if we should start new count (last capture older than 5 seconds)
-    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 5:
+    # Determine if we should start new count (last capture older than 10 seconds) (increased from 5 due to VFD)
+    if len(FPM_LastMinuteFrameTimes) == 0 or FPM_LastMinuteFrameTimes[-1] < frame_time - 10:
         FPM_StartTime = frame_time
         FPM_LastMinuteFrameTimes.clear()
         FPM_CalculatedValue = -1
@@ -2443,6 +2524,11 @@ def cmd_start_scan_simulated():
     global total_wait_time_save_image
     global session_frames
     global last_frame_time
+    global splash_id
+    
+    if splash_id != None:
+        draw_capture_canvas.delete(splash_id)
+        splash_id == None
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -2616,6 +2702,11 @@ def start_scan():
     global session_frames
     global last_frame_time
     global AutoExpEnabled, AutoWbEnabled
+    global splash_id
+
+    if splash_id != None:
+        draw_capture_canvas.delete(splash_id)
+        splash_id == None
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -2673,7 +2764,7 @@ def start_scan():
             if not AutoExpEnabled:
                 camera.set_controls({"ExposureTime": int(int(exposure_value.get() * 1000))})
             logging.debug("Sending CMD_START_SCAN")
-            send_arduino_command(CMD_START_SCAN)
+            send_arduino_command(CMD_START_SCAN, FrameDetectMode == 'VFD')       # Pass first parameter as True if in VFD mode
 
         refresh_qr_code()
 
@@ -2710,6 +2801,10 @@ def capture_loop():
     global session_frames, CurrentStill
     global disk_space_error_to_notify
     global AutoStopEnabled
+    global CapstanDiameter  # Temporary, check if it is a good idea to dynamically modify capstan diameter according to results
+    global vfd_attempts_on_same_frame, vfd_CurrentFrame_previous
+    global scan_error_counter, scan_error_total_frames_counter
+    global steps_submitted, steps_completed
 
     if ScanStopRequested:
         stop_scan()
@@ -2738,6 +2833,70 @@ def capture_loop():
                                       "Please delete some files before continuing current scan.")
             disk_space_error_to_notify = False
     elif ScanOngoing:
+        if FrameDetectMode == 'VFD':
+            # If we are in Visual Frame Detection mode, we need to:
+            #   - Capture a snap
+            #   - Check alignment 
+            #   - If alignment OK, save it, otherwise perform additional steps until OK
+            if steps_submitted:
+                if not steps_completed:
+                    logging.debug(f"VFD: Frame {CurrentFrame}, waiting for response from Arduino to complete required steps")
+                    win.after(10, capture_loop)
+                    return # loop again to see if next attempt is OK
+                else:
+                    logging.debug(f"VFD: Frame {CurrentFrame}, response received comfirming required steps done")
+                    steps_submitted = False
+                    steps_completed = False
+            time.sleep(0.05) # wait for film to settle (50 ms is enough, this is not the captured imnage, just to determine position)
+            sample_image = camera.capture_image("main")
+            # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
+            image_np = np.array(sample_image)  # PIL gives RGB by default
+            image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
+            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 0.6, slice_width = 10)
+            img_height = sample_image.size[1]
+            pixels_per_step = img_height // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
+            vfd_CurrentFrame_previous = CurrentFrame
+            if not centered and offset > 0: # If not centered and offset < 0 it is too late, film cannot go back, so capture as is (at most flag it as bad)
+                if CurrentFrame == vfd_CurrentFrame_previous:
+                    vfd_attempts_on_same_frame += 1
+                #draw_preview_image(sample_image, 0, 0)
+                if offset > 100:
+                    steps_to_advance = (offset // pixels_per_step) - 5
+                elif offset > 20:
+                    steps_to_advance = 4
+                else:
+                    steps_to_advance = 1
+                if vfd_attempts_on_same_frame > 1:
+                    logging.debug(f"VFD attempts on same frame {CurrentFrame} = {vfd_attempts_on_same_frame}, offset = {offset}, steps = {steps_to_advance}")
+                if steps_to_advance > 0:
+                    scan_advance_steps(steps_to_advance)
+                    logging.debug(f"VFD: Advancing frame {CurrentFrame} by {steps_to_advance} steps, @{pixels_per_step} pixels per step = ({pixels_per_step*steps_to_advance} pixels)")
+                    win.after(10, capture_loop)
+                    return # loog again to see if next attempt is OK
+                else:
+                    logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
+            else:
+                NewFrameAvailable = True
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 20 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                scan_error_total_frames_counter += 1
+                scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                if centered:
+                    logging.info(f"VFD: {CurrentFrame} was captured within {offset} pixels of the right position.")
+                    if vfd_attempts_on_same_frame > 10:
+                        CapstanDiameter +=0.1
+                        logging.debug(f"VFD frame {CurrentFrame} took too many attempts, increasing capstan diameter to  {CapstanDiameter:.1f}")
+                    else:
+                        logging.debug(f"VFD frame {CurrentFrame} capture OK !!! (with small shift of {offset} pixels)")
+                else:
+                    #if (abs(offset) > int(img_height*0.05)):    # Do not count small deviations
+                    scan_error_counter += 1  
+                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                    logging.warning(f"VFD: Frame {CurrentFrame} was captured past the correct position (by {abs(offset)} pixels), it might not be correct.")
+                    if abs(offset) > 20:
+                        CapstanDiameter -=0.1
+                        logging.debug(f"VFD frame {CurrentFrame} captured past position, reducing capstan diameter to  {CapstanDiameter:.1f}")
+                vfd_attempts_on_same_frame = 0
+            # If centered, or gone too far, or offset too small to handle, let the code flow in the standard flow to do the normal capture
         if NewFrameAvailable:
             # Update remaining time
             aux = frames_to_go_str.get()
@@ -2760,21 +2919,25 @@ def capture_loop():
             register_frame()
             CurrentStill = 1
             capture('normal')
-            if not SimulatedRun:
-                try:
-                    # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
-                    NewFrameAvailable = False
-                    logging.debug("Frame %i captured.", CurrentFrame)
-                    send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
-                except IOError:
-                    CurrentFrame -= 1
-                    NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
-                    # Log error to console
-                    logging.warning("Error while telling Arduino to move to next Frame.")
-                    logging.warning("Frame %i capture to be tried again.", CurrentFrame)
-                    win.after(5, capture_loop)
-                    return
-
+            if FrameDetectMode == 'PFD':
+                if not SimulatedRun:
+                    try:
+                        # Set NewFrameAvailable to False here, to avoid overwriting new frame from arduino
+                        NewFrameAvailable = False
+                        logging.debug("Frame %i captured.", CurrentFrame)
+                        send_arduino_command(CMD_GET_NEXT_FRAME)  # Tell Arduino to move to next frame
+                    except IOError:
+                        CurrentFrame -= 1
+                        NewFrameAvailable = True  # Set NewFrameAvailable to True to repeat next time
+                        # Log error to console
+                        logging.warning("Error while telling Arduino to move to next Frame.")
+                        logging.warning("Frame %i capture to be tried again.", CurrentFrame)
+                        win.after(5, capture_loop)
+                        return
+            else:   # VFD
+                logging.debug(f"Frame {CurrentFrame}: Advancing to next frame using {steps_to_next} steps")
+                scan_advance_steps(steps_to_next)
+                NewFrameAvailable = False
             ConfigData["CurrentDate"] = str(datetime.now())
             ConfigData["CurrentDir"] = CurrentDir
             ConfigData["CurrentFrame"] = str(CurrentFrame)
@@ -2877,7 +3040,6 @@ def onesec_periodic_checks():  # Update RPi temperature every 10 seconds
         onesec_after = win.after(1000, onesec_periodic_checks)
 
 
-
 def UpdatePlotterWindow(PTValue, ThresholdLevel, extra_shift = 0):
     global MaxPT, MinPT, PrevPTValue, PrevThresholdLevel, PlotterScroll, PlotterWindowPos
 
@@ -2947,6 +3109,24 @@ def UpdatePlotterWindow(PTValue, ThresholdLevel, extra_shift = 0):
         PlotterWindowPos = (PlotterWindowPos + 5 + extra_shift) % plotter_width
 
 
+def check_version(current_version, required_version):
+    """
+    Check if current_version is at least required_version.
+    Versions are in 'a.b.c' format (e.g., '1.2.3').
+    Returns True if current_version >= required_version.
+    """
+    # Split into components and convert to integers
+    curr_parts = [int(x) for x in current_version.split('.')]
+    req_parts = [int(x) for x in required_version.split('.')]
+
+    # Ensure both have 3 parts (pad with 0s if needed)
+    curr_parts += [0] * (3 - len(curr_parts))
+    req_parts += [0] * (3 - len(req_parts))
+
+    # Compare as tuples
+    return tuple(curr_parts) >= tuple(req_parts)
+
+
 # send_arduino_command: No response expected
 def send_arduino_command(cmd, param=0):
     if not SimulatedRun:
@@ -2971,20 +3151,19 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     global ArduinoTrigger
     global ScanProcessError
     global last_frame_time
-    global Controller_Id, Controller_version
+    global Controller_Id, Controller_full_version
     global ScanStopRequested
     global arduino_after
     global PtLevelValue, StepsPerFrame
     global scan_error_counter, scan_error_total_frames_counter, scan_error_counter_value
-
+    global steps_completed, steps_submitted
 
     if not SimulatedRun:
         try:
             ArduinoData = i2c.read_i2c_block_data(16, CMD_GET_CNT_STATUS, 5)
             ArduinoTrigger = ArduinoData[0]
             ArduinoParam1 = ArduinoData[1] * 256 + ArduinoData[2]
-            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[
-                4]  # Sometimes this part arrives as 255, 255, no idea why
+            ArduinoParam2 = ArduinoData[3] * 256 + ArduinoData[4]  # Sometimes this part arrives as 255, 255, no idea why
         except IOError as e:
             ArduinoTrigger = 0
             # Log error to console
@@ -2993,7 +3172,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
                 logging.warning(
                     f"Non-critical IOError ({e}) while checking incoming event from Arduino. Will check again.")
 
-    if ScanOngoing and time.time() > last_frame_time:
+    if ScanOngoing and FrameDetectMode == 'PFD' and time.time() > last_frame_time:  # Do not force new event in case of VFD - Arduino only asked to move the C motor
         # If scan is ongoing, and more than 3 seconds have passed since last command, maybe one
         # command from/to Arduino (frame received/go to next frame) has been lost.
         # In such case, we force a 'fake' new frame command to allow process to continue
@@ -3010,12 +3189,18 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         Controller_Id = ArduinoParam1%256
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
-            Controller_version = "Nano "
+            Controller_type = "Nano"
         elif Controller_Id == 2:
             logging.info("Raspberry Pi Pico controller detected")
-            Controller_version = "Pico "
-        Controller_version += f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
-        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
+            Controller_type = "Pico"
+        Controller_version = f"{ArduinoParam1//256}.{ArduinoParam2//256}.{ArduinoParam2%256}"
+        Controller_full_version = f"{Controller_type} {Controller_version}"
+        win.title(f"ALT-Scann8 v{__version__} ({Controller_full_version})")  # setting title of the window
+        required_controller_version = "1.1.8"
+        if check_version(Controller_version, required_controller_version):
+            tk.messagebox.showerror("Incompatible controller version", f"ALT-Scann8 {__version__} requires controller version {required_controller_version}, "
+                                    "you have {Controller_version} installed. Please upload it to your {Controller_type} and try again")
+            exit_app(False) # If Arduino version not OK exit without saving
         refresh_qr_code()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
@@ -3063,6 +3248,9 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
         cmd_advance_movie(True)
+    elif ArduinoTrigger == RSP_ADVANCE_FRAME_FRACTION:  
+        logging.debug(f"Received confirmation of {ArduinoParam1} steps done from Arduino")
+        steps_completed = True
     else:
         logging.warning("Unrecognized incoming event (%i) from Arduino.", ArduinoTrigger)
 
@@ -3349,6 +3537,7 @@ def load_session_data_post_init():
     global FileType, FilmType, CapstanDiameter
     global CaptureResolution
     global AutoExpEnabled, AutoWbEnabled
+    global FrameDetectMode
 
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
@@ -3430,6 +3619,14 @@ def load_session_data_post_init():
                 if 'HdrBracketShift' in ConfigData:
                     HdrBracketShift = ConfigData["HdrBracketShift"]
                     hdr_bracket_shift_value.set(HdrBracketShift)
+                if 'VFD' in ConfigData:
+                    if ConfigData["VFD"]:
+                        FrameDetectMode = 'VFD'
+                        disable_canvas(plotter_canvas)
+                    else:
+                        FrameDetectMode = 'PFD'
+                        enable_canvas(plotter_canvas)
+                    vfd_mode_value.set(ConfigData["VFD"])
         else:   # If not loading previous session status, restore to default
             ConfigData["NegativeCaptureActive"] = NegativeImage
             ConfigData["FilmType"] = FilmType
@@ -3481,6 +3678,13 @@ def load_session_data_post_init():
                 aux = int(ConfigData["UVBrightness"])
                 send_arduino_command(CMD_SET_UV_LEVEL, aux)
                 uv_brightness_value.set(aux)
+            if 'VFD' in ConfigData:
+                if ConfigData['VFD']:
+                    FrameDetectMode = 'VFD'
+                    disable_canvas(plotter_canvas)
+                else:
+                    FrameDetectMode = 'PFD'
+                    enable_canvas(plotter_canvas)
         # Expert mode options
         if ExpertMode:
             if 'ExposureWbAdaptPause' in ConfigData:
@@ -3676,7 +3880,7 @@ def load_session_data_post_init():
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
         if not SimplifiedMode:
-            detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
+            ### detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
             scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
         # Display current capture settings as loaded from file
@@ -3731,7 +3935,7 @@ def PiCam2_change_resolution():
 
 
 def PiCam2_configure():
-    global capture_config, preview_config
+    global capture_config, preview_config, vfd_config
 
     camera.stop()
     capture_config = camera.create_still_configuration(main={"size": camera_resolutions.get_sensor_resolution()},
@@ -3740,6 +3944,7 @@ def PiCam2_configure():
                                                        transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
+    vfd_config = camera.create_preview_configuration({"size": (1332, 990)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     # WB controls
@@ -3811,6 +4016,27 @@ def init_multidependent_widgets():
         widget_list_refresh([id_HdrBracketAuto])
 
 
+def display_splash():
+    global splash_id
+    splash_id = None
+    splash_path = os.path.join(ScriptDir, "ALT-Scann8.jpg")  # Adjust to your file’s location
+    if os.path.isfile(splash_path):
+        try:
+            # Load the splash image (third from the batch)
+            canvas_width = draw_capture_canvas.winfo_width()
+            canvas_height = draw_capture_canvas.winfo_height()
+            splash_img = Image.open(splash_path).resize((canvas_width, canvas_height), Image.LANCZOS)  # Match canvas size
+            splash_photo = ImageTk.PhotoImage(splash_img)
+
+            # Display splash on canvas
+            splash_id = draw_capture_canvas.create_image(canvas_width//2, canvas_height//2, image=splash_photo)  # Center at (width/2, height/2)
+            draw_capture_canvas.image = splash_photo  # Keep reference to avoid garbage collection
+        except Exception as e:
+            logging.error(f"Failed to load splash image: {e}")
+    else:
+        logging.warning(f"Splash image not found at {splash_path}, skipping.")    
+
+
 def create_main_window():
     global win
     global plotter_width, plotter_height
@@ -3834,7 +4060,7 @@ def create_main_window():
         else:
             win.title(f"ALT-Scann8 v{__version__} (Nano {SimulatedArduinoVersion})") # Real title for snapshots
     else:
-        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_version})")  # setting title of the window
+        win.title(f"ALT-Scann8 v{__version__} (Nano {Controller_full_version})")  # setting title of the window
     # Get screen size - maxsize gives the usable screen size
     screen_width = win.winfo_screenwidth()
     screen_height = win.winfo_screenheight()
@@ -3877,12 +4103,14 @@ def create_main_window():
         win.geometry(f"+{ConfigData['WindowPos'].split('+', 1)[1]}")
 
     # Catch closing with 'X' button
-    win.protocol("WM_DELETE_WINDOW", cmd_app_standard_exit)
+    win.protocol("WM_DELETE_WINDOW", cmd_app_emergency_exit)
 
     # Init ToolTips
     as_tooltips = Tooltips(FontSize)
 
     create_widgets()
+
+    display_splash()
 
     logging.info(f"Window size: {app_width}x{app_height + 20}")
 
@@ -3993,6 +4221,9 @@ def tscann8_init():
         hw_panel = HwPanel(win, i2c)
     else:
         hw_panel = None
+
+    # Init default steps per frame (used by manual scan and VFD)
+    adjust_default_frame_steps()
 
     # Init HDR variables
     hdr_init()
@@ -4287,6 +4518,18 @@ def uv_brightness_validation(new_value):
     return value_validation(new_value, uv_brightness_spinbox, 1, 255, 255)
 
 
+def cmd_vfd_mode():
+    global FrameDetectMode
+    if vfd_mode_value.get():
+        ConfigData['VFD'] = True
+        FrameDetectMode = 'VFD'
+        disable_canvas(plotter_canvas)
+    else:
+        ConfigData['VFD'] = False
+        FrameDetectMode = 'PFD'
+        enable_canvas(plotter_canvas)
+
+
 def cmd_stabilization_delay_selection():
     global StabilizationDelayValue
     StabilizationDelayValue = value_normalize(stabilization_delay_value, 0, 1000, 150)
@@ -4468,19 +4711,21 @@ def update_target_dir_wraplength(event):
 
 def cmd_plotter_canvas_click(event):
     global PlotterEnabled, PlotterScroll, PlotterWindowPos
-    if PlotterEnabled:
-        if not PlotterScroll:
-            PlotterScroll = True
-            logging.debug("Enable Plotter Scroll")
+
+    if FrameDetectMode == 'PFD':    # Plotter window only functional in PFD mode
+        if PlotterEnabled:
+            if not PlotterScroll:
+                PlotterScroll = True
+                logging.debug("Enable Plotter Scroll")
+            else:
+                PlotterEnabled = False
+                PlotterWindowPos = 0
+                logging.debug("Disable Plotter")
         else:
-            PlotterEnabled = False
+            PlotterEnabled = True
+            PlotterScroll = False
             PlotterWindowPos = 0
-            logging.debug("Disable Plotter")
-    else:
-        PlotterEnabled = True
-        PlotterScroll = False
-        PlotterWindowPos = 0
-        logging.debug("Enable Plotter, without scroll")
+            logging.debug("Enable Plotter, without scroll")
         
 
 # ***************
@@ -4562,6 +4807,7 @@ def create_widgets():
     global uv_brightness_value, uv_brightness_spinbox
     global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
     global capture_info_str
+    global vfd_mode_value
 
     # Global value for separations between widgets
     y_pad = 2
@@ -4612,6 +4858,7 @@ def create_widgets():
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight,
                                  name='draw_capture_canvas')
     draw_capture_canvas.pack(padx=(20, 5), pady=5)
+
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
     top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
@@ -4638,8 +4885,8 @@ def create_widgets():
     bottom_area_row = 0
 
     # Retreat movie button (slow backward through filmgate)
-    retreat_movie_btn = Button(top_left_area_frame, text="<", command=cmd_retreat_movie,
-                                activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
+    retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
+                                activebackground='#f0f0f0', relief=RAISED, 
                                 name='retreat_movie_btn')
     retreat_movie_btn.widget_type = "general"
     retreat_movie_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad,
@@ -4648,8 +4895,8 @@ def create_widgets():
                                         "reels in left position in order to avoid film jamming at film gate.")
 
     # Advance movie button (slow forward through filmgate)
-    AdvanceMovie_btn = Button(top_left_area_frame, text=">", command=cmd_advance_movie,
-                              activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize+3),
+    AdvanceMovie_btn = Button(top_left_area_frame, text="▶", command=cmd_advance_movie,
+                              activebackground='#f0f0f0', relief=RAISED, 
                               name='advanceMovie_btn')
     AdvanceMovie_btn.widget_type = "general"
     AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column + 1, padx=x_pad, pady=y_pad,
@@ -4674,13 +4921,13 @@ def create_widgets():
     snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    rewind_btn = Button(top_left_area_frame, text="<<", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
+    rewind_btn = Button(top_left_area_frame, text="◀◀", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
                         activebackground='#f0f0f0', relief=RAISED, name='rewind_btn')
     rewind_btn.widget_type = "general"
     rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    fast_forward_btn = Button(top_left_area_frame, text=">>", font=("Arial", FontSize + 3), height=2,
+    fast_forward_btn = Button(top_left_area_frame, text="▶▶", font=("Arial", FontSize + 3), height=2,
                              command=cmd_fast_forward_movie, activebackground='#f0f0f0', relief=RAISED,
                              name='fast_forward_btn')
     fast_forward_btn.widget_type = "general"
@@ -4735,19 +4982,19 @@ def create_widgets():
                              activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_minus_btn')
     focus_minus_btn.grid(row=0, column=0, sticky='NSEW')
     as_tooltips.add(focus_minus_btn, "Decrease zoom level.")
-    focus_lf_btn = Button(Focus_btn_grid_frame, text="⇐", height=1, command=cmd_set_focus_left, state='disabled',
+    focus_lf_btn = Button(Focus_btn_grid_frame, text="◀", height=1, command=cmd_set_focus_left, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_lf_btn')
     focus_lf_btn.grid(row=1, column=0, sticky='NSEW')
     as_tooltips.add(focus_lf_btn, "Move zoom view to the left.")
-    focus_up_btn = Button(Focus_btn_grid_frame, text="⇑", height=1, command=cmd_set_focus_up, state='disabled',
+    focus_up_btn = Button(Focus_btn_grid_frame, text="▲", height=1, command=cmd_set_focus_up, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_up_btn')
     focus_up_btn.grid(row=0, column=1, sticky='NSEW')
     as_tooltips.add(focus_up_btn, "Move zoom view up.")
-    focus_dn_btn = Button(Focus_btn_grid_frame, text="⇓", height=1, command=cmd_set_focus_down, state='disabled',
+    focus_dn_btn = Button(Focus_btn_grid_frame, text="▼", height=1, command=cmd_set_focus_down, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize), name='focus_dn_btn')
     focus_dn_btn.grid(row=1, column=1, sticky='NSEW')
     as_tooltips.add(focus_dn_btn, "Move zoom view down.")
-    focus_rt_btn = Button(Focus_btn_grid_frame, text="⇒", height=1, command=cmd_set_focus_right, state='disabled',
+    focus_rt_btn = Button(Focus_btn_grid_frame, text="▶", height=1, command=cmd_set_focus_right, state='disabled',
                           activebackground='#f0f0f0', font=("Arial", FontSize - 2), name='focus_rt_btn')
     focus_rt_btn.grid(row=1, column=2, sticky='NSEW')
     as_tooltips.add(focus_rt_btn, "Move zoom view to the right.")
@@ -4862,14 +5109,15 @@ def create_widgets():
                                 activebackground='red', activeforeground='white', relief=RAISED,
                                 font=("Arial", FontSize - 1), name='emergency_exit_btn')
     emergency_exit_btn.widget_type = "general"
-    emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
+    #emergency_exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='NEW')
+    emergency_exit_btn.grid_forget()
     as_tooltips.add(emergency_exit_btn, "Exit ALT-Scann8 without saving.")
 
-    exit_btn = Button(top_right_area_frame, text="Exit", height=2, command=cmd_app_standard_exit, activebackground='#f0f0f0',
+    exit_btn = Button(top_right_area_frame, text="Exit", height=4, command=cmd_app_standard_exit, activebackground='#f0f0f0',
                       font=("Arial", FontSize), name='exit_btn')
     exit_btn.widget_type = "general"
-    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='SEW')
-    as_tooltips.add(exit_btn, "Exit ALT-Scann8.")
+    exit_btn.grid(row=top_right_area_row, column=0, padx=x_pad, pady=y_pad, sticky='EW')
+    as_tooltips.add(exit_btn, "Exit ALT-Scann8. You can use the window close button ('x') to exit without saving changes")
 
     # Start scan button
     if SimulatedRun:
@@ -5782,6 +6030,14 @@ def create_widgets():
         as_tooltips.add(manual_uv_btn, "Manually switch UV led (to allow tunning using plotter)")
         experimental_row += 1
 
+        # VFD (Visual Frame Detection)
+        vfd_mode_value = tk.BooleanVar(value=FrameDetectMode=='VFD')
+        vfd_mode_btn = tk.Checkbutton(experimental_miscellaneous_frame, variable=vfd_mode_value, onvalue=True, offvalue=False,
+                                        font=("Arial", FontSize - 1), text="VisualDetect", command=cmd_vfd_mode)
+        vfd_mode_btn.widget_type = "experimental"
+        vfd_mode_btn.grid(row=experimental_row, column=0, columnspan=2,padx=x_pad, pady=y_pad)
+        as_tooltips.add(vfd_mode_btn, "Activate VisualDetect mode (Visual Frame Detection, phototransistor not used)")
+
     # Adjust plotter size based on right  frames
     win.update_idletasks()
     if PlotterEnabled:
@@ -5815,7 +6071,6 @@ def create_widgets():
         cmd_set_s8()
 
 
-
 def get_controller_version():
     if Controller_Id == 0:
         logging.debug("Requesting controller version")
@@ -5826,6 +6081,38 @@ def reset_controller():
     logging.debug("Resetting controller")
     send_arduino_command(CMD_RESET_CONTROLLER)
     time.sleep(0.5)
+
+
+# Get or generate persistent user ID
+def get_user_id():
+    if os.path.exists(anonymous_user_filename):
+        with open(anonymous_user_filename, "r") as f:
+            return f.read().strip()
+    else:
+        user_id = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+        with open(anonymous_user_filename, "w") as f:
+            f.write(user_id)
+        return user_id
+
+
+# Ping server if requests is available (call once at startup)
+def report_usage():
+    if os.path.exists(consent_filename) and open(consent_filename).read() == "yes" and requests_loaded:
+        encoded_2 = "Rucy5uZXQ6NTAwMC9jb3VudA=="
+        user_id = get_user_id()  # Reuse persistent ID
+        payload = {
+            "id": user_id,
+            "versions": {"ui": __version__, "controller": Controller_full_version}
+        }
+        encoded_1 = "aHR0cDovL2phdW4uZG"
+        server_url = base64.b64decode(encoded_1+encoded_2).decode("utf-8")        
+        try:
+            requests.post(server_url, json=payload, timeout=1)
+            logging.debug("Usage reporting done.")
+        except requests.RequestException:
+            pass  # Silent fail if offline
+    elif not REQUESTS_AVAILABLE:
+        logging.warning("Usage reporting skipped—install 'python3-requests' to enable (optional).")
 
 
 def main(argv):
@@ -5892,6 +6179,16 @@ def main(argv):
         logging.error("Numpy library could no tbe loaded.\r\nPlease install it with this command 'sudo apt install python3-numpy'.")
         return
 
+    # Check reporting consent on first run
+    if requests_loaded:
+        if not os.path.exists(consent_filename):
+            consent = tk.messagebox.askyesno(
+                "ALT-Scann8 User Count",
+                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
+            )
+            with open(consent_filename, "w") as f:
+                f.write("yes" if consent else "no")
+
     win = tkinter.Tk()  # Create temporary main window to support popups before main window is created
     win.withdraw()  # Hide temporary main window
 
@@ -5903,6 +6200,9 @@ def main(argv):
     load_config_data_pre_init()
 
     tscann8_init()
+
+    if not SimulatedRun:
+        arduino_listen_loop()
 
     if DisableToolTips:
         as_tooltips.disable()
@@ -5924,9 +6224,6 @@ def main(argv):
     if DisableThreads:
         logging.debug("Threads disabled.")
 
-    if not SimulatedRun:
-        arduino_listen_loop()
-
     ALT_scann_init_done = True
 
     refresh_qr_code()
@@ -5935,7 +6232,10 @@ def main(argv):
     data = generate_qr_code_info()
     logging.info(data)
 
+    report_usage()
+
     # *** ALT-Scann8 load complete ***
+
     if hw_panel_installed:
         hw_panel.ALT_Scann8_init_completed()
 
