@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.06"
-__date__ = "2025-02-27"
-__version_highlight__ = "Visual Frame Detection"
+__version__ = "1.12.07"
+__date__ = "2025-02-28"
+__version_highlight__ = "Visual Frame Detection - Restricted release"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1497,7 +1497,7 @@ def cmd_advance_movie(from_arduino=False):
 
     # Update button text
     if not AdvanceMovieActive:  # Advance movie is about to start...
-        AdvanceMovie_btn.config(text='⏹', bg='red', fg='white', 
+        AdvanceMovie_btn.config(text='■', bg='red', fg='white', 
                                 relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
         AdvanceMovie_btn.config(text='▶', bg=save_bg, fg=save_fg,
@@ -1524,7 +1524,7 @@ def cmd_retreat_movie():
 
     # Update button text
     if not RetreatMovieActive:  # Advance movie is about to start...
-        retreat_movie_btn.config(text='⏹', bg='red', fg='white', 
+        retreat_movie_btn.config(text='■', bg='red', fg='white', 
                                  relief=SUNKEN)  # ...so now we propose to stop it in the button test
     else:
         retreat_movie_btn.config(text='◀', bg=save_bg, fg=save_fg,
@@ -1550,7 +1550,7 @@ def cmd_rewind_movie():
     if not RewindMovieActive:  # Ask only when rewind is not ongoing
         RewindMovieActive = True
         # Update button text
-        rewind_btn.config(text='⏹', bg='red', fg='white', font=("Arial", FontSize + 3), 
+        rewind_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), 
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1572,7 +1572,7 @@ def cmd_rewind_movie():
         RewindMovieActive = False
 
     if not RewindMovieActive:
-        rewind_btn.config(text='⏪', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), 
+        rewind_btn.config(text='◀◀', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), 
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
         except_widget_global_enable(rewind_btn, not RewindMovieActive)
@@ -1610,7 +1610,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:  # Ask only when rewind is not ongoing
         FastForwardActive = True
         # Update button text
-        fast_forward_btn.config(text='⏹', bg='red', fg='white', font=("Arial", FontSize + 3), relief=SUNKEN)
+        fast_forward_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), relief=SUNKEN)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
@@ -1631,7 +1631,7 @@ def cmd_fast_forward_movie():
         FastForwardActive = False
 
     if not FastForwardActive:
-        fast_forward_btn.config(text='⏩', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), relief=RAISED)
+        fast_forward_btn.config(text='▶▶', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), relief=RAISED)
         # Enable/Disable related buttons
         except_widget_global_enable(fast_forward_btn, not FastForwardActive)
 
@@ -1864,6 +1864,21 @@ def capture_save_thread(queue, event, id):
         time_save_image.add_value(aux)
     active_threads -= 1
     logging.debug("Exiting capture_save_thread n.%i", id)
+
+
+def disable_canvas(canvas):
+    """Disables the canvas by graying it out and preventing interaction."""
+    canvas.create_rectangle(0, 0, canvas.winfo_width(), canvas.winfo_height(),
+                            fill="gray", stipple="gray50", tags="disable_overlay")  # Overlay a gray rectangle
+    canvas.bind("<Button-1>", lambda event: None)  # Disable clicks
+    # Disable other relevant events (e.g., <Motion>, <B1-Motion>, etc.)
+
+
+def enable_canvas(canvas):
+    """Enables the canvas by removing the gray overlay and restoring interaction."""
+    canvas.delete("disable_overlay")  # Remove the gray rectangle
+    canvas.unbind("<Button-1>")  # Re-enable clicks
+    # Re-enable other relevant events
 
 
 def draw_preview_image(preview_image, curframe, idx):
@@ -2827,17 +2842,17 @@ def capture_loop():
                 if not steps_completed:
                     logging.debug(f"VFD: Frame {CurrentFrame}, waiting for response from Arduino to complete required steps")
                     win.after(10, capture_loop)
-                    return # loog again to see if next attempt is OK
+                    return # loop again to see if next attempt is OK
                 else:
                     logging.debug(f"VFD: Frame {CurrentFrame}, response received comfirming required steps done")
                     steps_submitted = False
                     steps_completed = False
-            # time.sleep(0.05) # wait for film to settle (50 ms is enough, this is not the captured imnage, just to determine position)
+            time.sleep(0.05) # wait for film to settle (50 ms is enough, this is not the captured imnage, just to determine position)
             sample_image = camera.capture_image("main")
             # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
             image_np = np.array(sample_image)  # PIL gives RGB by default
             image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
-            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 0.6, slice_width = 30)
+            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 0.6, slice_width = 10)
             img_height = sample_image.size[1]
             pixels_per_step = img_height // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
             vfd_CurrentFrame_previous = CurrentFrame
@@ -2846,7 +2861,7 @@ def capture_loop():
                     vfd_attempts_on_same_frame += 1
                 #draw_preview_image(sample_image, 0, 0)
                 if offset > 100:
-                    steps_to_advance = pixels_per_step // 2
+                    steps_to_advance = (offset // pixels_per_step) - 5
                 elif offset > 20:
                     steps_to_advance = 4
                 else:
@@ -2862,7 +2877,7 @@ def capture_loop():
                     logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
             else:
                 NewFrameAvailable = True
-                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 30 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 20 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
                 scan_error_total_frames_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 if centered:
@@ -2920,7 +2935,7 @@ def capture_loop():
                         win.after(5, capture_loop)
                         return
             else:   # VFD
-                logging.debug(f"Frame {CurrentFrame}: Advancing to next frame usign {steps_to_next} steps")
+                logging.debug(f"Frame {CurrentFrame}: Advancing to next frame using {steps_to_next} steps")
                 scan_advance_steps(steps_to_next)
                 NewFrameAvailable = False
             ConfigData["CurrentDate"] = str(datetime.now())
@@ -3607,8 +3622,10 @@ def load_session_data_post_init():
                 if 'VFD' in ConfigData:
                     if ConfigData["VFD"]:
                         FrameDetectMode = 'VFD'
+                        disable_canvas(plotter_canvas)
                     else:
                         FrameDetectMode = 'PFD'
+                        enable_canvas(plotter_canvas)
                     vfd_mode_value.set(ConfigData["VFD"])
         else:   # If not loading previous session status, restore to default
             ConfigData["NegativeCaptureActive"] = NegativeImage
@@ -3664,8 +3681,10 @@ def load_session_data_post_init():
             if 'VFD' in ConfigData:
                 if ConfigData['VFD']:
                     FrameDetectMode = 'VFD'
+                    disable_canvas(plotter_canvas)
                 else:
                     FrameDetectMode = 'PFD'
+                    enable_canvas(plotter_canvas)
         # Expert mode options
         if ExpertMode:
             if 'ExposureWbAdaptPause' in ConfigData:
@@ -4504,9 +4523,11 @@ def cmd_vfd_mode():
     if vfd_mode_value.get():
         ConfigData['VFD'] = True
         FrameDetectMode = 'VFD'
+        disable_canvas(plotter_canvas)
     else:
         ConfigData['VFD'] = False
         FrameDetectMode = 'PFD'
+        enable_canvas(plotter_canvas)
 
 
 def cmd_stabilization_delay_selection():
@@ -4690,19 +4711,21 @@ def update_target_dir_wraplength(event):
 
 def cmd_plotter_canvas_click(event):
     global PlotterEnabled, PlotterScroll, PlotterWindowPos
-    if PlotterEnabled:
-        if not PlotterScroll:
-            PlotterScroll = True
-            logging.debug("Enable Plotter Scroll")
+
+    if FrameDetectMode == 'PFD':    # Plotter window only functional in PFD mode
+        if PlotterEnabled:
+            if not PlotterScroll:
+                PlotterScroll = True
+                logging.debug("Enable Plotter Scroll")
+            else:
+                PlotterEnabled = False
+                PlotterWindowPos = 0
+                logging.debug("Disable Plotter")
         else:
-            PlotterEnabled = False
+            PlotterEnabled = True
+            PlotterScroll = False
             PlotterWindowPos = 0
-            logging.debug("Disable Plotter")
-    else:
-        PlotterEnabled = True
-        PlotterScroll = False
-        PlotterWindowPos = 0
-        logging.debug("Enable Plotter, without scroll")
+            logging.debug("Enable Plotter, without scroll")
         
 
 # ***************
@@ -4898,13 +4921,13 @@ def create_widgets():
     snapshot_btn.grid_forget()
 
     # Rewind movie (via upper path, outside of film gate)
-    rewind_btn = Button(top_left_area_frame, text="⏪", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
+    rewind_btn = Button(top_left_area_frame, text="◀◀", font=("Arial", FontSize + 3), height=2, command=cmd_rewind_movie,
                         activebackground='#f0f0f0', relief=RAISED, name='rewind_btn')
     rewind_btn.widget_type = "general"
     rewind_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(rewind_btn, "Rewind film. Make sure film is routed via upper rolls.")
     # Fast Forward movie (via upper path, outside of film gate)
-    fast_forward_btn = Button(top_left_area_frame, text="⏩", font=("Arial", FontSize + 3), height=2,
+    fast_forward_btn = Button(top_left_area_frame, text="▶▶", font=("Arial", FontSize + 3), height=2,
                              command=cmd_fast_forward_movie, activebackground='#f0f0f0', relief=RAISED,
                              name='fast_forward_btn')
     fast_forward_btn.widget_type = "general"
@@ -6010,10 +6033,10 @@ def create_widgets():
         # VFD (Visual Frame Detection)
         vfd_mode_value = tk.BooleanVar(value=FrameDetectMode=='VFD')
         vfd_mode_btn = tk.Checkbutton(experimental_miscellaneous_frame, variable=vfd_mode_value, onvalue=True, offvalue=False,
-                                        font=("Arial", FontSize - 1), text="VFD", command=cmd_vfd_mode)
+                                        font=("Arial", FontSize - 1), text="VisualDetect", command=cmd_vfd_mode)
         vfd_mode_btn.widget_type = "experimental"
         vfd_mode_btn.grid(row=experimental_row, column=0, columnspan=2,padx=x_pad, pady=y_pad)
-        as_tooltips.add(vfd_mode_btn, "Activat eVFD mode (Visual Frame Detection)")
+        as_tooltips.add(vfd_mode_btn, "Activate VisualDetect mode (Visual Frame Detection, phototransistor not used)")
 
     # Adjust plotter size based on right  frames
     win.update_idletasks()
@@ -6104,7 +6127,7 @@ def main(argv):
     global win
 
     DisableToolTips = False
-    return
+
     opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
 
     for opt, arg in opts:
