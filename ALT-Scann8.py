@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.09"
+__version__ = "1.12.10"
 __date__ = "2025-02-28"
-__version_highlight__ = "Visual Frame Detection - Fix blocking error when bad frame counter is enabled"
+__version_highlight__ = "Visual Frame Detection - Several bug fixes"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -179,6 +179,7 @@ disk_space_error_to_notify = False
 
 ArduinoTrigger = 0
 last_frame_time = 0
+last_steps_time = 0
 reference_inactivity_delay = 6  # Max time (in sec) we wait for next frame. If expired, we force next frame again
 max_inactivity_delay = reference_inactivity_delay
 # Minimum number of steps per frame, to be passed to Arduino
@@ -1432,8 +1433,9 @@ def manual_scan_advance_frame_fraction(steps):
 
 
 def scan_advance_steps(steps):
-    global steps_completed, steps_submitted
+    global steps_completed, steps_submitted, last_steps_time
     if not SimulatedRun:
+        last_steps_time = time.time() + 2   # 2 seconds max of waitign for Arduino to perform requested steps
         steps_completed = False
         steps_submitted = True
         send_arduino_command(CMD_ADVANCE_FRAME_FRACTION, steps)
@@ -1662,7 +1664,46 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
-def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
+def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
+    height, width = img.shape[:2]
+    if slice_width > width:
+        raise ValueError("Slice width exceeds image width")
+    stripe = img[:, :slice_width]
+    gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
+    _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    middle = height // 2
+    margin = height * threshold // 100
+    height_profile = np.sum(binary_img, axis=1)
+    
+    # Dynamic thresholds
+    white_thresh = slice_width * 255 * 0.75
+    black_thresh = slice_width * 255 * 0.25
+    white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
+    
+    # Contiguous zones
+    min_gap_size = int(height * 0.08)
+    if len(white_heights) > 0:
+        gaps = np.where(np.diff(white_heights) > 1)[0]
+        areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
+        areas = [a for a in areas if len(a) > min_gap_size]
+        
+        result = 0
+        bigger = 0
+        for area in areas:
+            if len(area) > bigger:
+                bigger = len(area)
+                result = (area[0] + area[-1]) // 2
+                break
+        
+        if result != 0:
+            if middle - margin <= result <= middle + margin:
+                return True, 0
+            return False, result - middle if result > middle else -(middle - result)
+    return False, -1
+
+
+def is_frame_centered_old(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
     height = img.shape[0]
     width = img.shape[1]
@@ -1672,9 +1713,12 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
         raise ValueError("Slice width exceeds image width")
     sliced_image = img[:, :slice_width]
 
+    # Convert to grayscale
+    img = cv2.cvtColor(sliced_image, cv2.COLOR_BGR2GRAY)
+
     # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(sliced_image, 250, 255, cv2.THRESH_BINARY)
-    # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+    # _, binary_img = cv2.threshold(sliced_image, 220, 255, cv2.THRESH_BINARY)
+    _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
 
     # Calculate the middle horizontal line
     middle = height // 2
@@ -1726,23 +1770,6 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
         elif result > middle + margin:
             return False, result - middle
     return False, -1
-
-
-def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
-    # Read the image
-    if image_path.lower().endswith('.dng'):
-        with rawpy.imread(image_path) as raw:
-            rgb = raw.postprocess()
-            # Convert the numpy array to something OpenCV can work with
-            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-    else:
-        img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        
-    if img is None:
-        raise ValueError("Could not read the image")
-    
-    # Call is_frame_centered with the image
-    return is_frame_centered(img, film_type, threshold, slice_width)
 
 
 def reverse_image(image):
@@ -1854,7 +1881,7 @@ def capture_save_thread(queue, event, id):
                     captured_image.save(FrameFilenamePattern % (frame_idx, FileType),
                                         quality=95)
                     # Once the PIL Image has been saved, convert it to an array, as expected by is_frame_centered
-                    captured_image = np.array(captured_image.convert('L'))
+                    captured_image = np.array(captured_image)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
             if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
@@ -2809,7 +2836,7 @@ def capture_loop():
     global CapstanDiameter  # Temporary, check if it is a good idea to dynamically modify capstan diameter according to results
     global vfd_attempts_on_same_frame, vfd_CurrentFrame_previous
     global scan_error_counter, scan_error_total_frames_counter
-    global steps_submitted, steps_completed
+    global steps_submitted, steps_completed, last_steps_time
 
     if ScanStopRequested:
         stop_scan()
@@ -2844,12 +2871,15 @@ def capture_loop():
             #   - Check alignment 
             #   - If alignment OK, save it, otherwise perform additional steps until OK
             if steps_submitted:
-                if not steps_completed:
+                if not steps_completed and last_steps_time > time.time():
                     logging.debug(f"VFD: Frame {CurrentFrame}, waiting for response from Arduino to complete required steps")
                     win.after(10, capture_loop)
                     return # loop again to see if next attempt is OK
                 else:
-                    logging.debug(f"VFD: Frame {CurrentFrame}, response received comfirming required steps done")
+                    if not steps_completed: # Timeout waiting for steps completion confirmation from Arduino: Continue
+                        logging.warning(f"VFD: Frame {CurrentFrame}, timeout waiting for response comfirming required steps done")
+                    else:
+                        logging.debug(f"VFD: Frame {CurrentFrame}, response received comfirming required steps done")
                     steps_submitted = False
                     steps_completed = False
             time.sleep(0.05) # wait for film to settle (50 ms is enough, this is not the captured imnage, just to determine position)
@@ -3190,7 +3220,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
 
     if ArduinoTrigger == 0:  # Do nothing
         pass
-    elif ArduinoTrigger == RSP_VERSION_ID:  # New Frame available
+    elif ArduinoTrigger == RSP_VERSION_ID:  # Version Id response
         Controller_Id = ArduinoParam1%256
         if Controller_Id == 1:
             logging.info("Arduino controller detected")
@@ -3202,11 +3232,12 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         Controller_full_version = f"{Controller_type} {Controller_version}"
         win.title(f"ALT-Scann8 v{__version__} ({Controller_full_version})")  # setting title of the window
         required_controller_version = "1.1.8"
-        if check_version(Controller_version, required_controller_version):
-            tk.messagebox.showerror("Incompatible controller version", f"ALT-Scann8 {__version__} requires controller version {required_controller_version}, "
-                                    "you have {Controller_version} installed. Please upload it to your {Controller_type} and try again")
+        if not check_version(Controller_version, required_controller_version):
+            tk.messagebox.showerror(f"Incompatible controller version", f"ALT-Scann8 {__version__} requires controller version {required_controller_version}, "
+                                    f"you have {Controller_version} installed. Please upload it to your {Controller_type} and try again")
             exit_app(False) # If Arduino version not OK exit without saving
-        refresh_qr_code()
+        else:
+            refresh_qr_code()
     elif ArduinoTrigger == RSP_FORCE_INIT:  # Controller reloaded, sent init sequence again
         logging.debug("Controller requested to reinit")
         reinit_controller()
@@ -6112,7 +6143,21 @@ def get_user_id():
     if AnonymousUuid != None:
         return AnonymousUuid
     else:
-        AnonymousUuid = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+        serial = None
+        try:
+            with open('/proc/cpuinfo', 'r') as f:
+                for line in f:
+                    if line.startswith('Serial'):
+                        serial = line.split(':')[1].strip()
+                        break # exit for loop after finding serial number.
+        except FileNotFoundError:
+            logging.error(f"e")
+        if serial == None:
+            AnonymousUuid = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+            logging.debug(f"Generating generic uuid: {AnonymousUuid}")
+        else:
+            AnonymousUuid = hashlib.sha256(serial.encode()).hexdigest()
+            logging.debug(f"Generating RPi uuid: {AnonymousUuid}")
         ConfigData['AnonymousUuid'] = AnonymousUuid
         return AnonymousUuid
 
