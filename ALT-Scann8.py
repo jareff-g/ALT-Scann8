@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.08"
+__version__ = "1.12.09"
 __date__ = "2025-02-28"
-__version_highlight__ = "Visual Frame Detection - Move user consent + uuid inside configuration"
+__version_highlight__ = "Visual Frame Detection - Fix blocking error when bad frame counter is enabled"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1824,7 +1824,8 @@ def capture_save_thread(queue, event, id):
             if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
                 if not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
                     scan_error_counter += 1
-                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                    if scan_error_total_frames_counter > 0:
+                        scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     with open(scan_error_log_fullpath, 'a') as f:
                         f.write(f"Misaligned frame, {CurrentFrame}\n")
             logging.debug("Thread %i saved request DNG image: %s ms", id,
@@ -1858,7 +1859,8 @@ def capture_save_thread(queue, event, id):
                               str(round((time.time() - curtime) * 1000, 1)))
             if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
                 scan_error_counter += 1
-                scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+                if scan_error_total_frames_counter > 0:
+                    scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 with open(scan_error_log_fullpath, 'a') as f:
                     f.write(f"Misaligned frame, {CurrentFrame}\n")
             logging.debug("Thread %i after checking misaligned frames", id)
@@ -2891,8 +2893,8 @@ def capture_loop():
                     else:
                         logging.debug(f"VFD frame {CurrentFrame} capture OK !!! (with small shift of {offset} pixels)")
                 else:
-                    #if (abs(offset) > int(img_height*0.05)):    # Do not count small deviations
-                    scan_error_counter += 1  
+                    if abs(offset) > int(img_height*0.05):    # We consider frame in error if final offset > 5% of frame height (76 pixels for a 1520 pixel tall image)
+                        scan_error_counter += 1
                     scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                     logging.warning(f"VFD: Frame {CurrentFrame} was captured past the correct position (by {abs(offset)} pixels), it might not be correct.")
                     if abs(offset) > 20:
@@ -3219,7 +3221,8 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         logging.warning("Received scan error from Arduino (%i, %i)", ArduinoParam1, ArduinoParam2)
         ScanProcessError = True
         scan_error_counter += 1
-        scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
+        if scan_error_total_frames_counter > 0:
+            scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
         with open(scan_error_log_fullpath, 'a') as f:
             f.write(f"No Frame detected, {CurrentFrame}, {ArduinoParam1}, {ArduinoParam2}\n")
     elif ArduinoTrigger == RSP_SCAN_ENDED:  # Scan arrived at the end of the reel
