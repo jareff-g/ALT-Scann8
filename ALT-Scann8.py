@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.07"
+__version__ = "1.12.08"
 __date__ = "2025-02-28"
-__version_highlight__ = "Visual Frame Detection - Restricted release"
+__version_highlight__ = "Visual Frame Detection - Move user consent + uuid inside configuration"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -168,6 +168,9 @@ ScanProcessError_LastTime = 0
 ScriptDir = os.path.dirname(os.path.realpath(__file__))
 ConfigurationDataFilename = os.path.join(ScriptDir, "ALT-Scann8.json")
 ConfigurationDataLoaded = False
+# Info required for usage counter
+UserConsent = None
+AnonymousUuid = None
 consent_filename = os.path.join(ScriptDir, "user_consent.txt")  # Adjust to your file’s location
 anonymous_user_filename = os.path.join(ScriptDir, "alt_scann8_id.txt")  # Adjust to your file’s location
 # Variables to deal with remaining disk space
@@ -3466,6 +3469,7 @@ def validate_config_folders():
 def load_config_data_pre_init():
     global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
+    global UserConsent, AnonymousUuid
 
     for item in ConfigData:
         logging.debug("%s=%s", item, str(ConfigData[item]))
@@ -3512,6 +3516,22 @@ def load_config_data_pre_init():
             LogLevel = ConfigData["LogLevel"]
             LoggingMode = logging.getLevelName(LogLevel)
             logging.getLogger().setLevel(LogLevel)
+        if 'UserConsent' in ConfigData:
+            UserConsent = ConfigData["UserConsent"]
+        if 'AnonymousUuid' in ConfigData:
+            AnonymousUuid = ConfigData["AnonymousUuid"]
+
+
+def init_user_count_data():
+    global UserConsent, AnonymousUuid, ConfigData
+
+    if UserConsent == None and os.path.exists(consent_filename):
+        UserConsent = open(consent_filename).read()
+        ConfigData["UserConsent"] = UserConsent
+    if AnonymousUuid == None and os.path.exists(anonymous_user_filename):
+        with open(anonymous_user_filename, "r") as f:
+            AnonymousUuid = f.read().strip()
+            ConfigData["AnonymousUuid"] = AnonymousUuid
 
 
 def load_session_data_post_init():
@@ -6085,19 +6105,18 @@ def reset_controller():
 
 # Get or generate persistent user ID
 def get_user_id():
-    if os.path.exists(anonymous_user_filename):
-        with open(anonymous_user_filename, "r") as f:
-            return f.read().strip()
+    global AnonymousUuid, ConfigData
+    if AnonymousUuid != None:
+        return AnonymousUuid
     else:
-        user_id = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
-        with open(anonymous_user_filename, "w") as f:
-            f.write(user_id)
-        return user_id
+        AnonymousUuid = hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+        ConfigData['AnonymousUuid'] = AnonymousUuid
+        return AnonymousUuid
 
 
 # Ping server if requests is available (call once at startup)
 def report_usage():
-    if os.path.exists(consent_filename) and open(consent_filename).read() == "yes" and requests_loaded:
+    if UserConsent == "yes" and requests_loaded:
         encoded_2 = "Rucy5uZXQ6NTAwMC9jb3VudA=="
         user_id = get_user_id()  # Reuse persistent ID
         payload = {
@@ -6111,7 +6130,7 @@ def report_usage():
             logging.debug("Usage reporting done.")
         except requests.RequestException:
             pass  # Silent fail if offline
-    elif not REQUESTS_AVAILABLE:
+    elif not requests_loaded:
         logging.warning("Usage reporting skipped—install 'python3-requests' to enable (optional).")
 
 
@@ -6125,6 +6144,7 @@ def main(argv):
     global WidgetsEnabledWhileScanning
     global DisableToolTips
     global win
+    global UserConsent, ConfigData
 
     DisableToolTips = False
 
@@ -6179,16 +6199,6 @@ def main(argv):
         logging.error("Numpy library could no tbe loaded.\r\nPlease install it with this command 'sudo apt install python3-numpy'.")
         return
 
-    # Check reporting consent on first run
-    if requests_loaded:
-        if not os.path.exists(consent_filename):
-            consent = tk.messagebox.askyesno(
-                "ALT-Scann8 User Count",
-                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
-            )
-            with open(consent_filename, "w") as f:
-                f.write("yes" if consent else "no")
-
     win = tkinter.Tk()  # Create temporary main window to support popups before main window is created
     win.withdraw()  # Hide temporary main window
 
@@ -6198,6 +6208,18 @@ def main(argv):
         return
 
     load_config_data_pre_init()
+
+    init_user_count_data()
+
+    # Check reporting consent on first run
+    if requests_loaded:
+        if UserConsent == None:
+            consent = tk.messagebox.askyesno(
+                "ALT-Scann8 User Count",
+                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
+            )
+            UserConsent = "yes" if consent else "no"
+            ConfigData['UserConsent'] = UserConsent
 
     tscann8_init()
 
