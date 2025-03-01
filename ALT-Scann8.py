@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.10"
-__date__ = "2025-02-28"
-__version_highlight__ = "Visual Frame Detection - Several bug fixes"
+__version__ = "1.12.11"
+__date__ = "2025-03-01"
+__version_highlight__ = "Add product to usage report"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -6169,7 +6169,7 @@ def report_usage():
         user_id = get_user_id()  # Reuse persistent ID
         payload = {
             "id": user_id,
-            "versions": {"ui": __version__, "controller": Controller_full_version}
+            "versions": {"product": __module__, "ui": __version__, "controller": Controller_full_version}
         }
         encoded_1 = "aHR0cDovL2phdW4uZG"
         server_url = base64.b64decode(encoded_1+encoded_2).decode("utf-8")        
