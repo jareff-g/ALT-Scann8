@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.11"
+__version__ = "1.12.12"
 __date__ = "2025-03-01"
-__version_highlight__ = "Add product to usage report"
+__version_highlight__ = "Add workaround for possible bug in tkinter filedialog.askdirectory"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1308,13 +1308,14 @@ def set_base_folder():
     global BaseFolder, CurrentDir, NewBaseFolder
     options_dlg.withdraw()  # Hide the root window
     TmpBaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", parent=None)
-    if not os.path.isdir(TmpBaseFolder):
-        tk.messagebox.showerror("Error!", f"Folder {TmpBaseFolder} does not exist. Please specify an existing folder name.")
-    else:
-        NewBaseFolder = TmpBaseFolder
-        if CurrentDir == '':
-            CurrentDir = NewBaseFolder
-        base_folder_btn.config(text=NewBaseFolder)
+    if type(TmpBaseFolder) == "<class 'str'>" and TmpBaseFolder != "" and TmpBaseFolder is not None:
+        if not os.path.isdir(TmpBaseFolder):
+            tk.messagebox.showerror("Error!", f"Folder {TmpBaseFolder} does not exist. Please specify an existing folder name.")
+        else:
+            NewBaseFolder = TmpBaseFolder
+            if CurrentDir == '':
+                CurrentDir = NewBaseFolder
+            base_folder_btn.config(text=NewBaseFolder)
 
     options_dlg.deiconify()
 
