@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.13"
+__version__ = "1.12.14"
 __date__ = "2025-03-01"
-__version_highlight__ = "Save settings also when clicking on settings/OK"
+__version_highlight__ = "Fix exception when dealing with DNG images"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1850,7 +1850,7 @@ def capture_save_thread(queue, event, id):
             else:  # Non HDR
                 request.save_dng(FrameFilenamePattern % (frame_idx, FileType))                    
                 if DetectMisalignedFrames and can_check_dng_frames_for_misalignment:
-                    captured_image = request.make_array('main')[:,:,0]
+                    captured_image = request.make_array('main')
             request.release()   # Release request ASAP (delay frame alignment check)
             if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
                 if not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
