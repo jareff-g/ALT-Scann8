@@ -6169,7 +6169,7 @@ def report_usage():
         user_id = get_user_id()  # Reuse persistent ID
         payload = {
             "id": user_id,
-            "versions": {"product": "Alt-Scann8", "ui": __version__, "controller": Controller_full_version}
+            "versions": {"product": __module__, "ui": __version__, "controller": Controller_full_version}
         }
         encoded_1 = "aHR0cDovL2phdW4uZG"
         server_url = base64.b64decode(encoded_1+encoded_2).decode("utf-8")        
