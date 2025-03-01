@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.12"
+__version__ = "1.12.13"
 __date__ = "2025-03-01"
-__version_highlight__ = "Add workaround for possible bug in tkinter filedialog.askdirectory"
+__version_highlight__ = "Save settings also when clicking on settings/OK"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -963,6 +963,9 @@ def cmd_settings_popup_accept():
         as_tooltips.disable()
     else:
         as_tooltips.enable()
+
+    with open(ConfigurationDataFilename, 'w') as f:
+        json.dump(ConfigData, f)
 
     options_dlg.grab_release()
     options_dlg.destroy()
