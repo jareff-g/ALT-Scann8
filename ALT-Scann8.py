@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.14"
+__version__ = "1.12.15"
 __date__ = "2025-03-01"
-__version_highlight__ = "Fix exception when dealing with DNG images"
+__version_highlight__ = "Extend scope of VisualDetect to be used with damaged film"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -142,6 +142,7 @@ StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
 vfd_CurrentFrame_previous = 0   # Used by VFD for automatic CapstanDiameter adjustment
 vfd_attempts_on_same_frame = 0      # Used by VFD to calculate statistics
+vfd_sprocket_hole_x = 0     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
 steps_completed = False
 steps_submitted = False
 frames_to_go_key_press_time = 0
@@ -374,6 +375,7 @@ CameraDisabled = False  # To allow testing scanner without a camera installed
 KeepManualValues = False    # In case we want to keep manual values when switching to auto
 # QR code to display debug info
 qr_image = None
+dev_debug_enabled = True
 
 # Dictionaries for additional exposure control with PiCamera2
 if not SimulatedRun and not CameraDisabled:
@@ -1420,6 +1422,7 @@ def adjust_default_frame_steps():
 def cmd_Manual_scan_activated_selection():
     global ManualScanEnabled
     ManualScanEnabled = Manual_scan_activated.get()
+    widget_enable(start_btn, not ManualScanEnabled)
     widget_enable(manual_scan_advance_fraction_5_btn, ManualScanEnabled)
     widget_enable(manual_scan_advance_fraction_20_btn, ManualScanEnabled)
     widget_enable(manual_scan_take_snap_btn, ManualScanEnabled)
@@ -1496,7 +1499,7 @@ def rwnd_speed_up():
 
 def cmd_frame_extra_steps_selection():
     global FrameExtraStepsValue
-    FrameExtraStepsValue = value_normalize(frame_extra_steps_value, -30, 30, 0)
+    FrameExtraStepsValue = value_normalize(frame_extra_steps_value, 0, 30, 0)
     ConfigData["FrameExtraSteps"] = FrameExtraStepsValue
     send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
 
@@ -1668,11 +1671,95 @@ def fast_forward_loop():
 # *******************************************************************
 # ********************** Capture functions **************************
 # *******************************************************************
+def resize_image(img, ratio):
+    # Calculate the proportional size of original image
+    width = int(img.shape[1] * ratio)
+    height = int(img.shape[0] * ratio)
+
+    dsize = (width, height)
+
+    # resize image
+    return cv2.resize(img, dsize)
+
+def debug_display_image(window_name, img):
+    if dev_debug_enabled:
+        cv2.namedWindow(window_name)
+        if img.shape[0] >= 2 and img.shape[1] >= 2:
+            img_s = resize_image(img, 0.5)
+        else:
+            img_s = img
+        cv2.imshow(window_name, img_s)
+        cv2.waitKey(0)
+        window_visible = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE)
+        if window_visible > 0:
+            cv2.destroyWindow(window_name)
+
+
+def find_sprocket_best_x(film_type='S8', slice_width=20):
+    global vfd_sprocket_hole_x
+    # First, campture sample image to calculate value
+    sample_image = camera.capture_image("main")
+    # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
+    image_np = np.array(sample_image)  # PIL gives RGB by default
+    image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
+
+    """Find the optimal x-position of the sprocket hole (middle or right edge)."""
+    height, width, _ = image_bgr.shape
+    min_hole_width = int(width * 0.025) # Minimum hole width is 2.5% of the image width (and that is already a bit small)
+
+    # Get vertical position to extract horizontal slice (center for S8, top or bottom for R8)
+    vfd_sprocket_hole_x = 0 # Force is frame centered to search with a stripe starting on the left edge
+    if (film_type == 'S8'):
+        _, offset = is_frame_centered(image_bgr, film_type)
+        hole_y = height // 2 + offset
+        logging.debug(f"find_sprocket_best_x({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
+    else:
+        _, offset = is_frame_centered(image_bgr, film_type)
+        hole_y = height // 2 + offset 
+        if hole_y - height // 2 < 0:
+            hole_y += height // 2 - slice_width//2
+        else:
+            hole_y -= height // 2 + slice_width//2
+        hole_y -= slice_width//2
+        logging.debug(f"find_sprocket_best_x({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
+
+
+    stripe = image_bgr[hole_y - slice_width//2:hole_y + slice_width//2, :]
+
+    gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Sum columns—horizontal profile
+    x_profile = np.sum(binary, axis=0)  # Shape: (width,)
+    white_thresh = slice_width * 255 * 0.75  # 75% white—sprocket
+    
+    # Find white sprocket zone
+    sprocket_cols = np.where(x_profile > white_thresh)[0]
+    if len(sprocket_cols) == 0:
+        logging.error(f"find_sprocket_best_x: No sproket holes found in image")
+        return width // 4  # Fallback—left quarter guess
+    
+    # Split into contiguous zones
+    gaps = np.where(np.diff(sprocket_cols) > 1)[0]
+    zones = np.split(sprocket_cols, gaps + 1) if len(gaps) > 0 else [sprocket_cols]
+    zones = [z for z in zones if len(z) >= min_hole_width]  # Filter noise
+    
+    if not zones:
+        logging.error(f"find_sprocket_best_x: No holes found in stripe")
+        return width // 4  # Fallback
+    
+    # Leftmost sprocket—middle or right edge
+    sprocket_zone = zones[0]
+    # vfd_sprocket_hole_x = (sprocket_zone[0] + sprocket_zone[-1]) // 2  # Middle
+    vfd_sprocket_hole_x = sprocket_zone[-1]  # Right edge
+    logging.debug(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
+    
+    
 def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
     height, width = img.shape[:2]
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    stripe = img[:, :slice_width]
+    stripe = img[:, vfd_sprocket_hole_x:vfd_sprocket_hole_x + slice_width]
     gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
     _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
@@ -2739,6 +2826,7 @@ def start_scan():
     global last_frame_time
     global AutoExpEnabled, AutoWbEnabled
     global splash_id
+    global vfd_sprocket_hole_x
 
     if splash_id != None:
         draw_capture_canvas.delete(splash_id)
@@ -2792,6 +2880,9 @@ def start_scan():
         total_wait_time_autoexp = 0
         session_start_time = time.time()
         session_frames = 0
+
+        # Calculate best x position for vertical slice in VFD mode
+        find_sprocket_best_x(FilmType)
 
         # Send command to Arduino to start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun and not CameraDisabled:
@@ -5779,7 +5870,7 @@ def create_widgets():
 
         frame_extra_steps_value = tk.IntVar(value=FrameExtraStepsValue)  # To be overridden by config
         frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_extra_steps_selection, width=4,
-                                                   readonlybackground='pale green', from_=-30, to=30,
+                                                   readonlybackground='pale green', from_=0, to=30,
                                                    textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
                                                    name='frame_extra_steps_spinbox')
         frame_extra_steps_spinbox.widget_type = "control"
@@ -5787,7 +5878,7 @@ def create_widgets():
         cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
         as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
-                                                   "detection (n between -30 and 30). Negative values can help if "
+                                                   "detection (n between 0 and 30). Negative values can help if "
                                                    "film gate is not correctly positioned.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
         frame_align_row += 1
