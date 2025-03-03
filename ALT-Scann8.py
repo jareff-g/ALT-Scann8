@@ -375,7 +375,7 @@ CameraDisabled = False  # To allow testing scanner without a camera installed
 KeepManualValues = False    # In case we want to keep manual values when switching to auto
 # QR code to display debug info
 qr_image = None
-dev_debug_enabled = True
+dev_debug_enabled = False
 
 # Dictionaries for additional exposure control with PiCamera2
 if not SimulatedRun and not CameraDisabled:
