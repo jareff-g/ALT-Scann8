@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.16"
+__version__ = "1.12.17"
 __date__ = "2025-03-04"
-__version_highlight__ = "Fix bug when capturing PNG"
+__version_highlight__ = "Add menu bar with links (to wiki, discord, etc)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -51,6 +51,7 @@ import math
 import hashlib
 import uuid
 import base64
+import webbrowser
 
 try:
     import requests
@@ -3738,7 +3739,7 @@ def load_session_data_post_init():
                 logging.debug(f"Retrieved from config: FileType = {FileType} ({ConfigData['FileType']})")
             if 'CurrentDir' in ConfigData:
                 CurrentDir = ConfigData["CurrentDir"]
-                if CurrentDir != '':    # Respect empty currentdir in case no tyet set after very first run
+                if CurrentDir != '':    # Respect empty currentdir in case not yet set after very first run
                     # If directory in configuration does not exist we set the current working dir
                     if not os.path.isdir(CurrentDir):
                         CurrentDir = os.getcwd()
@@ -5011,6 +5012,30 @@ def create_widgets():
         scrolled_canvas = None
         main_container = win
 
+    # Menu bar
+    menu_bar = tk.Menu(main_container)
+    main_container.config(menu=menu_bar)
+    
+    # File menu
+    file_menu = tk.Menu(menu_bar, tearoff=0)
+    menu_bar.add_cascade(label="File", menu=file_menu)
+    """
+    file_menu.add_command(label="Save job list", command=save_named_job_list)
+    file_menu.add_command(label="Load job list", command=load_named_job_list)
+    file_menu.add_separator()  # Optional divider
+    """
+    file_menu.add_command(label="Exit", command=lambda: exit_app(True))
+
+    # Help Menu
+    help_menu = tk.Menu(menu_bar, tearoff=0)
+    menu_bar.add_cascade(label="Help", menu=help_menu)
+    help_menu.add_command(label="User Guide", command=lambda: webbrowser.open("https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface"))
+    help_menu.add_command(label="Discord Server", command=lambda: webbrowser.open("https://discord.gg/r2UGkH7qg2"))
+    help_menu.add_command(label="AfterScan Wiki", command=lambda: webbrowser.open("https://github.com/jareff-g/ALT-Scann8/wiki"))
+    if UserConsent == "no":
+        help_menu.add_command(label="Report AfterScan usage", command=lambda: get_consent(True))
+    help_menu.add_command(label="About AfterScan", command=lambda: webbrowser.open("https://github.com/jareff-g/ALT-Scann8#alt-scann-8-user-interface"))
+
     # Create a frame to contain the top area (preview + Right buttons) ***************
     top_area_frame = Frame(main_container, name='main_container')
     top_area_frame.pack(side=TOP, pady=(8, 0), anchor=NW, fill='both')
@@ -6275,6 +6300,21 @@ def get_user_id():
         return AnonymousUuid
 
 
+def get_consent(force = False):
+    global UserConsent, ConfigData, LastConsentDate
+    # Check reporting consent
+    if requests_loaded:
+        if force or UserConsent == None or LastConsentDate == None or (UserConsent == 'no' and (datetime.today()-LastConsentDate).days >= 60):
+            consent = tk.messagebox.askyesno(
+                "ALT-Scann8 User Count",
+                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
+            )
+            LastConsentDate = datetime.today()
+            ConfigData['LastConsentDate'] = LastConsentDate.isoformat()
+            UserConsent = "yes" if consent else "no"
+            ConfigData['UserConsent'] = UserConsent
+
+
 # Ping server if requests is available (call once at startup)
 def report_usage():
     if UserConsent == "yes" and requests_loaded:
@@ -6348,6 +6388,10 @@ def main(argv):
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
 
+    # Set our CWD to the same folder where the script is. 
+    # Otherwise webbrowser failt to launch (cannot open path of the current working directory: Permission denied)
+    os.chdir(ScriptDir) 
+
     LogLevel = getattr(logging, LoggingMode.upper(), None)
     if not isinstance(LogLevel, int):
         raise ValueError('Invalid log level: %s' % LogLevel)
@@ -6373,16 +6417,7 @@ def main(argv):
     init_user_count_data()
 
     # Check reporting consent on first run
-    if requests_loaded:
-        if UserConsent == None or LastConsentDate == None or (UserConsent == 'no' and (datetime.today()-LastConsentDate).days >= 60):
-            consent = tk.messagebox.askyesno(
-                "ALT-Scann8 User Count",
-                "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
-            )
-            LastConsentDate = datetime.today()
-            ConfigData['LastConsentDate'] = LastConsentDate.isoformat()
-            UserConsent = "yes" if consent else "no"
-            ConfigData['UserConsent'] = UserConsent
+    get_consent()
 
     tscann8_init()
 
