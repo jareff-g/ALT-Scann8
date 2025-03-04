@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.17"
+__version__ = "1.12.18"
 __date__ = "2025-03-04"
-__version_highlight__ = "Add menu bar with links (to wiki, discord, etc)"
+__version_highlight__ = "Fix bug in window dimensions due to addition of menu"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -4208,7 +4208,7 @@ def display_splash():
 def create_main_window():
     global win
     global plotter_width, plotter_height
-    global PreviewWinX, PreviewWinY, app_width, app_height, original_app_height, PreviewWidth, PreviewHeight
+    global PreviewWinX, PreviewWinY, app_width, app_height, PreviewWidth, PreviewHeight
     global FontSize
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
@@ -4246,8 +4246,6 @@ def create_main_window():
         logging.info(f"Font size: {FontSize}")
     PreviewWidth = 700
     PreviewHeight = int(PreviewWidth / (4 / 3))
-    app_width = PreviewWidth + 420
-    app_height = PreviewHeight + 50
     # Set minimum plotter size, to be adjusted later based on left frame width
     plotter_width = 20
     plotter_height = 10
@@ -4256,17 +4254,6 @@ def create_main_window():
     FilmHoleHeightBottom = int(PreviewHeight / 3.7)
     FilmHoleY_Top = 6
     FilmHoleY_Bottom = int(PreviewHeight / 1.25)
-    if ExpertMode or ExperimentalMode:
-        app_height += 325
-    # Check if window fits on screen, otherwise reduce and add scroll bar
-    if app_height > screen_height:
-        app_height = screen_height - 128
-    # Save original ap height for toggle UI button
-    original_app_height = app_height
-    # Prevent window resize
-    win.minsize(app_width, app_height)
-    win.maxsize(app_width, app_height)
-    win.geometry(f'{app_width}x{app_height - 20}')  # setting the size of the window
     if 'WindowPos' in ConfigData:
         win.geometry(f"+{ConfigData['WindowPos'].split('+', 1)[1]}")
 
@@ -4280,7 +4267,6 @@ def create_main_window():
 
     display_splash()
 
-    logging.info(f"Window size: {app_width}x{app_height + 20}")
 
     # Get Top window coordinates
     TopWinX = win.winfo_x()
@@ -6248,8 +6234,9 @@ def create_widgets():
     # Prevent window resize
     # Get screen size - maxsize gives the usable screen size
     main_container.update_idletasks()
+    win.update()
     app_width = min(main_container.winfo_reqwidth(), screen_width - 150)
-    app_height = min(main_container.winfo_reqheight(), screen_height - 150)
+    app_height = min(main_container.winfo_reqheight(), screen_height - 150) + menu_bar.winfo_reqheight()
     if ExpertMode and extended_frame.winfo_reqwidth() > top_area_frame.winfo_reqwidth():
         x = int((extended_frame.winfo_reqwidth() - top_area_frame.winfo_reqwidth()) / 2)
         top_area_frame.config(padx=x-1)
