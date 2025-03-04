@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.15"
-__date__ = "2025-03-01"
-__version_highlight__ = "Extend scope of VisualDetect to be used with damaged film"
+__version__ = "1.12.16"
+__date__ = "2025-03-04"
+__version_highlight__ = "Fix bug when capturing PNG"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -172,6 +172,7 @@ ConfigurationDataLoaded = False
 # Info required for usage counter
 UserConsent = None
 AnonymousUuid = None
+LastConsentDate = None
 consent_filename = os.path.join(ScriptDir, "user_consent.txt")  # Adjust to your file’s location
 anonymous_user_filename = os.path.join(ScriptDir, "alt_scann8_id.txt")  # Adjust to your file’s location
 # Variables to deal with remaining disk space
@@ -605,8 +606,7 @@ def exit_app(do_save):  # Exit Application
         ConfigData["FramesToGo"] = -1
     # Write session data upon exit
     if do_save:
-        with open(ConfigurationDataFilename, 'w') as f:
-            json.dump(ConfigData, f)
+        save_configuration_data_to_disk()
 
     win.config(cursor="")
 
@@ -966,8 +966,7 @@ def cmd_settings_popup_accept():
     else:
         as_tooltips.enable()
 
-    with open(ConfigurationDataFilename, 'w') as f:
-        json.dump(ConfigData, f)
+    save_configuration_data_to_disk()
 
     options_dlg.grab_release()
     options_dlg.destroy()
@@ -1959,7 +1958,7 @@ def capture_save_thread(queue, event, id):
                 else:  # Non HDR
                     request.save('main', FrameFilenamePattern % (frame_idx, FileType))
                     if DetectMisalignedFrames:
-                        captured_image = request.make_array('main')[:,:,0]
+                        captured_image = request.make_array('main')
                 request.release()
                 logging.debug("Thread %i saved request image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
@@ -3561,6 +3560,24 @@ def except_widget_global_enable_aux(except_button, enabled, widget):
                 if except_button != widget:
                     widget_enable(widget, enabled, 5)
 
+
+def sort_nested_json(data):
+    """Sorts keys in nested dictionaries."""
+    if isinstance(data, dict):
+        return {k: sort_nested_json(data[k]) for k in sorted(data)}
+    elif isinstance(data, list):
+        return [sort_nested_json(item) for item in data]
+    else:
+        return data
+
+
+def save_configuration_data_to_disk():
+    """Saves sorted nested JSON data to a file."""
+    sorted_data = sort_nested_json(ConfigData)
+    with open(ConfigurationDataFilename, 'w') as f:
+        json.dump(sorted_data, f, indent=4)
+
+
 def load_configuration_data_from_disk():
     global ConfigData
     global ConfigurationDataLoaded
@@ -3574,7 +3591,6 @@ def load_configuration_data_from_disk():
         logging.debug("Config data loaded from %s", ConfigurationDataFilename)
     else:
         logging.debug("Config data not loaded, file %s does not exist", ConfigurationDataFilename)
-
 
 
 def validate_config_folders():
@@ -3598,7 +3614,7 @@ def validate_config_folders():
 def load_config_data_pre_init():
     global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips, BaseFolder
     global WidgetsEnabledWhileScanning, LogLevel, LoggingMode, ColorCodedButtons, TempInFahrenheit, LogLevel
-    global UserConsent, AnonymousUuid
+    global UserConsent, AnonymousUuid, LastConsentDate
 
     for item in ConfigData:
         logging.debug("%s=%s", item, str(ConfigData[item]))
@@ -3649,6 +3665,8 @@ def load_config_data_pre_init():
             UserConsent = ConfigData["UserConsent"]
         if 'AnonymousUuid' in ConfigData:
             AnonymousUuid = ConfigData["AnonymousUuid"]
+        if 'LastConsentDate' in ConfigData:
+            LastConsentDate = datetime.fromisoformat(ConfigData["LastConsentDate"])
 
 
 def init_user_count_data():
@@ -6287,7 +6305,7 @@ def main(argv):
     global WidgetsEnabledWhileScanning
     global DisableToolTips
     global win
-    global UserConsent, ConfigData
+    global UserConsent, ConfigData, LastConsentDate
 
     DisableToolTips = False
 
@@ -6356,11 +6374,13 @@ def main(argv):
 
     # Check reporting consent on first run
     if requests_loaded:
-        if UserConsent == None:
+        if UserConsent == None or LastConsentDate == None or (UserConsent == 'no' and (datetime.today()-LastConsentDate).days >= 60):
             consent = tk.messagebox.askyesno(
                 "ALT-Scann8 User Count",
                 "Help us count ALT-Scann8 users anonymously? Reports UI+Controller versions to track usage. No personal data is collected, just an anonymous hash plus ALT-Scann8 + controller versions."
             )
+            LastConsentDate = datetime.today()
+            ConfigData['LastConsentDate'] = LastConsentDate.isoformat()
             UserConsent = "yes" if consent else "no"
             ConfigData['UserConsent'] = UserConsent
 
