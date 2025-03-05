@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.19"
+__version__ = "1.12.20"
 __date__ = "2025-03-05"
-__version_highlight__ = "Add logo to ALT-Scann8"
+__version_highlight__ = "Bugfixes: Target folder not set after base folder; False positives in misaligned frames"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -847,7 +847,8 @@ def cmd_settings_popup_accept():
     global FrameFineTuneValue, ScanSpeedValue
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
-    global ConfigData, BaseFolder
+    global ConfigData, BaseFolder, CurrentDir
+
 
     ConfigData["PopupPos"] = options_dlg.geometry()
 
@@ -942,9 +943,11 @@ def cmd_settings_popup_accept():
     if FileType != file_type_dropdown_selected.get():
         FileType = file_type_dropdown_selected.get()
         ConfigData["FileType"] = FileType
-    if NewBaseFolder != BaseFolder:
+    if NewBaseFolder != BaseFolder or CurrentDir == "":
         BaseFolder = NewBaseFolder
         ConfigData["BaseFolder"] = str(BaseFolder)
+        refresh_ui = True
+        folder_frame_target_dir.config(text=CurrentDir)
 
     if refresh_ui:
         create_main_window()
@@ -1313,7 +1316,7 @@ def set_base_folder():
     global BaseFolder, CurrentDir, NewBaseFolder
     options_dlg.withdraw()  # Hide the root window
     TmpBaseFolder = filedialog.askdirectory(initialdir=BaseFolder, title="Select base ALT-Scann8 folder", parent=None)
-    if type(TmpBaseFolder) == "<class 'str'>" and TmpBaseFolder != "" and TmpBaseFolder is not None:
+    if isinstance(TmpBaseFolder, str) and TmpBaseFolder != "":
         if not os.path.isdir(TmpBaseFolder):
             tk.messagebox.showerror("Error!", f"Folder {TmpBaseFolder} does not exist. Please specify an existing folder name.")
         else:
@@ -1755,7 +1758,7 @@ def find_sprocket_best_x(film_type='S8', slice_width=20):
     logging.debug(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
     
     
-def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
+def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
     height, width = img.shape[:2]
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
@@ -1794,7 +1797,7 @@ def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
     return False, -1
 
 
-def is_frame_centered_old(img, film_type ='S8', threshold=10, slice_width=10):
+def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     # Get dimensions of the binary image
     height = img.shape[0]
     width = img.shape[1]
@@ -5290,7 +5293,6 @@ def create_widgets():
     if logo_image != None:
         # Resize the image (e.g., to 50% of its original size)
         ratio = available_width / logo_image.width
-        print(f"ratio: {ratio}, available_width: {available_width}, logo_image.width: {logo_image.width}")
         new_width = int(logo_image.width * ratio)
         new_height = int(logo_image.height * ratio)
         resized_logo = logo_image.resize((new_width, new_height), Image.LANCZOS) #use LANCZOS for high quality resizing.
