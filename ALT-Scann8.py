@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.18"
-__date__ = "2025-03-04"
-__version_highlight__ = "Fix bug in window dimensions due to addition of menu"
+__version__ = "1.12.19"
+__date__ = "2025-03-05"
+__version_highlight__ = "Add logo to ALT-Scann8"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -5060,7 +5060,7 @@ def create_widgets():
 
     # Set initial positions for widgets in this frame
     bottom_area_column = 0
-    bottom_area_row = 0
+    bottom_area_row = 1  # Save first row for logo
 
     # Retreat movie button (slow backward through filmgate)
     retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
@@ -5277,6 +5277,30 @@ def create_widgets():
     options_btn.grid(row=bottom_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
     as_tooltips.add(options_btn, "Set ALT-Scann8 options.")
     bottom_area_row += 1
+
+    # Add logo on row 0. We add it the last to be able to calculate width
+    win.update_idletasks()
+    available_width = options_btn.winfo_width()
+    logo_file = os.path.join(ScriptDir, "ALT-Scann8_logo.png")
+    try:
+        logo_image = Image.open(logo_file)  # Replace with your logo file name
+    except FileNotFoundError as e:
+        logo_image = None
+        logging.warning(f"Could not find ALT-Scann8 logo file: {e}")
+    if logo_image != None:
+        # Resize the image (e.g., to 50% of its original size)
+        ratio = available_width / logo_image.width
+        print(f"ratio: {ratio}, available_width: {available_width}, logo_image.width: {logo_image.width}")
+        new_width = int(logo_image.width * ratio)
+        new_height = int(logo_image.height * ratio)
+        resized_logo = logo_image.resize((new_width, new_height), Image.LANCZOS) #use LANCZOS for high quality resizing.
+        # Convert to PhotoImage
+        logo_image = ImageTk.PhotoImage(resized_logo)
+        if logo_image:
+            logo_label = tk.Label(top_left_area_frame, image=logo_image)
+            logo_label.image = logo_image  # Keep a reference!
+            logo_label.grid(row=0, column=0, columnspan=2, sticky='w')
+
 
     # Create vertical button column at right *************************************
     # Application Exit button
