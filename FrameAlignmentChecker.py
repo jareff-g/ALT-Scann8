@@ -12,8 +12,8 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.6"
-__date__ = "2025-02-12"
+__version__ = "1.0.7"
+__date__ = "2025-03-08"
 __version_highlight__ = "Image viewer: Replace opencv imshow with a tkinter popup window"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 import time
 import sys
+import random
 try:
     import rawpy
     check_dng_frames_for_misalignment = True
@@ -42,73 +43,104 @@ stop_processing_requested = False
 # log path
 frame_alignment_checker_log_fullpath = ''
 
+# Find best horizontal position to take a slice to search for holes
+vfd_sprocket_hole_x = 0     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
+sprocket_best_x_found = False
 
 # Use a dictionary to store window size
 window_size = {'width': 640, 'height': 480}
 
-def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
-    # Get dimensions of the binary image
-    height, width = img.shape
+def find_sprocket_best_x(sample_image, film_type='S8', slice_width=20):
+    global vfd_sprocket_hole_x
 
-    # Slice only the left part of the image
+    """Find the optimal x-position of the sprocket hole (middle or right edge)."""
+    height, width = sample_image.shape[:2]
+    min_hole_width = int(width * 0.025) # Minimum hole width is 2.5% of the image width (and that is already a bit small)
+
+    # Get vertical position to extract horizontal slice (center for S8, top or bottom for R8)
+    vfd_sprocket_hole_x = 0 # Force is frame centered to search with a stripe starting on the left edge
+    if (film_type == 'S8'):
+        _, offset = is_frame_centered(sample_image, film_type)
+        hole_y = height // 2 + offset
+        print(f"find_sprocket_best_x ({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
+    else:
+        _, offset = is_frame_centered(sample_image, film_type)
+        hole_y = height // 2 + offset 
+        if hole_y - height // 2 < 0:
+            hole_y += height // 2 - slice_width//2
+        else:
+            hole_y -= height // 2 + slice_width//2
+        hole_y -= slice_width//2
+        print(f"find_sprocket_best_x ({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
+
+
+    stripe = sample_image[hole_y - slice_width//2:hole_y + slice_width//2, :]
+
+    _, binary = cv2.threshold(stripe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Sum columns—horizontal profile
+    x_profile = np.sum(binary, axis=0)  # Shape: (width,)
+    white_thresh = slice_width * 255 * 0.75  # 75% white—sprocket
+    
+    # Find white sprocket zone
+    sprocket_cols = np.where(x_profile > white_thresh)[0]
+    if len(sprocket_cols) == 0:
+        print(f"find_sprocket_best_x: No sproket holes found in image")
+        return width // 4  # Fallback—left quarter guess
+    
+    # Split into contiguous zones
+    gaps = np.where(np.diff(sprocket_cols) > 1)[0]
+    zones = np.split(sprocket_cols, gaps + 1) if len(gaps) > 0 else [sprocket_cols]
+    zones = [z for z in zones if len(z) >= min_hole_width]  # Filter noise
+    
+    if not zones:
+        print(f"find_sprocket_best_x: No holes found in stripe")
+        return width // 4  # Fallback
+    
+    # Leftmost sprocket—middle or right edge
+    sprocket_zone = zones[0]
+    vfd_sprocket_hole_x = (sprocket_zone[0] + sprocket_zone[-1]) // 2  # Middle
+    # vfd_sprocket_hole_x = sprocket_zone[-1]  # Right edge
+    print(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
+
+
+def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
+    height, width = img.shape[:2]
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    sliced_image = img[:, :slice_width]
-
-    # Convert to pure black and white (binary image)
-    _, binary_img = cv2.threshold(sliced_image, 200, 255, cv2.THRESH_BINARY)
-    # _, binary_img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
-
-    # Calculate the middle horizontal line
+    stripe = img[:, vfd_sprocket_hole_x:vfd_sprocket_hole_x + slice_width]
+    gray = stripe
+    _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
     middle = height // 2
-
-    # Calculate margin
-    margin = height*threshold//100
-
-    # Sum along the width to get a 1D array representing white pixels at each height
+    margin = height * threshold // 100
     height_profile = np.sum(binary_img, axis=1)
     
-    # Find where the sum is non-zero (white areas)
-    if film_type == 'S8':
-        white_heights = np.where(height_profile > 0)[0]
-    else:
-        white_heights = np.where(height_profile == 0)[0]
+    # Dynamic thresholds
+    white_thresh = slice_width * 255 * 0.75
+    black_thresh = slice_width * 255 * 0.25
+    white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
     
-    areas = []
-    start = None
-    min_gap_size = int(height*0.08)  # minimum hole height is around 8% of the frame height
-    previous = None
-    for i in white_heights:
-        if start is None:
-            start = i
-        if previous is not None and i-previous > 1: # end of first ares, check size
-            if previous-start > min_gap_size:  # min_gap_size is minimum number of consecutive pixels to skip small gaps
-                areas.append((start, previous - 1))
-            start = i
-        previous = i
-    if start is not None and white_heights[-1]-start > min_gap_size:  # Add the last area if it exists
-        areas.append((start, white_heights[-1]))
-    
-    result = 0
-    bigger = 0
-    area_count = 0
-    for start, end in areas:
-        area_count += 1
-        if area_count > 2:
-            break
-        if end-start > bigger:
-            bigger = end-start
-            center = (start + end) // 2
-            result = center
-    if result != 0:
-        if result >= middle - margin and result <= middle + margin:
-            return True, 0
-        elif result < middle - margin:
-            return False, -(middle - result)
-        elif result > middle + margin:
-            return False, result - middle
+    # Contiguous zones
+    min_gap_size = int(height * 0.08)
+    if len(white_heights) > 0:
+        gaps = np.where(np.diff(white_heights) > 1)[0]
+        areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
+        areas = [a for a in areas if len(a) > min_gap_size]
+        
+        result = 0
+        bigger = 0
+        for area in areas:
+            if len(area) > bigger:
+                bigger = len(area)
+                result = (area[0] + area[-1]) // 2
+                break
+        
+        if result != 0:
+            if middle - margin <= result <= middle + margin:
+                return True, 0
+            return False, result - middle if result > middle else -(middle - result)
     return False, -1
-
 
 
 def show_image_popup(image):
@@ -191,6 +223,7 @@ def display_image(image_path, bw=False):
 
 
 def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
+    global sprocket_best_x_found, vfd_sprocket_hole_x
     # Read the image
     if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
         with rawpy.imread(image_path) as raw:
@@ -199,7 +232,7 @@ def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_w
             img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     else:
         img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-        
+
     if img is None:
         raise ValueError("Could not read the image")
     
@@ -246,18 +279,65 @@ def select_folder():
         root.config(cursor="watch")  # Change cursor to indicate processing
         stop_processing_requested = False
         stop_button.config(state=tk.NORMAL)  # Enable stop button
+        find_best_x_pos(folder_selected, film_type, threshold)
         root.after(0, process_images_in_folder, folder_selected, film_type, threshold)
     else:
         result_text.insert(tk.END, "No folder selected\n")
 
 
-def process_images_in_folder(folder_path, film_type, threshold):
+def find_best_x_pos(folder_path, film_type, threshold):
     global processing, stop_processing_requested
-    sorted_filenames = sorted(os.listdir(folder_path))
+    global sprocket_best_x_found
 
     file_set = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.dng') if check_dng_frames_for_misalignment else ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
-    
-    total_files = len([f for f in sorted_filenames if f.lower().endswith(file_set)])
+
+    file_list = os.listdir(folder_path)
+
+    filtered_list = [
+        file for file in file_list
+        if os.path.splitext(file)[1].lower() in file_set
+    ]
+    sorted_filenames = sorted(filtered_list)
+
+    position_found = False
+    total_files = len(sorted_filenames)
+
+    while not position_found:
+        candidate = random.randint(1, total_files)
+        image_path = os.path.join(folder_path, sorted_filenames[candidate])
+
+        if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess()
+                # Convert the numpy array to something OpenCV can work with
+                img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+        else:
+            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+
+        height, width = img.shape[:2]
+
+        find_sprocket_best_x(img, film_type)
+
+        if vfd_sprocket_hole_x < int(width*0.2):
+            position_found = True
+
+
+def process_images_in_folder(folder_path, film_type, threshold):
+    global processing, stop_processing_requested
+    global sprocket_best_x_found
+
+    file_set = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.dng') if check_dng_frames_for_misalignment else ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
+
+    file_list = os.listdir(folder_path)
+
+    filtered_list = [
+        file for file in file_list
+        if os.path.splitext(file)[1].lower() in file_set
+    ]
+    sorted_filenames = sorted(filtered_list)
+
+    sprocket_best_x_found = False # Search again for new optimal x search position
+    total_files = len(sorted_filenames)
     processed_files = 0
     misaligned_counter = 0
     empty_counter = 0
@@ -366,12 +446,17 @@ def on_resize(event):
     root.update_idletasks()
 
 
+def print_to_console(message):
+    """Prints a message to the console."""
+    print(message)
+
+
 def on_mouse_click(event):
     global processing
 
     if processing:
-        print(f"Processing files, ignoring click")
-        return
+        print_to_console(f"Processing files, ignoring click")
+        return None
 
     # Get the index of the click position
     click_position = event.widget.index(f"@{event.x},{event.y}")
@@ -396,10 +481,15 @@ def on_mouse_click(event):
         root.after(100, lambda: display_image(line_text.split(',')[0]))  
     elif event.num == 2:
         # Middle mouse button
-        print(f"{line_text.split(',')[0]}")
+        file_path = line_text.split(',')[0]
+        root.clipboard_clear()
+        root.clipboard_append(file_path)    
+        tk.messagebox.showinfo("Path copied to clipboard", f"File path '{file_path}' has been copied to the clipboard.")
     elif event.num == 3:
         # Right mouse button
         root.after(100, lambda: display_image(line_text.split(',')[0], bw=True))
+    
+    return None
 
 
 def keep_cursor(event):
@@ -488,7 +578,7 @@ def main (argv):
     root.bind("<Configure>", on_resize)
 
     # Set the minimum width to 300 pixels and the minimum height to 200 pixels
-    root.minsize(width=600, height=300)
+    root.minsize(width=700, height=300)
 
     # Start the GUI
     root.mainloop()
