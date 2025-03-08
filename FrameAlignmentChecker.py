@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.7"
+__version__ = "1.0.8"
 __date__ = "2025-03-08"
-__version_highlight__ = "Image viewer: Replace opencv imshow with a tkinter popup window"
+__version_highlight__ = "Implement multiple threshold attempts on detection + historic results file"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -42,105 +42,67 @@ stop_processing_requested = False
 
 # log path
 frame_alignment_checker_log_fullpath = ''
+frame_alignment_checker_history_fullpath = ''
 
 # Find best horizontal position to take a slice to search for holes
-vfd_sprocket_hole_x = 0     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
-sprocket_best_x_found = False
+sprocket_hole_x = 30     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
+
+image_height = 0
 
 # Use a dictionary to store window size
 window_size = {'width': 640, 'height': 480}
 
-def find_sprocket_best_x(sample_image, film_type='S8', slice_width=20):
-    global vfd_sprocket_hole_x
-
-    """Find the optimal x-position of the sprocket hole (middle or right edge)."""
-    height, width = sample_image.shape[:2]
-    min_hole_width = int(width * 0.025) # Minimum hole width is 2.5% of the image width (and that is already a bit small)
-
-    # Get vertical position to extract horizontal slice (center for S8, top or bottom for R8)
-    vfd_sprocket_hole_x = 0 # Force is frame centered to search with a stripe starting on the left edge
-    if (film_type == 'S8'):
-        _, offset = is_frame_centered(sample_image, film_type)
-        hole_y = height // 2 + offset
-        print(f"find_sprocket_best_x ({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
-    else:
-        _, offset = is_frame_centered(sample_image, film_type)
-        hole_y = height // 2 + offset 
-        if hole_y - height // 2 < 0:
-            hole_y += height // 2 - slice_width//2
-        else:
-            hole_y -= height // 2 + slice_width//2
-        hole_y -= slice_width//2
-        print(f"find_sprocket_best_x ({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
-
-
-    stripe = sample_image[hole_y - slice_width//2:hole_y + slice_width//2, :]
-
-    _, binary = cv2.threshold(stripe, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # Sum columns—horizontal profile
-    x_profile = np.sum(binary, axis=0)  # Shape: (width,)
-    white_thresh = slice_width * 255 * 0.75  # 75% white—sprocket
-    
-    # Find white sprocket zone
-    sprocket_cols = np.where(x_profile > white_thresh)[0]
-    if len(sprocket_cols) == 0:
-        print(f"find_sprocket_best_x: No sproket holes found in image")
-        return width // 4  # Fallback—left quarter guess
-    
-    # Split into contiguous zones
-    gaps = np.where(np.diff(sprocket_cols) > 1)[0]
-    zones = np.split(sprocket_cols, gaps + 1) if len(gaps) > 0 else [sprocket_cols]
-    zones = [z for z in zones if len(z) >= min_hole_width]  # Filter noise
-    
-    if not zones:
-        print(f"find_sprocket_best_x: No holes found in stripe")
-        return width // 4  # Fallback
-    
-    # Leftmost sprocket—middle or right edge
-    sprocket_zone = zones[0]
-    vfd_sprocket_hole_x = (sprocket_zone[0] + sprocket_zone[-1]) // 2  # Middle
-    # vfd_sprocket_hole_x = sprocket_zone[-1]  # Right edge
-    print(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
-
 
 def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
+    global image_height, sprocket_hole_x
+    image_height = img.shape[0]
     height, width = img.shape[:2]
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    stripe = img[:, vfd_sprocket_hole_x:vfd_sprocket_hole_x + slice_width]
+    stripe = img[:, sprocket_hole_x:sprocket_hole_x + slice_width]
     gray = stripe
-    _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    middle = height // 2
-    margin = height * threshold // 100
-    height_profile = np.sum(binary_img, axis=1)
-    
-    # Dynamic thresholds
-    white_thresh = slice_width * 255 * 0.75
-    black_thresh = slice_width * 255 * 0.25
-    white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
-    
-    # Contiguous zones
-    min_gap_size = int(height * 0.08)
-    if len(white_heights) > 0:
-        gaps = np.where(np.diff(white_heights) > 1)[0]
-        areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
-        areas = [a for a in areas if len(a) > min_gap_size]
+    is_centered = False
+    gap = -1
+    local_threshold = 204
+    while not is_centered and local_threshold < 255:
+        #_, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        _, binary_img = cv2.threshold(gray, local_threshold, 255, cv2.THRESH_BINARY)
+
+        middle = height // 2
+        margin = height * threshold // 100
+        height_profile = np.sum(binary_img, axis=1)
         
-        result = 0
-        bigger = 0
-        for area in areas:
-            if len(area) > bigger:
-                bigger = len(area)
-                result = (area[0] + area[-1]) // 2
+        # Dynamic thresholds
+        white_thresh = slice_width * 255 * 0.75
+        black_thresh = slice_width * 255 * 0.25
+        white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
+        
+        # Contiguous zones
+        min_gap_size = int(height * 0.08)
+        if len(white_heights) > 0:
+            gaps = np.where(np.diff(white_heights) > 1)[0]
+            areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
+            areas = [a for a in areas if len(a) > min_gap_size]
+            
+            result = 0
+            bigger = 0
+            for area in areas:
+                if len(area) > bigger:
+                    bigger = len(area)
+                    result = (area[0] + area[-1]) // 2
+                    break
+            
+            if result != 0:
+                if middle - margin <= result <= middle + margin:
+                    is_centered = True
+                    gap = 0
+                else:
+                    is_centered = False
+                    gap = result - middle if result > middle else -(middle - result)
                 break
+        local_threshold += 5
         
-        if result != 0:
-            if middle - margin <= result <= middle + margin:
-                return True, 0
-            return False, result - middle if result > middle else -(middle - result)
-    return False, -1
+    return is_centered, gap
 
 
 def show_image_popup(image):
@@ -208,7 +170,7 @@ def display_image(image_path, bw=False):
             # Convert the numpy array to something OpenCV can work with
             img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     else:
-        img = cv2.imread(image_path)
+        img = cv2.imread(image_path, cv2.COLOR_RGB2BGR)
 
     if img is None:
         raise ValueError("Could not read the image")
@@ -217,13 +179,14 @@ def display_image(image_path, bw=False):
         gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         # Convert to pure black and white (binary image)
         _, img = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
+        #_, binary_img = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
 
     # Display image
     show_image_popup(img)
 
 
 def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_width=10):
-    global sprocket_best_x_found, vfd_sprocket_hole_x
+    global sprocket_best_x_found, sprocket_hole_x
     # Read the image
     if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
         with rawpy.imread(image_path) as raw:
@@ -273,59 +236,23 @@ def select_folder():
     folder_selected = filedialog.askdirectory()
     if folder_selected:
         result_text.delete(1.0, tk.END)  # Clear previous results
-        threshold = int(spinbox.get())  # Get the value from Spinbox
+        threshold = int(threshold_spinbox.get())  # Get the value from Spinbox
         film_type = film_type_var.get()  # Get the selected mode
         processing = True
         root.config(cursor="watch")  # Change cursor to indicate processing
         stop_processing_requested = False
         stop_button.config(state=tk.NORMAL)  # Enable stop button
-        find_best_x_pos(folder_selected, film_type, threshold)
         root.after(0, process_images_in_folder, folder_selected, film_type, threshold)
     else:
         result_text.insert(tk.END, "No folder selected\n")
-
-
-def find_best_x_pos(folder_path, film_type, threshold):
-    global processing, stop_processing_requested
-    global sprocket_best_x_found
-
-    file_set = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.dng') if check_dng_frames_for_misalignment else ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
-
-    file_list = os.listdir(folder_path)
-
-    filtered_list = [
-        file for file in file_list
-        if os.path.splitext(file)[1].lower() in file_set
-    ]
-    sorted_filenames = sorted(filtered_list)
-
-    position_found = False
-    total_files = len(sorted_filenames)
-
-    while not position_found:
-        candidate = random.randint(1, total_files)
-        image_path = os.path.join(folder_path, sorted_filenames[candidate])
-
-        if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
-            with rawpy.imread(image_path) as raw:
-                rgb = raw.postprocess()
-                # Convert the numpy array to something OpenCV can work with
-                img = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
-        else:
-            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
-
-        height, width = img.shape[:2]
-
-        find_sprocket_best_x(img, film_type)
-
-        if vfd_sprocket_hole_x < int(width*0.2):
-            position_found = True
 
 
 def process_images_in_folder(folder_path, film_type, threshold):
     global processing, stop_processing_requested
     global sprocket_best_x_found
 
+    root.after(1000, on_change_threshold)
+    question_film_type = False
     file_set = ('.png', '.jpg', '.jpeg', '.gif', '.bmp', '.dng') if check_dng_frames_for_misalignment else ('.png', '.jpg', '.jpeg', '.gif', '.bmp')
 
     file_list = os.listdir(folder_path)
@@ -374,6 +301,11 @@ def process_images_in_folder(folder_path, film_type, threshold):
             progress_bar['value'] = progress
             root.update_idletasks()
             root.update()
+            if not question_film_type and processed_files > 200 and (misaligned_counter+empty_counter)*100//processed_files > 80:
+                if tk.messagebox.askokcancel("Too many failures", "Too many misaligned frames. Selected film type (S8/R8) might be wrong, do you want to stop to correct that?"):
+                    stop_processing_requested = True
+                else:
+                    question_film_type = True
     
     # Record end time
     end_time = time.time()
@@ -397,6 +329,15 @@ def process_images_in_folder(folder_path, film_type, threshold):
             result_text.insert(tk.END, message)
             with open(frame_alignment_checker_log_fullpath, 'a') as f:
                 f.write(message)
+            if not stop_processing_requested:   # If processed completely add entry to history lof
+                if not os.path.exists(frame_alignment_checker_history_fullpath): # If historic log does not exist, write header
+                    with open(frame_alignment_checker_history_fullpath, 'a') as f:
+                        message = "Check time, Folder name, Folder creation date, Shift threshold, % misaligned, % empty, Processed files, Misaligned frames, Empty frames\r\n"
+                        f.write(message)  
+                thres = int(threshold_spinbox.get())
+                with open(frame_alignment_checker_history_fullpath, 'a') as f:
+                    message = f"{time.ctime()}, {folder_path}, {get_folder_creation_date(folder_path)}, {int(image_height*thres/100)}, {misaligned_counter*100/processed_files:.2f}, {empty_counter*100/processed_files:.2f}, {processed_files}, {misaligned_counter}, {empty_counter}\r\n"
+                    f.write(message)                
         else:
             message = f"{processed_files} frames verified, all are correctly aligned!!!\n"
             result_text.insert(tk.END, message)
@@ -492,6 +433,14 @@ def on_mouse_click(event):
     return None
 
 
+def on_change_threshold():
+    global image_height
+    if image_height == 0:
+        return
+    thres = int(threshold_spinbox.get())
+    threshold_explained.config(text=f"Shift bigger than {int(image_height*thres/100)} pixels ({thres}%) considered as NOT centered.")
+
+
 def keep_cursor(event):
     # If the cursor somehow changes, this will set it back to what we want
     if processing:
@@ -501,7 +450,7 @@ def keep_cursor(event):
 
 
 def init_logging():
-    global frame_alignment_checker_log_fullpath
+    global frame_alignment_checker_log_fullpath, frame_alignment_checker_history_fullpath
 
     # Initialize logging
     log_path = os.path.dirname(__file__)
@@ -513,9 +462,24 @@ def init_logging():
 
     # Initialize scan error logging
     frame_alignment_checker_log_fullpath = log_path + "/frame_alignment_checker." + time.strftime("%Y%m%d") + ".log"
+    frame_alignment_checker_history_fullpath = log_path + "/frame_alignment_checker.history.csv"
+
+
+def get_folder_creation_date(folder_path):
+    if sys.platform.startswith('win'):
+        # Windows: Creation time
+        return time.ctime(os.path.getctime(folder_path))
+    else:
+        # macOS/Linux: Use the last metadata change time (not always creation date)
+        stat = os.stat(folder_path)
+        try:
+            return time.ctime(stat.st_birthtime)  # macOS & some Linux distros
+        except AttributeError:
+            return "Creation date not available on this OS"
+
 
 def main (argv):
-    global result_text, progress_bar, stop_button, root, spinbox, film_type_var
+    global result_text, progress_bar, stop_button, root, threshold_spinbox, film_type_var, threshold_explained
 
     # Main window setup
     root = tk.Tk()
@@ -531,8 +495,10 @@ def main (argv):
 
     # Label and Spinbox for selecting a threshold
     tk.Label(threshold_frame, text="Threshold:").pack(side=tk.LEFT, padx=(20, 5), pady=5)
-    spinbox = Spinbox(threshold_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'))
-    spinbox.pack(side=tk.LEFT, pady=5)
+    threshold_spinbox = Spinbox(threshold_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'), command=on_change_threshold)
+    threshold_spinbox.pack(side=tk.LEFT, pady=5)
+    threshold_explained = tk.Label(threshold_frame, text="")
+    threshold_explained.pack(side=tk.LEFT, padx=(20, 5), pady=5)
 
     # Frame for aligning radio buttons horizontally
     radio_frame = tk.Frame(root)
