@@ -12,9 +12,9 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.8"
-__date__ = "2025-03-08"
-__version_highlight__ = "Implement multiple threshold attempts on detection + historic results file"
+__version__ = "1.0.10"
+__date__ = "2025-03-09"
+__version_highlight__ = "Add canvas to display detected bad alignements"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -30,6 +30,8 @@ import numpy as np
 import time
 import sys
 import random
+import re
+from PIL import ImageTk, Image
 try:
     import rawpy
     check_dng_frames_for_misalignment = True
@@ -47,13 +49,16 @@ frame_alignment_checker_history_fullpath = ''
 # Find best horizontal position to take a slice to search for holes
 sprocket_hole_x = 30     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
 
-image_height = 0
+image_height = 1520
+
+last_bw_state = False
 
 # Use a dictionary to store window size
 window_size = {'width': 640, 'height': 480}
 
+bad_frame_threshold = {}
 
-def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
+def is_frame_centered(idx, img, film_type='S8', threshold=10, slice_width=20):
     global image_height, sprocket_hole_x
     image_height = img.shape[0]
     height, width = img.shape[:2]
@@ -62,8 +67,11 @@ def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
     stripe = img[:, sprocket_hole_x:sprocket_hole_x + slice_width]
     gray = stripe
     is_centered = False
-    gap = -1
-    local_threshold = 204
+    off_center = -1
+    local_threshold = 174
+    best_match_found = False
+    candidate_found = False
+    save_gaps = 10  # arbitrary non-zero number to identify whe area with less gaps (ideally, zero)
     while not is_centered and local_threshold < 255:
         #_, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         _, binary_img = cv2.threshold(gray, local_threshold, 255, cv2.THRESH_BINARY)
@@ -78,31 +86,43 @@ def is_frame_centered(img, film_type='S8', threshold=10, slice_width=20):
         white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
         
         # Contiguous zones
-        min_gap_size = int(height * 0.08)
+        min_area_size = int(height * 0.1 if film_type == 'S8' else height * 0.4)
+        # Searches for gaps in the target area. Used to be 1 pixel gap, which is too low, might be noise in the left stripe
+        min_gap_size = min_area_size // 2
         if len(white_heights) > 0:
-            gaps = np.where(np.diff(white_heights) > 1)[0]
+            gaps = np.where(np.diff(white_heights) > min_gap_size)[0]  
             areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
-            areas = [a for a in areas if len(a) > min_gap_size]
-            
+            areas = [a for a in areas if len(a) > min_area_size]
             result = 0
             bigger = 0
             for area in areas:
                 if len(area) > bigger:
                     bigger = len(area)
                     result = (area[0] + area[-1]) // 2
-                    break
+                    #break
             
             if result != 0:
                 if middle - margin <= result <= middle + margin:
                     is_centered = True
-                    gap = 0
-                else:
-                    is_centered = False
-                    gap = result - middle if result > middle else -(middle - result)
-                break
-        local_threshold += 5
+                    off_center = 0
+                    best_match_found = True
+                    break
+                elif len(gaps) <= save_gaps:
+                    save_is_centered = False
+                    save_off_center = result - middle if result > middle else -(middle - result)
+                    save__threshold = local_threshold
+                    save_gaps = len(gaps)
+                    candidate_found = True
+        local_threshold += 5 if local_threshold < 245 else 1
+
+    if not best_match_found and candidate_found:
+        is_centered = save_is_centered
+        off_center = save_off_center
+        local_threshold = save__threshold
+
+    bad_frame_threshold[idx] = min (local_threshold, 254)
         
-    return is_centered, gap
+    return is_centered, off_center, local_threshold
 
 
 def show_image_popup(image):
@@ -111,12 +131,8 @@ def show_image_popup(image):
     popup = Toplevel()
     popup.title("Image Viewer")
 
-    # Convert the OpenCV image from BGR to RGB
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
     # Convert the image to a format Tkinter can display
-    pil_image = PIL.Image.fromarray(image_rgb)
-    photo = PIL.ImageTk.PhotoImage(image=pil_image)
+    photo = PIL.ImageTk.PhotoImage(image=image)
 
     # Use a Label to display the image
     label = Label(popup, image=photo)
@@ -141,7 +157,7 @@ def show_image_popup(image):
     # Update label when window size changes, maintaining aspect ratio
     def on_resize(event):
         # Calculate the new size while maintaining aspect ratio
-        img_width, img_height = pil_image.size
+        img_width, img_height = image.size
         aspect_ratio = img_width / img_height
         if event.width / event.height > aspect_ratio:
             # If window is wider than the image aspect ratio
@@ -153,7 +169,7 @@ def show_image_popup(image):
             new_height = int(new_width / aspect_ratio)
 
         # Resize the image
-        resized_image = pil_image.resize((new_width, new_height), PIL.Image.LANCZOS)
+        resized_image = image.resize((new_width, new_height), PIL.Image.LANCZOS)
         new_photo = PIL.ImageTk.PhotoImage(resized_image)
         
         # Update the label with the new image
@@ -163,24 +179,47 @@ def show_image_popup(image):
     popup.bind('<Configure>', on_resize)
 
 
-def display_image(image_path, bw=False):
-    if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
-        with rawpy.imread(image_path) as raw:
-            rgb = raw.postprocess()
-            # Convert the numpy array to something OpenCV can work with
-            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    else:
-        img = cv2.imread(image_path, cv2.COLOR_RGB2BGR)
+def load_image(image_path, bw=False):
+    """Loads an image from disk, optionally converts it to black and white, and returns a PhotoImage."""
 
-    if img is None:
-        raise ValueError("Could not read the image")
-    if bw:
-        # Convert the image to grayscale
-        gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # Convert to pure black and white (binary image)
-        _, img = cv2.threshold(gray_image, 200, 255, cv2.THRESH_BINARY)
-        #_, binary_img = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    try:
+        if image_path.lower().endswith('.dng'):
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess()
+                img = Image.fromarray(rgb, 'RGB') #Create PIL image directly.
+        else:
+            img = Image.open(image_path)
 
+        if bw:
+            img = img.convert('L')  # Convert to grayscale (Pillow)
+            # Thresholding (manual)
+            idx = frame_number_from_path(image_path)
+            if idx is None:
+                idx = 220
+            threshold_value = bad_frame_threshold[idx]
+            img = img.point(lambda p: 255 if p > threshold_value else 0) #Pillow thresholding.
+
+        return img
+
+    except FileNotFoundError:
+        raise ValueError(f"Could not find the image: {image_path}")
+    except Exception as e:
+        raise ValueError(f"Could not read or process the image: {e}")
+
+
+def display_bad_frame(image_path, bw = False):
+    canvas_width = bad_frame_canvas.winfo_width()
+    canvas_height = bad_frame_canvas.winfo_height()
+    frame_img = load_image(image_path, bw)
+    frame_img = frame_img.resize((canvas_width, canvas_height), Image.LANCZOS)
+    frame_photo = ImageTk.PhotoImage(frame_img)
+    # Display splash on canvas
+    frame_id = bad_frame_canvas.create_image(canvas_width//2, canvas_height//2, image=frame_photo)  # Center at (width/2, height/2)
+    bad_frame_canvas.image = frame_photo  # Keep reference to avoid garbage collection
+
+
+def display_image_popup(image_path, bw=False):
+    img = load_image(image_path, bw)
     # Display image
     show_image_popup(img)
 
@@ -199,8 +238,20 @@ def is_frame_in_file_centered(image_path, film_type ='S8', threshold=10, slice_w
     if img is None:
         raise ValueError("Could not read the image")
     
+    
     # Call is_frame_centered with the image
-    return is_frame_centered(img, film_type, threshold, slice_width)
+    return is_frame_centered(frame_number_from_path(image_path), img, film_type, threshold, slice_width)
+
+
+def frame_number_from_path(image_path):
+    # Extract numeric part using regex
+    match = re.search(r'picture-(\d+)\.(jpg|dng|png)$', image_path, re.IGNORECASE)
+    if match:
+        numeric_part = match.group(1)
+        frame_number = int(numeric_part)
+    else:
+        frame_number = None
+    return frame_number
 
 
 def format_duration(seconds):
@@ -235,14 +286,8 @@ def select_folder():
     global processing, stop_processing_requested
     folder_selected = filedialog.askdirectory()
     if folder_selected:
-        result_text.delete(1.0, tk.END)  # Clear previous results
-        threshold = int(threshold_spinbox.get())  # Get the value from Spinbox
-        film_type = film_type_var.get()  # Get the selected mode
-        processing = True
-        root.config(cursor="watch")  # Change cursor to indicate processing
-        stop_processing_requested = False
-        stop_button.config(state=tk.NORMAL)  # Enable stop button
-        root.after(0, process_images_in_folder, folder_selected, film_type, threshold)
+        selected_folder_value.set(folder_selected)
+        start_stop_button.config(state=tk.NORMAL)  # Disable stop button after processing ends or is stopped
     else:
         result_text.insert(tk.END, "No folder selected\n")
 
@@ -277,18 +322,19 @@ def process_images_in_folder(folder_path, film_type, threshold):
             break
         if filename.lower().endswith(file_set):
             image_path = os.path.join(folder_path, filename)
-            centered, gap = is_frame_in_file_centered(image_path, film_type, threshold)
+            centered, off_center, img_threshold = is_frame_in_file_centered(image_path, film_type, threshold)
             if not centered:
-                if gap == -1:
+                display_bad_frame(image_path)
+                if off_center == -1:
                     status = "possibly empty" 
-                elif gap < 0:
-                    status = f"{-gap} pixels too high" 
+                elif off_center < 0:
+                    status = f"{-off_center} pixels too high" 
                 else:
-                    status = f"{gap} pixels too low"
-                message = f"{image_path}, {status}\n"
+                    status = f"{off_center} pixels too low"
+                message = f"{image_path}, {status}, threshold = {img_threshold}\n"
                 result_text.insert(tk.END, message)
                 result_text.see(tk.END)
-                if gap == -1:
+                if off_center == -1:
                     empty_counter += 1
                 else:
                     misaligned_counter += 1
@@ -297,6 +343,7 @@ def process_images_in_folder(folder_path, film_type, threshold):
 
             # Update progress
             processed_files += 1
+            bad_frame_count.config(text=f"Processed: {processed_files}\r\nMisaligned: {misaligned_counter} ({misaligned_counter*100/processed_files:.2f}%)\r\nEmpty: {empty_counter} ({empty_counter*100/processed_files:.2f}%)")
             progress = (processed_files / total_files) * 100 if total_files > 0 else 0
             progress_bar['value'] = progress
             root.update_idletasks()
@@ -345,7 +392,10 @@ def process_images_in_folder(folder_path, film_type, threshold):
                 f.write(message)
     # Scroll to the bottom
     result_text.see(tk.END)
-    stop_button.config(state=tk.DISABLED)  # Disable stop button after processing ends or is stopped
+    start_stop_button.config(text="Start")  # Process ended: Change button text
+    start_stop_button.config(state=tk.NORMAL)  # Enable stop button after processing ends or is stopped
+    select_button.config(state=tk.NORMAL) 
+    close_button.config(state=tk.NORMAL) 
     processing = False
     root.config(cursor="")  # Change cursor to indicate processing ended
 
@@ -354,9 +404,22 @@ def prevent_input(event):
     # Returning "break" prevents the event from propagating further
     return "break"
 
-def stop_processing():
+def start_stop_processing():
     global processing, stop_processing_requested
-    stop_processing_requested = True
+    if processing:
+        stop_processing_requested = True
+    else:
+        result_text.delete(1.0, tk.END)  # Clear previous results
+        threshold = int(threshold_spinbox.get())  # Get the value from Spinbox
+        film_type = film_type_var.get()  # Get the selected mode
+        processing = True
+        root.config(cursor="watch")  # Change cursor to indicate processing
+        stop_processing_requested = False
+        start_stop_button.config(text="Stop")  # Process started: Change button text
+        select_button.config(state=tk.DISABLED) 
+        close_button.config(state=tk.DISABLED) 
+        root.after(0, process_images_in_folder, selected_folder_value.get(), film_type, threshold)
+
 
 
 def terminate_main():
@@ -392,19 +455,22 @@ def print_to_console(message):
     print(message)
 
 
-def on_mouse_click(event):
+def process_scrolltext_updated_position(event):
     global processing
 
     if processing:
         print_to_console(f"Processing files, ignoring click")
-        return None
+        return "break"  # Prevent default behavior
+
+    # Check if the event is a mouse event
+    if event.type != tk.EventType.ButtonPress:
+        return "break"
 
     # Get the index of the click position
     click_position = event.widget.index(f"@{event.x},{event.y}")
-    
     # Extract line number from click position
     line = int(click_position.split('.')[0])
-    
+
     # Define the start and end of the line
     line_start = f"{line}.0"
     line_end = f"{line}.end"
@@ -414,21 +480,116 @@ def on_mouse_click(event):
     
     # Add highlight to the clicked line
     event.widget.tag_add("highlight", line_start, line_end)
-    
+
+
+def move_line_up(event):
+    widget = event.widget
+    # Get the current highlighted line
+    highlighted_line_start = None
+    for tag in widget.tag_names():
+        if tag == "highlight":
+            highlighted_line_start = widget.tag_nextrange(tag, "1.0")[0]
+            break
+
+    if highlighted_line_start:
+        # Extract line number from highlighted line start
+        line = int(highlighted_line_start.split('.')[0])
+        
+        if line > 1:
+            # Move the highlighted line up
+            new_line_start = f"{line - 1}.0"
+            new_line_end = f"{line - 1}.end"
+            widget.tag_remove("highlight", "1.0", tk.END)
+            widget.tag_add("highlight", new_line_start, new_line_end)
+            widget.mark_set('insert', new_line_start)
+            widget.see('insert')  # Ensure the line is visible
+    filename = retrieve_filename_at_current_line(event, line-1)
+    if filename:
+        display_bad_frame(filename, last_bw_state)
+
+
+def move_line_down(event):
+    widget = event.widget
+    # Get the current highlighted line
+    highlighted_line_start = None
+    for tag in widget.tag_names():
+        if tag == "highlight":
+            highlighted_line_start = widget.tag_nextrange(tag, "1.0")[0]
+            break
+
+    if highlighted_line_start:
+        # Extract line number from highlighted line start
+        line = int(highlighted_line_start.split('.')[0])
+        
+        # Get the total number of lines
+        total_lines = int(widget.index('end').split('.')[0]) - 1
+        
+        if line < total_lines:
+            # Move the highlighted line down
+            new_line_start = f"{line + 1}.0"
+            new_line_end = f"{line + 1}.end"
+            widget.tag_remove("highlight", "1.0", tk.END)
+            widget.tag_add("highlight", new_line_start, new_line_end)
+            widget.mark_set('insert', new_line_start)
+            widget.see('insert')  # Ensure the line is visible
+    filename = retrieve_filename_at_current_line(event, line+1)
+    if filename:
+        display_bad_frame(filename, last_bw_state)
+
+
+def retrieve_line_at_current_click_position(event):
+    # Get the index of the click position
+    click_position = event.widget.index(f"@{event.x},{event.y}")
+    # Extract line number from click position
+    line = int(click_position.split('.')[0])
+    return line
+
+
+def retrieve_filename_at_current_line(event, line):
+    # Define the start and end of the line
+    line_start = f"{line}.0"
+    line_end = f"{line}.end"
     # Get the text of the line (optional, for demonstration)
     line_text = event.widget.get(line_start, line_end)
+    filename = line_text.split(',')[0]
+    
+    return filename if os.path.exists(filename) else None
+
+def on_mouse_click(event):
+    global last_bw_state
+    process_scrolltext_updated_position(event)
+    line = retrieve_line_at_current_click_position(event)
+    filename = retrieve_filename_at_current_line(event, line)
+    if not filename:
+        return
     if event.num == 1:
         # Left mouse button
-        root.after(100, lambda: display_image(line_text.split(',')[0]))  
+        last_bw_state = False
+        display_bad_frame(filename)
     elif event.num == 2:
         # Middle mouse button
-        file_path = line_text.split(',')[0]
         root.clipboard_clear()
-        root.clipboard_append(file_path)    
-        tk.messagebox.showinfo("Path copied to clipboard", f"File path '{file_path}' has been copied to the clipboard.")
+        root.clipboard_append(filename)    
+        tk.messagebox.showinfo("Path copied to clipboard", f"File path '{filename}' has been copied to the clipboard.")
     elif event.num == 3:
         # Right mouse button
-        root.after(100, lambda: display_image(line_text.split(',')[0], bw=True))
+        last_bw_state = True
+        display_bad_frame(filename, bw=True)
+
+
+
+def on_mouse_double_click(event):
+    process_scrolltext_updated_position(event)
+    line = retrieve_line_at_current_click_position(event)
+    filename = retrieve_filename_at_current_line(event, line)
+    if not filename:
+        return
+    if event.num == 1:
+        # Left mouse button
+        root.after(100, lambda: display_image_popup(filename))  
+    elif event.num == 3:
+        # Right mouse button
+        root.after(100, lambda: display_image_popup(filename, bw=True))
     
     return None
 
@@ -438,7 +599,7 @@ def on_change_threshold():
     if image_height == 0:
         return
     thres = int(threshold_spinbox.get())
-    threshold_explained.config(text=f"Shift bigger than {int(image_height*thres/100)} pixels ({thres}%) considered as NOT centered.")
+    threshold_message.config(text=f"Shift bigger than {int(image_height*thres/100)} pixels ({thres}%) considered as NOT centered.")
 
 
 def keep_cursor(event):
@@ -479,46 +640,76 @@ def get_folder_creation_date(folder_path):
 
 
 def main (argv):
-    global result_text, progress_bar, stop_button, root, threshold_spinbox, film_type_var, threshold_explained
+    global result_text, progress_bar, root, threshold_spinbox, film_type_var
+    global threshold_message, bad_frame_count, bad_frame_canvas, selected_folder_value
+    global start_stop_button, select_button, close_button
 
     # Main window setup
     root = tk.Tk()
     root.title(f"ALT-Scann8 utility - Standalone Frame Alignment Checker (v{__version__})")
 
-    # Button to select folder
-    select_button = tk.Button(root, text="Select Folder", command=select_folder)
-    select_button.pack(pady=5)
-
     # Frame for aligning threshold label
-    threshold_frame = tk.Frame(root)
-    threshold_frame.pack(pady=5)
+    top_frame = tk.Frame(root)
+    top_frame.pack(side='top' ,pady=5, expand=True, fill='x')
+
+    # Button to select folder
+    select_button = tk.Button(top_frame, text="Select Folder", command=select_folder)
+    select_button.grid(row=0, column=0, padx=(20, 5), pady=5, sticky='w')
+
+    # Display Selected folder
+    selected_folder_value=tk.StringVar(value='No folder selected')
+    selected_folder_label = tk.Label(top_frame, textvariable=selected_folder_value)
+    selected_folder_label.grid(row=0, column=1, padx=(20, 5), pady=5, sticky='w')
+
+    # Canvas to display bad frames
+    bad_frame_canvas = tk.Canvas(top_frame, bg='dark grey')
+    bad_frame_canvas.grid(row=0, column=2, rowspan=3, padx=(20, 5), pady=5, sticky='w')
+
 
     # Label and Spinbox for selecting a threshold
-    tk.Label(threshold_frame, text="Threshold:").pack(side=tk.LEFT, padx=(20, 5), pady=5)
-    threshold_spinbox = Spinbox(threshold_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'), command=on_change_threshold)
-    threshold_spinbox.pack(side=tk.LEFT, pady=5)
-    threshold_explained = tk.Label(threshold_frame, text="")
-    threshold_explained.pack(side=tk.LEFT, padx=(20, 5), pady=5)
+    tk.Label(top_frame, text="Threshold:").grid(row=1, column=0, padx=(20, 5), pady=5, sticky='w')
+    threshold_spinbox = Spinbox(top_frame, from_=0, to=100, width=5, textvariable=tk.StringVar(value='10'), command=on_change_threshold)
+    threshold_spinbox.grid(row=1, column=0, padx=(20, 5), pady=5, sticky='e')
+    threshold_message = tk.Label(top_frame, text="")
+    threshold_message.grid(row=1, column=1, padx=(20, 5), pady=5, sticky='w')
+    thres = int(threshold_spinbox.get())
+    threshold_message.config(text=f"Off-center frames more than {int(image_height*thres/100)} pixels ({thres}%) \r\nare considered as NOT centered.")
 
     # Frame for aligning radio buttons horizontally
-    radio_frame = tk.Frame(root)
-    radio_frame.pack(pady=5)
+    radio_frame = tk.Frame(top_frame)
+    radio_frame.grid(row=2, column=0, padx=(20, 5), pady=5)
     film_type_var = tk.StringVar(value='S8')  # Default value
     tk.Radiobutton(radio_frame, text='S8', variable=film_type_var, value='S8').pack(side=tk.LEFT)
     tk.Radiobutton(radio_frame, text='R8', variable=film_type_var, value='R8').pack(side=tk.LEFT)
 
+    bad_frame_count = tk.Label(top_frame, text="Misaligned: 0\r\nEmpty: 0")
+    bad_frame_count.grid(row=2, column=1, padx=(20, 5), pady=5)
+
+    # Create a frame to hold the ScrolledText and horizontal scrollbar
+    scrolled_frame = tk.Frame(root)
+    scrolled_frame.pack(fill=tk.BOTH, expand=True)    
     # Scrolled text widget for displaying results
-    result_text = scrolledtext.ScrolledText(root, width=40, height=10)
+    result_text = scrolledtext.ScrolledText(scrolled_frame, wrap="none", width=40, height=10)
     result_text.pack(fill=tk.BOTH, expand=True)
+    # Create the horizontal scrollbar
+    h_scrollbar = tk.Scrollbar(scrolled_frame, orient="horizontal", command=result_text.xview)
+    h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+    # Configure the ScrolledText widget to work with the horizontal scrollbar
+    result_text.configure(xscrollcommand=h_scrollbar.set)
     # Bind to any event that might change the cursor; here we use <Enter> and <Leave>
     result_text.bind("<Enter>", keep_cursor)
     result_text.bind("<Leave>", keep_cursor)    
     # Bind the '<Key>' event to the prevent_input function
     result_text.bind("<Key>", prevent_input)
+    # Bind keyboard events
+    result_text.bind("<Up>", move_line_up)
+    result_text.bind("<Down>", move_line_down)
     # Bind the left mouse button click event to our function
     result_text.bind("<Button-1>", on_mouse_click)
     result_text.bind("<Button-2>", on_mouse_click)
     result_text.bind("<Button-3>", on_mouse_click)
+    result_text.bind("<Double-1>", on_mouse_double_click)
+    result_text.bind("<Double-3>", on_mouse_double_click)
     # Configure the highlight tag for appearance
     result_text.tag_configure("highlight", background="yellow", foreground="black")
 
@@ -529,9 +720,9 @@ def main (argv):
     # Frame for aligning stop and close buttons horizontally
     button_frame = tk.Frame(root)
     button_frame.pack(pady=5)
-    stop_button = tk.Button(button_frame, text="Stop", command=stop_processing, state=tk.DISABLED)
-    stop_button.pack(side=tk.LEFT, padx=5)
-    close_button = tk.Button(button_frame, text="Close", command=on_closing)
+    start_stop_button = tk.Button(button_frame, text="Start", command=start_stop_processing, state=tk.DISABLED)
+    start_stop_button.pack(side=tk.LEFT, padx=5)
+    close_button = tk.Button(button_frame, text="Exit", command=on_closing)
     close_button.pack(side=tk.LEFT, padx=5)
 
     # Initialize logging
@@ -544,7 +735,7 @@ def main (argv):
     root.bind("<Configure>", on_resize)
 
     # Set the minimum width to 300 pixels and the minimum height to 200 pixels
-    root.minsize(width=700, height=300)
+    root.minsize(width=500, height=300)
 
     # Start the GUI
     root.mainloop()
