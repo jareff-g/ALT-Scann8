@@ -12,7 +12,7 @@ __copyright__ = "Copyright 2025, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8 - Frame Alignment Checker"
-__version__ = "1.0.9"
+__version__ = "1.0.10"
 __date__ = "2025-03-09"
 __version_highlight__ = "Add canvas to display detected bad alignements"
 __maintainer__ = "Juan Remirez de Esparza"
@@ -51,6 +51,8 @@ sprocket_hole_x = 30     # Used by VFD to take a vertical slice at the center of
 
 image_height = 1520
 
+last_bw_state = False
+
 # Use a dictionary to store window size
 window_size = {'width': 640, 'height': 480}
 
@@ -65,8 +67,11 @@ def is_frame_centered(idx, img, film_type='S8', threshold=10, slice_width=20):
     stripe = img[:, sprocket_hole_x:sprocket_hole_x + slice_width]
     gray = stripe
     is_centered = False
-    gap = -1
+    off_center = -1
     local_threshold = 174
+    best_match_found = False
+    candidate_found = False
+    save_gaps = 10  # arbitrary non-zero number to identify whe area with less gaps (ideally, zero)
     while not is_centered and local_threshold < 255:
         #_, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         _, binary_img = cv2.threshold(gray, local_threshold, 255, cv2.THRESH_BINARY)
@@ -81,12 +86,13 @@ def is_frame_centered(idx, img, film_type='S8', threshold=10, slice_width=20):
         white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
         
         # Contiguous zones
-        min_gap_size = int(height * 0.1 if film_type == 'S8' else height * 0.4)
+        min_area_size = int(height * 0.1 if film_type == 'S8' else height * 0.4)
+        # Searches for gaps in the target area. Used to be 1 pixel gap, which is too low, might be noise in the left stripe
+        min_gap_size = min_area_size // 2
         if len(white_heights) > 0:
-            gaps = np.where(np.diff(white_heights) > 1)[0]
+            gaps = np.where(np.diff(white_heights) > min_gap_size)[0]  
             areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
-            areas = [a for a in areas if len(a) > min_gap_size]
-            
+            areas = [a for a in areas if len(a) > min_area_size]
             result = 0
             bigger = 0
             for area in areas:
@@ -98,16 +104,25 @@ def is_frame_centered(idx, img, film_type='S8', threshold=10, slice_width=20):
             if result != 0:
                 if middle - margin <= result <= middle + margin:
                     is_centered = True
-                    gap = 0
-                else:
-                    is_centered = False
-                    gap = result - middle if result > middle else -(middle - result)
-                break
+                    off_center = 0
+                    best_match_found = True
+                    break
+                elif len(gaps) <= save_gaps:
+                    save_is_centered = False
+                    save_off_center = result - middle if result > middle else -(middle - result)
+                    save__threshold = local_threshold
+                    save_gaps = len(gaps)
+                    candidate_found = True
         local_threshold += 5 if local_threshold < 245 else 1
+
+    if not best_match_found and candidate_found:
+        is_centered = save_is_centered
+        off_center = save_off_center
+        local_threshold = save__threshold
 
     bad_frame_threshold[idx] = min (local_threshold, 254)
         
-    return is_centered, gap, local_threshold
+    return is_centered, off_center, local_threshold
 
 
 def show_image_popup(image):
@@ -116,12 +131,8 @@ def show_image_popup(image):
     popup = Toplevel()
     popup.title("Image Viewer")
 
-    # Convert the OpenCV image from BGR to RGB
-    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-    
     # Convert the image to a format Tkinter can display
-    pil_image = PIL.Image.fromarray(image_rgb)
-    photo = PIL.ImageTk.PhotoImage(image=pil_image)
+    photo = PIL.ImageTk.PhotoImage(image=image)
 
     # Use a Label to display the image
     label = Label(popup, image=photo)
@@ -146,7 +157,7 @@ def show_image_popup(image):
     # Update label when window size changes, maintaining aspect ratio
     def on_resize(event):
         # Calculate the new size while maintaining aspect ratio
-        img_width, img_height = pil_image.size
+        img_width, img_height = image.size
         aspect_ratio = img_width / img_height
         if event.width / event.height > aspect_ratio:
             # If window is wider than the image aspect ratio
@@ -158,7 +169,7 @@ def show_image_popup(image):
             new_height = int(new_width / aspect_ratio)
 
         # Resize the image
-        resized_image = pil_image.resize((new_width, new_height), PIL.Image.LANCZOS)
+        resized_image = image.resize((new_width, new_height), PIL.Image.LANCZOS)
         new_photo = PIL.ImageTk.PhotoImage(resized_image)
         
         # Update the label with the new image
@@ -169,26 +180,42 @@ def show_image_popup(image):
 
 
 def load_image(image_path, bw=False):
-    if check_dng_frames_for_misalignment and image_path.lower().endswith('.dng'):
-        with rawpy.imread(image_path) as raw:
-            rgb = raw.postprocess()
-            # Convert the numpy array to something OpenCV can work with
-            img = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-    else:
-        img = cv2.imread(image_path, cv2.COLOR_RGB2BGR)
+    """Loads an image from disk, optionally converts it to black and white, and returns a PhotoImage."""
 
-    if img is None:
-        raise ValueError("Could not read the image")
-    if bw:
-        # Convert the image to grayscale
-        gray_image = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        # Convert to pure black and white (binary image)
-        idx = frame_number_from_path(image_path)
-        if idx is None:
-            idx = 220
-        _, img = cv2.threshold(gray_image, bad_frame_threshold[idx], 255, cv2.THRESH_BINARY)
-        #_, binary_img = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    return img
+    try:
+        if image_path.lower().endswith('.dng'):
+            with rawpy.imread(image_path) as raw:
+                rgb = raw.postprocess()
+                img = Image.fromarray(rgb, 'RGB') #Create PIL image directly.
+        else:
+            img = Image.open(image_path)
+
+        if bw:
+            img = img.convert('L')  # Convert to grayscale (Pillow)
+            # Thresholding (manual)
+            idx = frame_number_from_path(image_path)
+            if idx is None:
+                idx = 220
+            threshold_value = bad_frame_threshold[idx]
+            img = img.point(lambda p: 255 if p > threshold_value else 0) #Pillow thresholding.
+
+        return img
+
+    except FileNotFoundError:
+        raise ValueError(f"Could not find the image: {image_path}")
+    except Exception as e:
+        raise ValueError(f"Could not read or process the image: {e}")
+
+
+def display_bad_frame(image_path, bw = False):
+    canvas_width = bad_frame_canvas.winfo_width()
+    canvas_height = bad_frame_canvas.winfo_height()
+    frame_img = load_image(image_path, bw)
+    frame_img = frame_img.resize((canvas_width, canvas_height), Image.LANCZOS)
+    frame_photo = ImageTk.PhotoImage(frame_img)
+    # Display splash on canvas
+    frame_id = bad_frame_canvas.create_image(canvas_width//2, canvas_height//2, image=frame_photo)  # Center at (width/2, height/2)
+    bad_frame_canvas.image = frame_photo  # Keep reference to avoid garbage collection
 
 
 def display_image_popup(image_path, bw=False):
@@ -295,19 +322,19 @@ def process_images_in_folder(folder_path, film_type, threshold):
             break
         if filename.lower().endswith(file_set):
             image_path = os.path.join(folder_path, filename)
-            centered, gap, img_threshold = is_frame_in_file_centered(image_path, film_type, threshold)
+            centered, off_center, img_threshold = is_frame_in_file_centered(image_path, film_type, threshold)
             if not centered:
                 display_bad_frame(image_path)
-                if gap == -1:
+                if off_center == -1:
                     status = "possibly empty" 
-                elif gap < 0:
-                    status = f"{-gap} pixels too high" 
+                elif off_center < 0:
+                    status = f"{-off_center} pixels too high" 
                 else:
-                    status = f"{gap} pixels too low"
+                    status = f"{off_center} pixels too low"
                 message = f"{image_path}, {status}, threshold = {img_threshold}\n"
                 result_text.insert(tk.END, message)
                 result_text.see(tk.END)
-                if gap == -1:
+                if off_center == -1:
                     empty_counter += 1
                 else:
                     misaligned_counter += 1
@@ -316,7 +343,7 @@ def process_images_in_folder(folder_path, film_type, threshold):
 
             # Update progress
             processed_files += 1
-            bad_frame_count.config(text=f"Processed: {processed_files}\r\nMisaligned: {misaligned_counter}\r\nEmpty: {empty_counter}")
+            bad_frame_count.config(text=f"Processed: {processed_files}\r\nMisaligned: {misaligned_counter} ({misaligned_counter*100/processed_files:.2f}%)\r\nEmpty: {empty_counter} ({empty_counter*100/processed_files:.2f}%)")
             progress = (processed_files / total_files) * 100 if total_files > 0 else 0
             progress_bar['value'] = progress
             root.update_idletasks()
@@ -443,7 +470,6 @@ def process_scrolltext_updated_position(event):
     click_position = event.widget.index(f"@{event.x},{event.y}")
     # Extract line number from click position
     line = int(click_position.split('.')[0])
-    print(f"Mouse event: {event.num}, event.x: {event.x}, event.y: {event.y}, original line: {line}")
 
     # Define the start and end of the line
     line_start = f"{line}.0"
@@ -478,10 +504,8 @@ def move_line_up(event):
             widget.mark_set('insert', new_line_start)
             widget.see('insert')  # Ensure the line is visible
     filename = retrieve_filename_at_current_line(event, line-1)
-    print(f"{filename}")
     if filename:
-        print(f"{filename}")
-        display_bad_frame(filename)
+        display_bad_frame(filename, last_bw_state)
 
 
 def move_line_down(event):
@@ -510,8 +534,7 @@ def move_line_down(event):
             widget.see('insert')  # Ensure the line is visible
     filename = retrieve_filename_at_current_line(event, line+1)
     if filename:
-        print(f"{filename}")
-        display_bad_frame(filename)
+        display_bad_frame(filename, last_bw_state)
 
 
 def retrieve_line_at_current_click_position(event):
@@ -533,15 +556,15 @@ def retrieve_filename_at_current_line(event, line):
     return filename if os.path.exists(filename) else None
 
 def on_mouse_click(event):
-    print(f"{event}")
+    global last_bw_state
     process_scrolltext_updated_position(event)
     line = retrieve_line_at_current_click_position(event)
     filename = retrieve_filename_at_current_line(event, line)
-    print(f"{filename}")
     if not filename:
         return
     if event.num == 1:
         # Left mouse button
+        last_bw_state = False
         display_bad_frame(filename)
     elif event.num == 2:
         # Middle mouse button
@@ -550,6 +573,7 @@ def on_mouse_click(event):
         tk.messagebox.showinfo("Path copied to clipboard", f"File path '{filename}' has been copied to the clipboard.")
     elif event.num == 3:
         # Right mouse button
+        last_bw_state = True
         display_bad_frame(filename, bw=True)
 
 
@@ -615,17 +639,6 @@ def get_folder_creation_date(folder_path):
             return "Creation date not available on this OS"
 
 
-def display_bad_frame(image_path):
-    canvas_width = bad_frame_canvas.winfo_width()
-    canvas_height = bad_frame_canvas.winfo_height()
-    frame_img = Image.open(image_path).resize((canvas_width, canvas_height), Image.LANCZOS)  # Match canvas size
-    frame_photo = ImageTk.PhotoImage(frame_img)
-
-    # Display splash on canvas
-    frame_id = bad_frame_canvas.create_image(canvas_width//2, canvas_height//2, image=frame_photo)  # Center at (width/2, height/2)
-    bad_frame_canvas.image = frame_photo  # Keep reference to avoid garbage collection
-
-
 def main (argv):
     global result_text, progress_bar, root, threshold_spinbox, film_type_var
     global threshold_message, bad_frame_count, bad_frame_canvas, selected_folder_value
@@ -672,9 +685,17 @@ def main (argv):
     bad_frame_count = tk.Label(top_frame, text="Misaligned: 0\r\nEmpty: 0")
     bad_frame_count.grid(row=2, column=1, padx=(20, 5), pady=5)
 
+    # Create a frame to hold the ScrolledText and horizontal scrollbar
+    scrolled_frame = tk.Frame(root)
+    scrolled_frame.pack(fill=tk.BOTH, expand=True)    
     # Scrolled text widget for displaying results
-    result_text = scrolledtext.ScrolledText(root, width=40, height=10)
+    result_text = scrolledtext.ScrolledText(scrolled_frame, wrap="none", width=40, height=10)
     result_text.pack(fill=tk.BOTH, expand=True)
+    # Create the horizontal scrollbar
+    h_scrollbar = tk.Scrollbar(scrolled_frame, orient="horizontal", command=result_text.xview)
+    h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+    # Configure the ScrolledText widget to work with the horizontal scrollbar
+    result_text.configure(xscrollcommand=h_scrollbar.set)
     # Bind to any event that might change the cursor; here we use <Enter> and <Leave>
     result_text.bind("<Enter>", keep_cursor)
     result_text.bind("<Leave>", keep_cursor)    
@@ -714,7 +735,7 @@ def main (argv):
     root.bind("<Configure>", on_resize)
 
     # Set the minimum width to 300 pixels and the minimum height to 200 pixels
-    root.minsize(width=800, height=300)
+    root.minsize(width=500, height=300)
 
     # Start the GUI
     root.mainloop()
