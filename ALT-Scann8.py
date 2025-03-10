@@ -337,6 +337,10 @@ FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
 ExposureWbAdaptPause = False
+# Variables to handle auto fine tune
+AutoFineTuneEnabled = True
+offset_image = None # RollingAverage object to allow to automatically set the fine tune value
+auto_fine_tune_wait = 0 # To allow waiting a few frames to allow auto fine tune value to have an effect
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
 # Finally set to 4-104
 HdrMinExp = 8
@@ -357,6 +361,8 @@ id_ManualScanEnabled = 8
 id_AutoPtLevelEnabled = 9
 id_AutoFrameStepsEnabled = 10
 id_ExposureWbAdaptPause = 11
+id_AutoFineTuneEnabled = 12
+
 
 plotter_canvas = None
 plotter_width = 20
@@ -445,9 +451,6 @@ session_frames = 0
 max_wait_time = 5000
 last_click_time = 0
 
-offset_image = None # RollingAverage object to allow to automatically set the fine tune value
-auto_fine_tune_wait = 0 # To allow waiting a few frames to allow auto fine tune value to have an effect
-
 ALT_Scann8_controller_detected = False
 
 FPM_LastMinuteFrameTimes = list()
@@ -531,7 +534,8 @@ ConfigData = {
     "HdrBracketShift": 0,
     "HdrBracketAuto": HdrBracketAuto,
     "HdrMergeInPlace": HdrMergeInPlace,
-    "FramesToGo": FramesToGo
+    "FramesToGo": FramesToGo,
+    "AutoFineTuneEnabled": True
 }
 
 Simulated_PT_Levels = [(546, 373),(382, 373),(52, 373),(14, 373),(59, 373),(41, 373),(151, 373),(269, 371),
@@ -848,7 +852,7 @@ def cmd_settings_popup_accept():
     global options_dlg
     global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
-    global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
+    global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled, AutoFineTuneEnabled
     global FrameFineTuneValue, ScanSpeedValue, FrameVCenterValue
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
@@ -871,6 +875,7 @@ def cmd_settings_popup_accept():
             AutoWbEnabled = True
             AutoFrameStepsEnabled = True
             AutoPtLevelEnabled = True
+            AutoFineTuneEnabled = True
             FrameFineTuneValue = 20
             FrameVCenterValue = 0
             ScanSpeedValue = 5
@@ -885,6 +890,7 @@ def cmd_settings_popup_accept():
             FrameFineTuneValue = ConfigData["FrameFineTune"]
             FrameVCenterValue = ConfigData["FrameVCenter"]
             ScanSpeedValue = ConfigData["ScanSpeed"]
+            AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AeEnable": AutoExpEnabled})
             camera.set_controls({"AwbEnable": AutoWbEnabled})
@@ -962,7 +968,7 @@ def cmd_settings_popup_accept():
         widget_list_enable([id_RealTimeDisplay, id_RealTimeZoom, id_AutoStopEnabled])
         if ExpertMode:
             widget_list_enable([id_AutoWbEnabled, id_AutoExpEnabled, id_AutoPtLevelEnabled, id_AutoFrameStepsEnabled,
-                                id_ExposureWbAdaptPause])
+                                id_ExposureWbAdaptPause, id_AutoFineTuneEnabled])
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
 
@@ -1791,7 +1797,8 @@ def adjust_auto_fine_tune():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
     frame_fine_tune_value.set(FrameFineTuneValue)
     auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
-    
+
+
 def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
     height, width = img.shape[:2]
     if slice_width > width:
@@ -1983,7 +1990,8 @@ def capture_save_thread(queue, event, id):
             if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
                 frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
                 offset_image.add_value(offset)
-                adjust_auto_fine_tune()
+                if AutoFineTuneEnabled:
+                    adjust_auto_fine_tune()
                 if not frame_centered:
                     scan_error_counter += 1
                     if scan_error_total_frames_counter > 0:
@@ -2022,7 +2030,8 @@ def capture_save_thread(queue, event, id):
             frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
             print(f"Frame {frame_idx}, adding offset: {offset}")
             offset_image.add_value(offset)
-            adjust_auto_fine_tune()
+            if AutoFineTuneEnabled:
+                adjust_auto_fine_tune()
             if DetectMisalignedFrames and hdr_idx <= 1 and not frame_centered:
                 scan_error_counter += 1
                 if scan_error_total_frames_counter > 0:
@@ -3511,8 +3520,10 @@ def widget_list_update(cmd, category_list):
                                                     [exposure_spinbox]]
         dependent_widget_dict[id_AutoWbEnabled] = [[awb_mode_label,AwbMode_dropdown,auto_exp_wb_wait_btn],
                                                    [wb_red_spinbox,wb_blue_spinbox]]
-        dependent_widget_dict[id_AutoPtLevelEnabled] = [[],
+        dependent_widget_dict[id_AutoPtLevelEnabled] = [[fine_tune_btn, frame_fine_tune_spinbox],
                                                         [pt_level_spinbox]]
+        dependent_widget_dict[id_AutoFineTuneEnabled] = [[],
+                                                        [frame_fine_tune_spinbox]]
         dependent_widget_dict[id_AutoFrameStepsEnabled] = [[frame_extra_steps_label, frame_extra_steps_spinbox],
                                                            [steps_per_frame_spinbox]]
         dependent_widget_dict[id_ExposureWbAdaptPause] = [[match_wait_margin_spinbox],
@@ -3555,6 +3566,8 @@ def widget_list_update(cmd, category_list):
                 state = AutoFrameStepsEnabled
             elif category == id_ExposureWbAdaptPause:
                 state = ExposureWbAdaptPause
+            elif category == id_AutoFineTuneEnabled:
+                state = AutoFineTuneEnabled
             items = dependent_widget_dict[category]
             if cmd == 'enable':
                 for widget in items[0]:
@@ -4055,6 +4068,10 @@ def load_session_data_post_init():
                 ScanSpeedValue = int(ConfigData["ScanSpeed"])
                 scan_speed_value.set(ScanSpeedValue)
                 send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
+            if 'AutoFineTuneEnabled' in ConfigData:
+                AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
+                auto_fine_tune_enabled.set(AutoFineTuneEnabled)
+                cmd_set_auto_fine_tune()
             if 'Brightness' in ConfigData:
                 aux = ConfigData["Brightness"]
                 brightness_value.set(aux)
@@ -4092,6 +4109,7 @@ def load_session_data_post_init():
             AutoWbEnabled = True
             AutoFrameStepsEnabled = True
             AutoPtLevelEnabled = True
+            AutoFineTuneEnabled = True
             FrameFineTuneValue = 20
             ScanSpeedValue = 5
             if not SimulatedRun and not CameraDisabled:
@@ -4242,6 +4260,11 @@ def init_multidependent_widgets():
         hdr_max_exp_spinbox.disabled_counter = 1
 
         widget_list_refresh([id_HdrBracketAuto])
+    frame_fine_tune_spinbox.disabled_counter = 0
+    if not AutoPtLevelEnabled:
+        frame_fine_tune_spinbox.disabled_counter += 1
+    if  AutoFineTuneEnabled:
+        frame_fine_tune_spinbox.disabled_counter += 1
 
 
 def display_splash():
@@ -4671,6 +4694,14 @@ def cmd_set_auto_pt_level():
     send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else PtLevelValue)
 
 
+def cmd_set_auto_fine_tune():
+    global AutoFineTuneEnabled
+    AutoFineTuneEnabled = auto_fine_tune_enabled.get()
+    widget_list_enable([id_AutoFineTuneEnabled])
+    fine_tune_btn.config(text="Fine Tune AUTO:" if AutoFineTuneEnabled else "Fine Tune:")
+    ConfigData["AutoFineTuneEnabled"] = AutoFineTuneEnabled
+
+
 def cmd_pt_level_selection():
     global PtLevelValue
     if AutoPtLevelEnabled:
@@ -4983,9 +5014,9 @@ def create_widgets():
     global auto_stop_enabled_checkbox, auto_stop_enabled
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
     global draw_capture_canvas, draw_capture_frame
-    global steps_per_frame_value, frame_fine_tune_value
+    global steps_per_frame_value, frame_fine_tune_value, auto_fine_tune_enabled
     global pt_level_spinbox
-    global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
+    global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value, fine_tune_btn
     global frame_vcenter_spinbox, frame_vcenter_value
     global frame_extra_steps_spinbox, frame_extra_steps_value, frame_extra_steps_label
     global scan_speed_spinbox, scan_speed_value
@@ -5970,10 +6001,15 @@ def create_widgets():
         frame_align_row += 1
 
         # Spinbox to select Frame Fine Tune on Arduino
-        frame_fine_tune_label = tk.Label(frame_alignment_frame, text='Fine tune:', font=("Arial", FontSize - 1),
-                                         name='frame_fine_tune_label')
-        frame_fine_tune_label.widget_type = "control"
-        frame_fine_tune_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        auto_fine_tune_enabled = tk.BooleanVar(value=AutoFineTuneEnabled)
+        fine_tune_btn = tk.Checkbutton(frame_alignment_frame, variable=auto_fine_tune_enabled, onvalue=True,
+                                      offvalue=False, font=("Arial", FontSize - 1), command=cmd_set_auto_fine_tune,
+                                      text="Fine Tune AUTO:", relief="raised", indicatoron=False, name='fine_tune_btn')
+        fine_tune_btn.widget_type = "control"
+        if ColorCodedButtons:
+            fine_tune_btn.config(selectcolor="pale green")
+        fine_tune_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
+        as_tooltips.add(fine_tune_btn, "Toggle automatic fine-tune framne position calculation.")
 
         frame_fine_tune_value = tk.IntVar(value=FrameFineTuneValue)  # To be overridden by config
         frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_fine_tune_selection, width=4,
@@ -5981,7 +6017,7 @@ def create_widgets():
                                                  from_=5, to=95, increment=5, font=("Arial", FontSize - 1),
                                                  name='frame_fine_tune_spinbox')
         frame_fine_tune_spinbox.widget_type = "control"
-        frame_fine_tune_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        frame_fine_tune_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_fine_tune_validation_cmd = frame_fine_tune_spinbox.register(fine_tune_validation)
         frame_fine_tune_spinbox.configure(validate="key", validatecommand=(cmd_fine_tune_validation_cmd, '%P'))
         as_tooltips.add(frame_fine_tune_spinbox, "Fine tune frame detection: Shift frame detection threshold up of "
