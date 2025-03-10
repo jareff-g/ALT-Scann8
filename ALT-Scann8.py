@@ -2145,7 +2145,7 @@ def cmd_set_negative_image():
 #  - Focus
 #  - Color adjustment
 #  - Exposure adjustment
-def cmd_set_real_time_display():
+def cmd_set_real_time_display_old():
     global RealTimeDisplay
     global camera, ZoomSize
     global saved_locale
@@ -2175,6 +2175,42 @@ def cmd_set_real_time_display():
             camera.set_controls({"ScalerCrop": ZoomSize})
             # Restore the saved locale
             locale.setlocale(locale.LC_NUMERIC, saved_locale)
+
+    # Do not allow scan to start while PiCam2 preview is active
+    widget_enable(start_btn, not RealTimeDisplay)
+    widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
+    real_time_zoom_checkbox.deselect()
+
+
+def real_time_display():
+    if RealTimeDisplay:
+        # Capture frame-by-frame
+        image = camera.capture_image()
+        # Convert image to PhotoImage
+        photo = ImageTk.PhotoImage(image)
+        # Update the canvas image
+        draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        draw_capture_canvas.image = photo
+        # Repeat after 10 milliseconds
+        win.after(10, real_time_display)
+
+
+# Function to enable 'real-time' view on main window
+# Not a direct video feed from PiCamera2 but images capured an displayed sequentially
+def cmd_set_real_time_display():
+    global RealTimeDisplay
+    global camera, ZoomSize
+    global saved_locale
+    RealTimeDisplay = real_time_display.get()
+    if RealTimeDisplay:
+        logging.debug("Real time display on main window enabled")
+    else:
+        logging.debug("Real time display on main window disabled")
+    if not SimulatedRun and not CameraDisabled:
+        if RealTimeDisplay:
+            ZoomSize = camera.capture_metadata()['ScalerCrop']
+            time.sleep(0.1)
+            root.after(10, real_time_display)
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
