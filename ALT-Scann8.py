@@ -239,6 +239,7 @@ last_temp = 1  # Needs to be different from RPiTemp the first time
 LastTempInFahrenheit = False
 save_bg = 'gray'
 save_fg = 'black'
+default_canvas_bg_color = None
 ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
@@ -2015,7 +2016,8 @@ def draw_preview_image(preview_image, curframe, idx):
 
     if curframe % PreviewModuleValue == 0 and preview_image is not None:
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
-            preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
+            # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
+            preview_image = preview_image.resize((PreviewWidth+4, PreviewHeight+4))
             PreviewAreaImage = ImageTk.PhotoImage(preview_image)
         elif HdrViewX4Active:
             # if using View4X mode and there are 5 exposures, we do not display the 5th
@@ -2146,8 +2148,8 @@ def update_real_time_display():
     if RealTimeDisplay:
         # Capture frame-by-frame
         image = camera.capture_image()
-        # Resize image
-        image = image.resize((PreviewWidth, PreviewHeight), Image.LANCZOS)  # Match canvas size
+        # Resize image, match canvas size (need to increase a bit to prevent gaps)
+        image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)  
         # Convert image to PhotoImage
         photo = ImageTk.PhotoImage(image)
         # Update the canvas image
@@ -2161,7 +2163,8 @@ def update_real_time_display():
         camera.set_controls({"ScalerCrop": ZoomSize})
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
-
+        draw_capture_canvas.config(highlightbackground=default_canvas_bg_color)
+        
 
 
 # Function to enable 'real-time' view on main window
@@ -2176,6 +2179,7 @@ def cmd_set_real_time_display():
         logging.debug("Real time display on main window disabled")
     if not SimulatedRun and not CameraDisabled:
         if RealTimeDisplay:
+            draw_capture_canvas.config(highlightbackground="red")
             camera.switch_mode(vfd_config)
             time.sleep(0.1)
             ZoomSize = camera.capture_metadata()['ScalerCrop']
@@ -4920,7 +4924,7 @@ def create_widgets():
     global real_time_zoom_checkbox, real_time_zoom
     global auto_stop_enabled_checkbox, auto_stop_enabled
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
-    global draw_capture_canvas
+    global draw_capture_canvas, draw_capture_frame
     global steps_per_frame_value, frame_fine_tune_value
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
@@ -4971,6 +4975,7 @@ def create_widgets():
     global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
     global capture_info_str
     global vfd_mode_value
+    global default_canvas_bg_color
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5043,8 +5048,10 @@ def create_widgets():
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2, 0))  # Pady+=2 to compensate
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight,
-                                 name='draw_capture_canvas')
+                                 highlightthickness=5, name='draw_capture_canvas')
     draw_capture_canvas.pack(padx=(20, 5), pady=5)
+    # Store the default border color
+    default_canvas_bg_color = draw_capture_canvas.cget("highlightbackground")
 
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
