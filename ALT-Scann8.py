@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.20"
-__date__ = "2025-03-05"
-__version_highlight__ = "Bugfixes: Target folder not set after base folder; False positives in misaligned frames"
+__version__ = "1.12.21"
+__date__ = "2025-03-10"
+__version_highlight__ = "Focus view: Finally get rid of popup window, focus is done in main window."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -239,6 +239,7 @@ last_temp = 1  # Needs to be different from RPiTemp the first time
 LastTempInFahrenheit = False
 save_bg = 'gray'
 save_fg = 'black'
+default_canvas_bg_color = None
 ZoomSize = 0
 simulated_captured_frame_list = [None] * 1000
 simulated_capture_image = ''
@@ -2059,7 +2060,8 @@ def draw_preview_image(preview_image, curframe, idx):
 
     if curframe % PreviewModuleValue == 0 and preview_image is not None:
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
-            preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
+            # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
+            preview_image = preview_image.resize((PreviewWidth+4, PreviewHeight+4))
             PreviewAreaImage = ImageTk.PhotoImage(preview_image)
         elif HdrViewX4Active:
             # if using View4X mode and there are 5 exposures, we do not display the 5th
@@ -2184,41 +2186,49 @@ def cmd_set_negative_image():
     ConfigData["NegativeCaptureActive"] = NegativeImage
 
 
-# Function to enable 'real' preview with PiCamera2
-# Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
-#  - Focus
-#  - Color adjustment
-#  - Exposure adjustment
+def update_real_time_display():
+    global RealTimeDisplay
+    global ZoomSize
+    if RealTimeDisplay:
+        # Capture frame-by-frame
+        image = camera.capture_image()
+        # Resize image, match canvas size (need to increase a bit to prevent gaps)
+        image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)  
+        # Convert image to PhotoImage
+        photo = ImageTk.PhotoImage(image)
+        # Update the canvas image
+        draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        draw_capture_canvas.image = photo
+        # Repeat after 10 milliseconds
+        win.after(10, update_real_time_display)
+    else:
+        camera.switch_mode(capture_config)
+        time.sleep(0.1)
+        camera.set_controls({"ScalerCrop": ZoomSize})
+        # Restore the saved locale
+        locale.setlocale(locale.LC_NUMERIC, saved_locale)
+        draw_capture_canvas.config(highlightbackground=default_canvas_bg_color)
+        
+
+
+# Function to enable 'real-time' view on main window
+# Not a direct video feed from PiCamera2 but images capured an displayed sequentially
 def cmd_set_real_time_display():
     global RealTimeDisplay
-    global camera, ZoomSize
-    global saved_locale
+    global ZoomSize
     RealTimeDisplay = real_time_display.get()
     if RealTimeDisplay:
-        logging.debug("Real time display enabled")
+        logging.debug("Real time display on main window enabled")
     else:
-        logging.debug("Real time display disabled")
+        logging.debug("Real time display on main window disabled")
     if not SimulatedRun and not CameraDisabled:
         if RealTimeDisplay:
+            draw_capture_canvas.config(highlightbackground="red")
+            camera.switch_mode(vfd_config)
+            time.sleep(0.1)
             ZoomSize = camera.capture_metadata()['ScalerCrop']
             time.sleep(0.1)
-            if camera._preview:
-                camera.stop_preview()
-            time.sleep(0.1)
-            camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
-            time.sleep(0.1)
-            camera.switch_mode(preview_config)
-        else:
-            if camera._preview:
-                camera.stop_preview()
-            camera.stop()
-            camera.start()
-            time.sleep(0.1)
-            camera.switch_mode(capture_config)
-            time.sleep(0.1)
-            camera.set_controls({"ScalerCrop": ZoomSize})
-            # Restore the saved locale
-            locale.setlocale(locale.LC_NUMERIC, saved_locale)
+            win.after(10, update_real_time_display)
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
@@ -4972,7 +4982,7 @@ def create_widgets():
     global real_time_zoom_checkbox, real_time_zoom
     global auto_stop_enabled_checkbox, auto_stop_enabled
     global focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn, focus_plus_btn, focus_minus_btn
-    global draw_capture_canvas
+    global draw_capture_canvas, draw_capture_frame
     global steps_per_frame_value, frame_fine_tune_value
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
@@ -5024,6 +5034,7 @@ def create_widgets():
     global scan_error_counter_value, scan_error_counter_value_label, detect_misaligned_frames_btn, detect_misaligned_frames
     global capture_info_str
     global vfd_mode_value
+    global default_canvas_bg_color
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5096,8 +5107,10 @@ def create_widgets():
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2, 0))  # Pady+=2 to compensate
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight,
-                                 name='draw_capture_canvas')
+                                 highlightthickness=5, name='draw_capture_canvas')
     draw_capture_canvas.pack(padx=(20, 5), pady=5)
+    # Store the default border color
+    default_canvas_bg_color = draw_capture_canvas.cget("highlightbackground")
 
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
