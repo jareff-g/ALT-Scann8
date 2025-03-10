@@ -331,6 +331,7 @@ MatchWaitMarginValue = 50
 StepsPerFrame = 250
 PtLevelValue = 200
 FrameFineTuneValue = 20
+FrameVCenterValue = 0
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
@@ -442,6 +443,9 @@ session_start_time = 0
 session_frames = 0
 max_wait_time = 5000
 last_click_time = 0
+
+offset_image = None # RollingAverage object to allow to automatically set the fine tune value
+auto_fine_tune_wait = 0 # To allow waiting a few frames to allow auto fine tune value to have an effect
 
 ALT_Scann8_controller_detected = False
 
@@ -844,7 +848,7 @@ def cmd_settings_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled
-    global FrameFineTuneValue, ScanSpeedValue
+    global FrameFineTuneValue, ScanSpeedValue, FrameVCenterValue
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
     global ConfigData, BaseFolder, CurrentDir
@@ -867,6 +871,7 @@ def cmd_settings_popup_accept():
             AutoFrameStepsEnabled = True
             AutoPtLevelEnabled = True
             FrameFineTuneValue = 20
+            FrameVCenterValue = 0
             ScanSpeedValue = 5
         else:
             ExpertMode = ConfigData['ExpertMode'] = True
@@ -877,6 +882,7 @@ def cmd_settings_popup_accept():
             AutoFrameStepsEnabled = ConfigData['AutoFrameStepsEnabled']  # FrameStepsAuto
             AutoPtLevelEnabled = ConfigData['AutoPtLevelEnabled']  # PTLevelAuto
             FrameFineTuneValue = ConfigData["FrameFineTune"]
+            FrameVCenterValue = ConfigData["FrameVCenter"]
             ScanSpeedValue = ConfigData["ScanSpeed"]
         if not SimulatedRun and not CameraDisabled:
             camera.set_controls({"AeEnable": AutoExpEnabled})
@@ -1756,7 +1762,34 @@ def find_sprocket_best_x(film_type='S8', slice_width=20):
     # vfd_sprocket_hole_x = (sprocket_zone[0] + sprocket_zone[-1]) // 2  # Middle
     vfd_sprocket_hole_x = sprocket_zone[-1]  # Right edge
     logging.debug(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
-    
+
+
+def adjust_auto_fine_tune():
+    global FrameFineTuneValue, auto_fine_tune_wait
+    offset_avg = offset_image.get_average()
+    if offset_avg == None:
+        return  # Too early as to rely on average (less than 50 samples)
+    else:
+        offset_avg = int(offset_avg)
+    if auto_fine_tune_wait > 0:
+        auto_fine_tune_wait -= 1
+        return
+    print(f"Average offset: {offset_avg}")
+    if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.02:
+        return  # Ignore if average offset is less than 2% of total height
+    direction = -1 if offset_avg < 0 else 1
+    step = min(10, int(abs(offset_avg)/10)) # big steps for big offsets
+    FrameFineTuneValue += int(direction * step)
+    if FrameFineTuneValue < 0:
+        FrameFineTuneValue = 0
+    elif FrameFineTuneValue > 100:
+        FrameFineTuneValue = 100
+    frame_fine_tune_value.set(FrameFineTuneValue)
+    logging.debug(f"Adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
+    print(f"Adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
+    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+    frame_fine_tune_value.set(FrameFineTuneValue)
+    auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
     
 def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
     height, width = img.shape[:2]
@@ -1792,7 +1825,8 @@ def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
         
         if result != 0:
             if middle - margin <= result <= middle + margin:
-                return True, 0
+                return True, result - middle if result > middle else -(middle - result)
+            #return False, result - middle if result > middle else -(middle - result)
             return False, result - middle if result > middle else -(middle - result)
     return False, -1
 
@@ -1816,6 +1850,9 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
 
     # Calculate the middle horizontal line
     middle = height // 2
+
+    # Adjust VCenter (not all films have the frames vertically centered respect to the holes)
+    middle -= int(FrameVCenterValue/100 * height)
 
     # Calculate margin
     margin = height*threshold//100
@@ -1858,7 +1895,7 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
 
     if result != 0:
         if result >= middle - margin and result <= middle + margin:
-            return True, 0
+            return True, result - middle if result > middle else -(middle - result)
         elif result < middle - margin:
             return False, -(middle - result)
         elif result > middle + margin:
@@ -1943,7 +1980,10 @@ def capture_save_thread(queue, event, id):
                     captured_image = request.make_array('main')
             request.release()   # Release request ASAP (delay frame alignment check)
             if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
-                if not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
+                frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
+                offset_image.add_value(offset)
+                adjust_auto_fine_tune()
+                if not frame_centered:
                     scan_error_counter += 1
                     if scan_error_total_frames_counter > 0:
                         scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
@@ -1978,7 +2018,11 @@ def capture_save_thread(queue, event, id):
                     captured_image = np.array(captured_image)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            if DetectMisalignedFrames and hdr_idx <= 1 and not is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)[0]:
+            frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
+            print(f"Frame {frame_idx}, adding offset: {offset}")
+            offset_image.add_value(offset)
+            adjust_auto_fine_tune()
+            if DetectMisalignedFrames and hdr_idx <= 1 and not frame_centered:
                 scan_error_counter += 1
                 if scan_error_total_frames_counter > 0:
                     scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
@@ -3973,6 +4017,9 @@ def load_session_data_post_init():
                 FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
                 frame_extra_steps_value.set(FrameExtraStepsValue)
                 send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
+            if 'FrameVCenter' in ConfigData:
+                FrameVCenterValue = ConfigData["FrameVCenter"]
+                frame_vcenter_value.set(FrameVCenterValue)
             if 'PTLevelAuto' in ConfigData:     # Delete legacy name, replace with new
                 ConfigData['AutoPtLevelEnabled'] = ConfigData['PTLevelAuto']
                 del ConfigData['PTLevelAuto']
@@ -4332,7 +4379,7 @@ def tscann8_init():
     global capture_save_queue, capture_save_event
     global MergeMertens, camera_resolutions
     global active_threads
-    global time_save_image, time_preview_display, time_awb, time_autoexp
+    global time_save_image, time_preview_display, time_awb, time_autoexp, offset_image
     global hw_panel, hw_panel_installed
 
     if SimulatedRun:
@@ -4367,6 +4414,7 @@ def tscann8_init():
     time_preview_display = RollingAverage(50)
     time_awb = RollingAverage(50)
     time_autoexp = RollingAverage(50)
+    offset_image = RollingAverage(5)
 
     create_main_window()
 
@@ -4636,8 +4684,18 @@ def cmd_frame_fine_tune_selection():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
 
 
+def cmd_frame_vcenter_selection():
+    global FrameVCenterValue
+    FrameVCenterValue = value_normalize(frame_vcenter_value, -200, 200, 0)
+    ConfigData["FrameVCenter"] = FrameVCenterValue
+    ConfigData["FrameVCenter" + ConfigData["FilmType"]] = FrameVCenterValue
+
 def fine_tune_validation(new_value):
     return value_validation(new_value, frame_fine_tune_spinbox, 5, 95, 25)
+
+
+def vcenter_validation(new_value):
+    return value_validation(new_value, frame_vcenter_spinbox, -200, 200, 0)
 
 
 def extra_steps_validation(new_value):
@@ -4918,6 +4976,7 @@ def create_widgets():
     global steps_per_frame_value, frame_fine_tune_value
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value
+    global frame_vcenter_spinbox, frame_vcenter_value
     global frame_extra_steps_spinbox, frame_extra_steps_value, frame_extra_steps_label
     global scan_speed_spinbox, scan_speed_value
     global exposure_value
@@ -5916,6 +5975,26 @@ def create_widgets():
                                                  "down (5 to 95% of PT amplitude).")
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: cmd_frame_fine_tune_selection())
         frame_align_row += 1
+
+        # Spinbox to adjust frame vertical center
+        frame_vcenter_label = tk.Label(frame_alignment_frame, text='Frame vcenter:', font=("Arial", FontSize - 1),
+                                         name='frame_vcenter_label')
+        frame_vcenter_label.widget_type = "control"
+        frame_vcenter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+
+        frame_vcenter_value = tk.IntVar(value=FrameVCenterValue)  # To be overridden by config
+        frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
+                                                 readonlybackground='pale green', textvariable=frame_vcenter_value,
+                                                 from_=-100, to=+100, increment=1, font=("Arial", FontSize - 1),
+                                                 name='frame_vcenter_spinbox')
+        frame_vcenter_spinbox.widget_type = "control"
+        frame_vcenter_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
+        frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
+        as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: Adjust so that frame appears vertically centered")
+        frame_vcenter_spinbox.bind("<FocusOut>", lambda event: cmd_frame_vcenter_selection())
+        frame_align_row += 1
+
 
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1),
