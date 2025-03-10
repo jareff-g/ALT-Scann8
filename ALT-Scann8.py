@@ -364,6 +364,7 @@ id_ExposureWbAdaptPause = 11
 id_AutoFineTuneEnabled = 12
 
 
+
 plotter_canvas = None
 plotter_width = 20
 plotter_height = 10
@@ -672,6 +673,7 @@ def cmd_set_auto_stop_enabled():
 def cmd_set_focus_zoom():
     global RealTimeZoom, ZoomSize
     RealTimeZoom = real_time_zoom.get()
+    widget_list_enable([id_RealTimeZoom])
     if RealTimeZoom:
         widget_enable(real_time_display_checkbox, False)
     else:
@@ -696,6 +698,9 @@ def cmd_set_focus_zoom():
     widget_enable(focus_rt_btn, RealTimeZoom)
     widget_enable(focus_plus_btn, RealTimeZoom)
     widget_enable(focus_minus_btn, RealTimeZoom)
+    widget_enable(frame_vcenter_label, not RealTimeZoom)
+    widget_enable(frame_vcenter_spinbox, not RealTimeZoom)
+
 
 
 def adjust_focus_zoom():
@@ -2231,6 +2236,7 @@ def cmd_set_real_time_display():
     else:
         logging.debug("Real time display on main window disabled")
     if not SimulatedRun and not CameraDisabled:
+        widget_list_enable([id_RealTimeDisplay])
         if RealTimeDisplay:
             draw_capture_canvas.config(highlightbackground="red")
             camera.switch_mode(vfd_config)
@@ -2242,6 +2248,8 @@ def cmd_set_real_time_display():
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
     widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
+    widget_enable(frame_vcenter_label, RealTimeDisplay)
+    widget_enable(frame_vcenter_spinbox, RealTimeDisplay)
     real_time_zoom_checkbox.deselect()
 
 
@@ -3505,10 +3513,10 @@ def widget_list_update(cmd, category_list):
     # First list contains the widgets to enable when boolean key is true
     # Second list contains the widgets to enable when boolean key is false
     dependent_widget_dict = {
-        id_RealTimeDisplay: [[real_time_zoom_checkbox],
+        id_RealTimeDisplay: [[real_time_zoom_checkbox, frame_vcenter_label, frame_vcenter_spinbox],
                              []],
         id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
-                          []],
+                          [frame_vcenter_label, frame_vcenter_spinbox]],
         id_AutoStopEnabled: [[autostop_no_film_rb, autostop_counter_zero_rb],
                              []]
     }
@@ -4259,13 +4267,20 @@ def init_multidependent_widgets():
         hdr_min_exp_spinbox.disabled_counter = 1
         hdr_max_exp_spinbox.disabled_counter = 1
 
-        widget_list_refresh([id_HdrBracketAuto])
     frame_fine_tune_spinbox.disabled_counter = 0
     if not AutoPtLevelEnabled:
         frame_fine_tune_spinbox.disabled_counter += 1
     if  AutoFineTuneEnabled:
         frame_fine_tune_spinbox.disabled_counter += 1
-
+    frame_vcenter_label.disabled_counter = 0
+    frame_vcenter_spinbox.disabled_counter = 0
+    if not RealTimeDisplay:
+        frame_vcenter_label.disabled_counter += 1
+        frame_vcenter_spinbox.disabled_counter += 1
+    if RealTimeZoom:
+        frame_vcenter_label.disabled_counter += 1
+        frame_vcenter_spinbox.disabled_counter += 1
+    widget_list_refresh([id_HdrBracketAuto, id_AutoPtLevelEnabled, id_AutoFineTuneEnabled, id_RealTimeDisplay, id_RealTimeZoom])
 
 def display_splash():
     global splash_id
@@ -5017,7 +5032,7 @@ def create_widgets():
     global steps_per_frame_value, frame_fine_tune_value, auto_fine_tune_enabled
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value, fine_tune_btn
-    global frame_vcenter_spinbox, frame_vcenter_value
+    global frame_vcenter_spinbox, frame_vcenter_value, frame_vcenter_label
     global frame_extra_steps_spinbox, frame_extra_steps_value, frame_extra_steps_label
     global scan_speed_spinbox, scan_speed_value
     global exposure_value
@@ -6025,26 +6040,6 @@ def create_widgets():
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: cmd_frame_fine_tune_selection())
         frame_align_row += 1
 
-        # Spinbox to adjust frame vertical center
-        frame_vcenter_label = tk.Label(frame_alignment_frame, text='Frame vcenter:', font=("Arial", FontSize - 1),
-                                         name='frame_vcenter_label')
-        frame_vcenter_label.widget_type = "control"
-        frame_vcenter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-
-        frame_vcenter_value = tk.IntVar(value=FrameVCenterValue)  # To be overridden by config
-        frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
-                                                 readonlybackground='pale green', textvariable=frame_vcenter_value,
-                                                 from_=-100, to=+100, increment=1, font=("Arial", FontSize - 1),
-                                                 name='frame_vcenter_spinbox')
-        frame_vcenter_spinbox.widget_type = "control"
-        frame_vcenter_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
-        cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
-        frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
-        as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: Adjust so that frame appears vertically centered")
-        frame_vcenter_spinbox.bind("<FocusOut>", lambda event: cmd_frame_vcenter_selection())
-        frame_align_row += 1
-
-
         # Spinbox to select Extra Steps on Arduino
         frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1),
                                            name='frame_extra_steps_label')
@@ -6065,6 +6060,26 @@ def create_widgets():
                                                    "film gate is not correctly positioned.")
         frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
         frame_align_row += 1
+
+        # Spinbox to adjust frame center vertically, usign the focus view
+        frame_vcenter_label = tk.Label(frame_alignment_frame, text='Frame vcenter:', font=("Arial", FontSize - 1),
+                                         name='frame_vcenter_label')
+        frame_vcenter_label.widget_type = "control"
+        frame_vcenter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+
+        frame_vcenter_value = tk.IntVar(value=FrameVCenterValue)  # To be overridden by config
+        frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
+                                                 readonlybackground='pale green', textvariable=frame_vcenter_value,
+                                                 from_=-100, to=+100, increment=1, font=("Arial", FontSize - 1),
+                                                 name='frame_vcenter_spinbox')
+        frame_vcenter_spinbox.widget_type = "control"
+        frame_vcenter_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
+        frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
+        as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: Adjust using focus view so that frame appears vertically centered")
+        frame_vcenter_spinbox.bind("<FocusOut>", lambda event: cmd_frame_vcenter_selection())
+        frame_align_row += 1
+
 
         # Scan error counter
         detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
