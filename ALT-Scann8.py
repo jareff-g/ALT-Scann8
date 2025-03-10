@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.20"
-__date__ = "2025-03-05"
-__version_highlight__ = "Bugfixes: Target folder not set after base folder; False positives in misaligned frames"
+__version__ = "1.12.21"
+__date__ = "2025-03-10"
+__version_highlight__ = "Focus view: Finally get rid of popup window, focus is done in main window."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2140,67 +2140,35 @@ def cmd_set_negative_image():
     ConfigData["NegativeCaptureActive"] = NegativeImage
 
 
-# Function to enable 'real' preview with PiCamera2
-# Even if it is useless for capture (slow and imprecise) it is still needed for other tasks like:
-#  - Focus
-#  - Color adjustment
-#  - Exposure adjustment
-def cmd_set_real_time_display_old():
+def update_real_time_display():
     global RealTimeDisplay
-    global camera, ZoomSize
-    global saved_locale
-    RealTimeDisplay = real_time_display.get()
-    if RealTimeDisplay:
-        logging.debug("Real time display enabled")
-    else:
-        logging.debug("Real time display disabled")
-    if not SimulatedRun and not CameraDisabled:
-        if RealTimeDisplay:
-            ZoomSize = camera.capture_metadata()['ScalerCrop']
-            time.sleep(0.1)
-            if camera._preview:
-                camera.stop_preview()
-            time.sleep(0.1)
-            camera.start_preview(Preview.QTGL, x=PreviewWinX, y=PreviewWinY, width=840, height=720)
-            time.sleep(0.1)
-            camera.switch_mode(preview_config)
-        else:
-            if camera._preview:
-                camera.stop_preview()
-            camera.stop()
-            camera.start()
-            time.sleep(0.1)
-            camera.switch_mode(capture_config)
-            time.sleep(0.1)
-            camera.set_controls({"ScalerCrop": ZoomSize})
-            # Restore the saved locale
-            locale.setlocale(locale.LC_NUMERIC, saved_locale)
-
-    # Do not allow scan to start while PiCam2 preview is active
-    widget_enable(start_btn, not RealTimeDisplay)
-    widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
-    real_time_zoom_checkbox.deselect()
-
-
-def real_time_display():
+    global ZoomSize
     if RealTimeDisplay:
         # Capture frame-by-frame
         image = camera.capture_image()
+        # Resize image
+        image = image.resize((PreviewWidth, PreviewHeight), Image.LANCZOS)  # Match canvas size
         # Convert image to PhotoImage
         photo = ImageTk.PhotoImage(image)
         # Update the canvas image
         draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
         draw_capture_canvas.image = photo
         # Repeat after 10 milliseconds
-        win.after(10, real_time_display)
+        win.after(10, update_real_time_display)
+    else:
+        camera.switch_mode(capture_config)
+        time.sleep(0.1)
+        camera.set_controls({"ScalerCrop": ZoomSize})
+        # Restore the saved locale
+        locale.setlocale(locale.LC_NUMERIC, saved_locale)
+
 
 
 # Function to enable 'real-time' view on main window
 # Not a direct video feed from PiCamera2 but images capured an displayed sequentially
 def cmd_set_real_time_display():
     global RealTimeDisplay
-    global camera, ZoomSize
-    global saved_locale
+    global ZoomSize
     RealTimeDisplay = real_time_display.get()
     if RealTimeDisplay:
         logging.debug("Real time display on main window enabled")
@@ -2208,9 +2176,11 @@ def cmd_set_real_time_display():
         logging.debug("Real time display on main window disabled")
     if not SimulatedRun and not CameraDisabled:
         if RealTimeDisplay:
+            camera.switch_mode(vfd_config)
+            time.sleep(0.1)
             ZoomSize = camera.capture_metadata()['ScalerCrop']
             time.sleep(0.1)
-            root.after(10, real_time_display)
+            win.after(10, update_real_time_display)
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
