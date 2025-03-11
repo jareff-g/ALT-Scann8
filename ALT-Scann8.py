@@ -1732,7 +1732,6 @@ def adjust_auto_fine_tune():
     if auto_fine_tune_wait > 0:
         auto_fine_tune_wait -= 1
         return
-    print(f"Average offset: {offset_avg}")
     if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.005:
         return  # Ignore if average offset is less than 2% of total height
     direction = -1 if offset_avg < 0 else 1
@@ -1743,7 +1742,7 @@ def adjust_auto_fine_tune():
     elif FrameFineTuneValue > 100:
         FrameFineTuneValue = 100
     frame_fine_tune_value.set(FrameFineTuneValue)
-    logging.debug(f"Adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
+    logging.debug(f"Average offset is {offset_avg}, adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
     frame_fine_tune_value.set(FrameFineTuneValue)
     auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
@@ -1979,7 +1978,6 @@ def capture_save_thread(queue, event, id):
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
             frame_centered, offset = is_frame_centered(captured_image, FilmType, threshold=MisalignedFrameTolerance)
-            print(f"Frame {frame_idx}, adding offset: {offset}")
             offset_image.add_value(offset)
             if AutoFineTuneEnabled:
                 adjust_auto_fine_tune()
@@ -4700,7 +4698,6 @@ def cmd_set_frame_vcenter():
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
         _, FrameVCenterHoleShift = is_frame_centered(bgr_image, film_type, compensate=False)        
         width, height = pil_image.size
-        print(f"FrameVCenterHoleShift: {FrameVCenterHoleShift}, width: {width}, height: {height}")
         cv2.line(bgr_image, (0, height//2+FrameVCenterHoleShift), (100, height//2+FrameVCenterHoleShift), (0, 0, 255), 3)
         cv2.line(bgr_image, (0, height//2), (100, height//2), (0, 255, 0), 3)
         new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
@@ -6003,7 +6000,7 @@ def create_widgets():
         if ColorCodedButtons:
             fine_tune_btn.config(selectcolor="pale green")
         fine_tune_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
-        as_tooltips.add(fine_tune_btn, "Toggle automatic fine-tune framne position calculation.")
+        as_tooltips.add(fine_tune_btn, "Toggle automatic fine-tune frame position calculation.")
 
         frame_fine_tune_value = tk.IntVar(value=FrameFineTuneValue)  # To be overridden by config
         frame_fine_tune_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_fine_tune_selection, width=4,
@@ -6049,7 +6046,7 @@ def create_widgets():
         if ColorCodedButtons:
             frame_vcenter_btn.config(selectcolor="pale green")
         frame_vcenter_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
-        as_tooltips.add(fine_tune_btn, "User define frame vertical center")
+        as_tooltips.add(frame_vcenter_btn, "In case frame is not centered respect to sprockect holes click here to redefine.")
 
         frame_vcenter_value = tk.IntVar(value=FrameVCenterImageShift)  # To be overridden by config
         frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
@@ -6060,7 +6057,7 @@ def create_widgets():
         frame_vcenter_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
         frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
-        as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: Adjust using focus view so that frame appears vertically centered")
+        as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: manually correct position in case frame not aligned in film")
         frame_vcenter_spinbox.bind("<FocusOut>", lambda event: cmd_frame_vcenter_selection())
         frame_align_row += 1
 
