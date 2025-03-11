@@ -6042,7 +6042,7 @@ def create_widgets():
         frame_vcenter_btn = tk.Checkbutton(frame_alignment_frame, variable=frame_vcenter_enabled, onvalue=True,
                                       offvalue=False, font=("Arial", FontSize - 1), command=cmd_set_frame_vcenter,
                                       text="Frame VCenter:", relief="raised", indicatoron=False, name='frame_vcenter_btn')
-        frame_vcenter_btn.widget_type = "control"
+        frame_vcenter_btn.widget_type = "general"
         if ColorCodedButtons:
             frame_vcenter_btn.config(selectcolor="pale green")
         frame_vcenter_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
@@ -6053,7 +6053,7 @@ def create_widgets():
                                                  readonlybackground='pale green', textvariable=frame_vcenter_value,
                                                  from_=-100, to=+100, increment=-1, font=("Arial", FontSize - 1),
                                                  name='frame_vcenter_spinbox')
-        frame_vcenter_spinbox.widget_type = "control"
+        frame_vcenter_spinbox.widget_type = "general"
         frame_vcenter_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
         frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
