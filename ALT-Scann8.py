@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.22"
-__date__ = "2025-03-10"
-__version_highlight__ = "Auto Fine-tune: ALT-Scann8 calculates the fine-tune value so that frame is mostly centered."
+__version__ = "1.12.23"
+__date__ = "2025-03-11"
+__version_highlight__ = "Auto Fine-tune + Focus in place: Work in progress"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -6498,6 +6498,8 @@ def main(argv):
     global DisableToolTips
     global win
     global UserConsent, ConfigData, LastConsentDate
+
+    return  # Not ready to be used yet
 
     DisableToolTips = False
 
