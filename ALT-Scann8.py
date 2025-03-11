@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.21"
+__version__ = "1.12.22"
 __date__ = "2025-03-10"
-__version_highlight__ = "Focus view: Finally get rid of popup window, focus is done in main window."
+__version_highlight__ = "Auto Fine-tune: ALT-Scann8 calculates the fine-tune value so that frame is mostly centered."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -143,7 +143,6 @@ StillFrameFilenamePattern = "still-picture-%05d-%02d.jpg"
 CurrentFrame = 0  # bild in original code from Torulf
 vfd_CurrentFrame_previous = 0   # Used by VFD for automatic CapstanDiameter adjustment
 vfd_attempts_on_same_frame = 0      # Used by VFD to calculate statistics
-vfd_sprocket_hole_x = 0     # Used by VFD to take a vertical slice at the center of the hole (not at the left edge)
 steps_completed = False
 steps_submitted = False
 frames_to_go_key_press_time = 0
@@ -332,7 +331,6 @@ MatchWaitMarginValue = 50
 StepsPerFrame = 250
 PtLevelValue = 200
 FrameFineTuneValue = 20
-FrameVCenterValue = 0
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
@@ -341,6 +339,12 @@ ExposureWbAdaptPause = False
 AutoFineTuneEnabled = True
 offset_image = None # RollingAverage object to allow to automatically set the fine tune value
 auto_fine_tune_wait = 0 # To allow waiting a few frames to allow auto fine tune value to have an effect
+FrameVCenterEnabled = False
+FrameVCenterImage = None    # Used to temporarily save the imag eused to allow the user to vertically center the image
+FrameVCenterHoleShift = 0   # Offset of the hole center respect to the image center
+FrameVCenterImageShift = 0  # Offset of image centered respect to hole center respect to the user arranged position
+FrameVCenterImageShiftS8 = 0
+FrameVCenterImageShiftR8 = 0
 # HDR, min/max exposure range. Used to be from 10 to 150, but original values found elsewhere (1-56) are better
 # Finally set to 4-104
 HdrMinExp = 8
@@ -362,6 +366,7 @@ id_AutoPtLevelEnabled = 9
 id_AutoFrameStepsEnabled = 10
 id_ExposureWbAdaptPause = 11
 id_AutoFineTuneEnabled = 12
+id_FrameVCenterEnabled = 13
 
 
 
@@ -386,7 +391,7 @@ CameraDisabled = False  # To allow testing scanner without a camera installed
 KeepManualValues = False    # In case we want to keep manual values when switching to auto
 # QR code to display debug info
 qr_image = None
-dev_debug_enabled = False
+dev_debug_enabled = True
 
 # Dictionaries for additional exposure control with PiCamera2
 if not SimulatedRun and not CameraDisabled:
@@ -638,7 +643,7 @@ def cmd_set_free_mode():
     FreeWheelActive = not FreeWheelActive
 
     # Enable/Disable related buttons
-    except_widget_global_enable(free_btn, not FreeWheelActive)
+    except_widget_global_enable([free_btn], not FreeWheelActive)
 
 
 def cmd_manual_uv():
@@ -655,7 +660,7 @@ def cmd_manual_uv():
         send_arduino_command(CMD_MANUAL_UV_LED)
 
     # Enable/Disable related buttons
-    except_widget_global_enable(manual_uv_btn, not ManualUvLedOn)
+    except_widget_global_enable([manual_uv_btn], not ManualUvLedOn)
 
 
 def cmd_set_auto_stop_enabled():
@@ -698,9 +703,6 @@ def cmd_set_focus_zoom():
     widget_enable(focus_rt_btn, RealTimeZoom)
     widget_enable(focus_plus_btn, RealTimeZoom)
     widget_enable(focus_minus_btn, RealTimeZoom)
-    widget_enable(frame_vcenter_label, not RealTimeZoom)
-    widget_enable(frame_vcenter_spinbox, not RealTimeZoom)
-
 
 
 def adjust_focus_zoom():
@@ -858,7 +860,7 @@ def cmd_settings_popup_accept():
     global ExpertMode, ExperimentalMode, PlotterEnabled, SimplifiedMode, UIScrollbars, DetectMisalignedFrames, MisalignedFrameTolerance, FontSize, DisableToolTips
     global WidgetsEnabledWhileScanning, LoggingMode, LogLevel, ColorCodedButtons, TempInFahrenheit
     global CaptureResolution, FileType, AutoExpEnabled, AutoWbEnabled, AutoFrameStepsEnabled, AutoPtLevelEnabled, AutoFineTuneEnabled
-    global FrameFineTuneValue, ScanSpeedValue, FrameVCenterValue
+    global FrameFineTuneValue, ScanSpeedValue, FrameVCenterImageShift
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
     global ConfigData, BaseFolder, CurrentDir
@@ -882,7 +884,7 @@ def cmd_settings_popup_accept():
             AutoPtLevelEnabled = True
             AutoFineTuneEnabled = True
             FrameFineTuneValue = 20
-            FrameVCenterValue = 0
+            FrameVCenterImageShift = 0
             ScanSpeedValue = 5
         else:
             ExpertMode = ConfigData['ExpertMode'] = True
@@ -893,7 +895,7 @@ def cmd_settings_popup_accept():
             AutoFrameStepsEnabled = ConfigData['AutoFrameStepsEnabled']  # FrameStepsAuto
             AutoPtLevelEnabled = ConfigData['AutoPtLevelEnabled']  # PTLevelAuto
             FrameFineTuneValue = ConfigData["FrameFineTune"]
-            FrameVCenterValue = ConfigData["FrameVCenter"]
+            FrameVCenterImageShift = ConfigData["FrameVCenter"]
             ScanSpeedValue = ConfigData["ScanSpeed"]
             AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
         if not SimulatedRun and not CameraDisabled:
@@ -973,7 +975,7 @@ def cmd_settings_popup_accept():
         widget_list_enable([id_RealTimeDisplay, id_RealTimeZoom, id_AutoStopEnabled])
         if ExpertMode:
             widget_list_enable([id_AutoWbEnabled, id_AutoExpEnabled, id_AutoPtLevelEnabled, id_AutoFrameStepsEnabled,
-                                id_ExposureWbAdaptPause, id_AutoFineTuneEnabled])
+                                id_ExposureWbAdaptPause, id_AutoFineTuneEnabled, id_FrameVCenterEnabled])
         if ExperimentalMode:
             widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto, id_ManualScanEnabled])
 
@@ -1541,7 +1543,7 @@ def cmd_advance_movie(from_arduino=False):
         send_arduino_command(CMD_FILM_FORWARD)
 
     # Enable/Disable related buttons
-    except_widget_global_enable(AdvanceMovie_btn, not AdvanceMovieActive)
+    except_widget_global_enable([AdvanceMovie_btn], not AdvanceMovieActive)
 
 
 def cmd_retreat_movie():
@@ -1568,7 +1570,7 @@ def cmd_retreat_movie():
         send_arduino_command(CMD_FILM_BACKWARD)
 
     # Enable/Disable related buttons
-    except_widget_global_enable(retreat_movie_btn, not RetreatMovieActive)
+    except_widget_global_enable([retreat_movie_btn], not RetreatMovieActive)
 
 
 def cmd_rewind_movie():
@@ -1586,7 +1588,7 @@ def cmd_rewind_movie():
         rewind_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), 
                           relief=SUNKEN)  # ...so now we propose to stop it in the button test
         # Enable/Disable related buttons
-        except_widget_global_enable(rewind_btn, not RewindMovieActive)
+        except_widget_global_enable([rewind_btn], not RewindMovieActive)
         # Invoke rewind_loop to continue processing until error or end event
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
@@ -1608,7 +1610,7 @@ def cmd_rewind_movie():
         rewind_btn.config(text='◀◀', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), 
                           relief=RAISED)  # Otherwise change to default text to start the action
         # Enable/Disable related buttons
-        except_widget_global_enable(rewind_btn, not RewindMovieActive)
+        except_widget_global_enable([rewind_btn], not RewindMovieActive)
 
     if not RewindErrorOutstanding and not RewindEndOutstanding:  # invoked from button
         time.sleep(0.2)
@@ -1645,7 +1647,7 @@ def cmd_fast_forward_movie():
         # Update button text
         fast_forward_btn.config(text='■', bg='red', fg='white', font=("Arial", FontSize + 3), relief=SUNKEN)
         # Enable/Disable related buttons
-        except_widget_global_enable(fast_forward_btn, not FastForwardActive)
+        except_widget_global_enable([fast_forward_btn], not FastForwardActive)
         # Invoke fast_forward_loop a first time when fast-forward starts
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
@@ -1666,7 +1668,7 @@ def cmd_fast_forward_movie():
     if not FastForwardActive:
         fast_forward_btn.config(text='▶▶', bg=save_bg, fg=save_fg, font=("Arial", FontSize + 3), relief=RAISED)
         # Enable/Disable related buttons
-        except_widget_global_enable(fast_forward_btn, not FastForwardActive)
+        except_widget_global_enable([fast_forward_btn], not FastForwardActive)
 
     if not FastForwardErrorOutstanding and not FastForwardEndOutstanding:  # invoked from button
         time.sleep(0.2)
@@ -1702,11 +1704,15 @@ def resize_image(img, ratio):
     # resize image
     return cv2.resize(img, dsize)
 
-def debug_display_image(window_name, img):
+def debug_display_image(window_name, img, factor=1):
     if dev_debug_enabled:
+        if isinstance(img, ImageTk.PhotoImage):
+            img = ImageTk.getimage(img)
+        if isinstance(img, Image.Image):
+            img = np.array(img)
         cv2.namedWindow(window_name)
-        if img.shape[0] >= 2 and img.shape[1] >= 2:
-            img_s = resize_image(img, 0.5)
+        if factor != 1 and img.shape[0] >= 2 and img.shape[1] >= 2:
+            img_s = resize_image(img, factor)
         else:
             img_s = img
         cv2.imshow(window_name, img_s)
@@ -1714,66 +1720,6 @@ def debug_display_image(window_name, img):
         window_visible = cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE)
         if window_visible > 0:
             cv2.destroyWindow(window_name)
-
-
-def find_sprocket_best_x(film_type='S8', slice_width=20):
-    global vfd_sprocket_hole_x
-    # First, campture sample image to calculate value
-    sample_image = camera.capture_image("main")
-    # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
-    image_np = np.array(sample_image)  # PIL gives RGB by default
-    image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
-
-    """Find the optimal x-position of the sprocket hole (middle or right edge)."""
-    height, width, _ = image_bgr.shape
-    min_hole_width = int(width * 0.025) # Minimum hole width is 2.5% of the image width (and that is already a bit small)
-
-    # Get vertical position to extract horizontal slice (center for S8, top or bottom for R8)
-    vfd_sprocket_hole_x = 0 # Force is frame centered to search with a stripe starting on the left edge
-    if (film_type == 'S8'):
-        _, offset = is_frame_centered(image_bgr, film_type)
-        hole_y = height // 2 + offset
-        logging.debug(f"find_sprocket_best_x({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
-    else:
-        _, offset = is_frame_centered(image_bgr, film_type)
-        hole_y = height // 2 + offset 
-        if hole_y - height // 2 < 0:
-            hole_y += height // 2 - slice_width//2
-        else:
-            hole_y -= height // 2 + slice_width//2
-        hole_y -= slice_width//2
-        logging.debug(f"find_sprocket_best_x({film_type}): Best Y to extract horizontal stripe: {height//2} + {offset} = {hole_y}")
-
-
-    stripe = image_bgr[hole_y - slice_width//2:hole_y + slice_width//2, :]
-
-    gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
-    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    # Sum columns—horizontal profile
-    x_profile = np.sum(binary, axis=0)  # Shape: (width,)
-    white_thresh = slice_width * 255 * 0.75  # 75% white—sprocket
-    
-    # Find white sprocket zone
-    sprocket_cols = np.where(x_profile > white_thresh)[0]
-    if len(sprocket_cols) == 0:
-        logging.error(f"find_sprocket_best_x: No sproket holes found in image")
-        return width // 4  # Fallback—left quarter guess
-    
-    # Split into contiguous zones
-    gaps = np.where(np.diff(sprocket_cols) > 1)[0]
-    zones = np.split(sprocket_cols, gaps + 1) if len(gaps) > 0 else [sprocket_cols]
-    zones = [z for z in zones if len(z) >= min_hole_width]  # Filter noise
-    
-    if not zones:
-        logging.error(f"find_sprocket_best_x: No holes found in stripe")
-        return width // 4  # Fallback
-    
-    # Leftmost sprocket—middle or right edge
-    sprocket_zone = zones[0]
-    # vfd_sprocket_hole_x = (sprocket_zone[0] + sprocket_zone[-1]) // 2  # Middle
-    vfd_sprocket_hole_x = sprocket_zone[-1]  # Right edge
-    logging.debug(f"find_sprocket_best_x: Best X position to extract stabilization slice for VFD mode: {vfd_sprocket_hole_x}")
 
 
 def adjust_auto_fine_tune():
@@ -1787,7 +1733,7 @@ def adjust_auto_fine_tune():
         auto_fine_tune_wait -= 1
         return
     print(f"Average offset: {offset_avg}")
-    if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.02:
+    if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.005:
         return  # Ignore if average offset is less than 2% of total height
     direction = -1 if offset_avg < 0 else 1
     step = min(10, int(abs(offset_avg)/10)) # big steps for big offsets
@@ -1798,7 +1744,6 @@ def adjust_auto_fine_tune():
         FrameFineTuneValue = 100
     frame_fine_tune_value.set(FrameFineTuneValue)
     logging.debug(f"Adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
-    print(f"Adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
     frame_fine_tune_value.set(FrameFineTuneValue)
     auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
@@ -1808,7 +1753,7 @@ def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
     height, width = img.shape[:2]
     if slice_width > width:
         raise ValueError("Slice width exceeds image width")
-    stripe = img[:, vfd_sprocket_hole_x:vfd_sprocket_hole_x + slice_width]
+    stripe = img[:, :slice_width]
     gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
     _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
@@ -1844,7 +1789,7 @@ def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
     return False, -1
 
 
-def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
+def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice_width=10):
     # Get dimensions of the binary image
     height = img.shape[0]
     width = img.shape[1]
@@ -1865,7 +1810,8 @@ def is_frame_centered(img, film_type ='S8', threshold=10, slice_width=10):
     middle = height // 2
 
     # Adjust VCenter (not all films have the frames vertically centered respect to the holes)
-    middle -= int(FrameVCenterValue/100 * height)
+    if compensate:
+        middle += FrameVCenterImageShift
 
     # Calculate margin
     margin = height*threshold//100
@@ -1993,7 +1939,7 @@ def capture_save_thread(queue, event, id):
                     captured_image = request.make_array('main')
             request.release()   # Release request ASAP (delay frame alignment check)
             if DetectMisalignedFrames and can_check_dng_frames_for_misalignment and hdr_idx <= 1:
-                frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
+                frame_centered, offset = is_frame_centered(captured_image, FilmType, threshold=MisalignedFrameTolerance)
                 offset_image.add_value(offset)
                 if AutoFineTuneEnabled:
                     adjust_auto_fine_tune()
@@ -2032,7 +1978,7 @@ def capture_save_thread(queue, event, id):
                     captured_image = np.array(captured_image)
                 logging.debug("Thread %i saved image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
-            frame_centered, offset = is_frame_centered(captured_image, FilmType, MisalignedFrameTolerance)
+            frame_centered, offset = is_frame_centered(captured_image, FilmType, threshold=MisalignedFrameTolerance)
             print(f"Frame {frame_idx}, adding offset: {offset}")
             offset_image.add_value(offset)
             if AutoFineTuneEnabled:
@@ -2248,19 +2194,18 @@ def cmd_set_real_time_display():
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
     widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
-    widget_enable(frame_vcenter_label, RealTimeDisplay)
-    widget_enable(frame_vcenter_spinbox, RealTimeDisplay)
     real_time_zoom_checkbox.deselect()
 
 
 def cmd_set_s8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
 
     FilmType = "S8"
     ConfigData["FilmType"] = "S8"
     time.sleep(0.2)
 
     PTLevel = PTLevelS8
+    FrameVCenterImageShift = FrameVCenterImageShiftS8
     MinFrameSteps = MinFrameStepsS8
     if ALT_scann_init_done:
         ConfigData["PTLevel"] = PTLevel
@@ -2282,13 +2227,14 @@ def cmd_set_s8():
 
 
 def cmd_set_r8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType
+    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
 
     FilmType = "R8"
     ConfigData["FilmType"] = "R8"
     time.sleep(0.2)
 
     PTLevel = PTLevelR8
+    FrameVCenterImageShift = FrameVCenterImageShiftR8
     MinFrameSteps = MinFrameStepsR8
     if ALT_scann_init_done:
         ConfigData["PTLevel"] = PTLevel
@@ -2755,7 +2701,7 @@ def cmd_start_scan_simulated():
         last_frame_time = time.time() + 3
 
         # Enable/Disable related buttons
-        except_widget_global_enable(start_btn, not ScanOngoing)
+        except_widget_global_enable([start_btn], not ScanOngoing)
 
         # Reset time counters
         total_wait_time_save_image = 0
@@ -2791,7 +2737,7 @@ def stop_scan_simulated():
     custom_spinboxes_kbd_lock(win)
 
     # Enable/Disable related buttons
-    except_widget_global_enable(start_btn, not ScanOngoing)
+    except_widget_global_enable([start_btn], not ScanOngoing)
 
 
 def capture_loop_simulated():
@@ -2900,7 +2846,6 @@ def start_scan():
     global last_frame_time
     global AutoExpEnabled, AutoWbEnabled
     global splash_id
-    global vfd_sprocket_hole_x
 
     if splash_id != None:
         draw_capture_canvas.delete(splash_id)
@@ -2945,7 +2890,7 @@ def start_scan():
         NewFrameAvailable = False
 
         # Enable/Disable related buttons
-        except_widget_global_enable(start_btn, not ScanOngoing)
+        except_widget_global_enable([start_btn], not ScanOngoing)
 
         # Reset time counters
         total_wait_time_save_image = 0
@@ -2954,9 +2899,6 @@ def start_scan():
         total_wait_time_autoexp = 0
         session_start_time = time.time()
         session_frames = 0
-
-        # Calculate best x position for vertical slice in VFD mode
-        find_sprocket_best_x(FilmType)
 
         # Send command to Arduino to start scan (as applicable, Arduino keeps its own status)
         if not SimulatedRun and not CameraDisabled:
@@ -2989,7 +2931,7 @@ def stop_scan():
         send_arduino_command(CMD_STOP_SCAN)
 
     # Enable/Disable related buttons
-    except_widget_global_enable(start_btn, not ScanOngoing)
+    except_widget_global_enable([start_btn], not ScanOngoing)
 
 
 def capture_loop():
@@ -3513,12 +3455,8 @@ def widget_list_update(cmd, category_list):
     # First list contains the widgets to enable when boolean key is true
     # Second list contains the widgets to enable when boolean key is false
     dependent_widget_dict = {
-        id_RealTimeDisplay: [[real_time_zoom_checkbox, frame_vcenter_label, frame_vcenter_spinbox],
+        id_RealTimeDisplay: [[real_time_zoom_checkbox],
                              []],
-        id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
-                          [frame_vcenter_label, frame_vcenter_spinbox]],
-        id_AutoStopEnabled: [[autostop_no_film_rb, autostop_counter_zero_rb],
-                             []]
     }
     if ExpertMode:
         dependent_widget_dict[id_AutoExpEnabled] = [[ae_constraint_mode_label, AeConstraintMode_dropdown,
@@ -3535,6 +3473,8 @@ def widget_list_update(cmd, category_list):
         dependent_widget_dict[id_AutoFrameStepsEnabled] = [[frame_extra_steps_label, frame_extra_steps_spinbox],
                                                            [steps_per_frame_spinbox]]
         dependent_widget_dict[id_ExposureWbAdaptPause] = [[match_wait_margin_spinbox],
+                                                          []]
+        dependent_widget_dict[id_FrameVCenterEnabled] = [[frame_vcenter_spinbox],
                                                           []]
     if ExperimentalMode:
         dependent_widget_dict[id_HdrCaptureActive] = [[hdr_viewx4_active_checkbox, hdr_min_exp_label,
@@ -3576,6 +3516,8 @@ def widget_list_update(cmd, category_list):
                 state = ExposureWbAdaptPause
             elif category == id_AutoFineTuneEnabled:
                 state = AutoFineTuneEnabled
+            elif category == id_FrameVCenterEnabled:
+                state = FrameVCenterEnabled
             items = dependent_widget_dict[category]
             if cmd == 'enable':
                 for widget in items[0]:
@@ -3612,14 +3554,14 @@ def custom_spinboxes_kbd_lock(widget):
 
 
 # Disables/enables all widgets except one
-def except_widget_global_enable(except_button, enabled):
+def except_widget_global_enable(except_buttons, enabled):
     global win
-    except_widget_global_enable_aux(except_button, enabled, win)
+    except_widget_global_enable_aux(except_buttons, enabled, win)
     widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                         id_HdrCaptureActive, id_HdrBracketAuto])
 
 
-def except_widget_global_enable_aux(except_button, enabled, widget):
+def except_widget_global_enable_aux(except_buttons, enabled, widget):
     global win
     if widget == win and UIScrollbars:
         widget = scrolled_canvas
@@ -3627,16 +3569,16 @@ def except_widget_global_enable_aux(except_button, enabled, widget):
     widgets = widget.winfo_children()
     for widget in widgets:
         if isinstance(widget, tk.Frame) or isinstance(widget, tk.LabelFrame):
-            except_widget_global_enable_aux(except_button, enabled, widget)
+            except_widget_global_enable_aux(except_buttons, enabled, widget)
         elif hasattr(widget, "widget_type"):
             if widget.widget_type == "control" and not WidgetsEnabledWhileScanning:
-                if except_button != widget:
+                if widget not in except_buttons:
                     widget_enable(widget, enabled, 5)
             elif widget.widget_type == "hdr" and not WidgetsEnabledWhileScanning and hdr_capture_active:
-                if except_button != widget:
+                if widget not in except_buttons:
                     widget_enable(widget, enabled, 5)
             elif widget.widget_type == "general" or widget.widget_type == "experimental":
-                if except_button != widget:
+                if widget not in except_buttons:
                     widget_enable(widget, enabled, 5)
 
 
@@ -3784,6 +3726,8 @@ def load_session_data_post_init():
     global CaptureResolution
     global AutoExpEnabled, AutoWbEnabled
     global FrameDetectMode
+    global FrameVCenterImageShiftS8, FrameVCenterImageShiftR8, FrameVCenterImageShift
+
 
     if ConfigurationDataLoaded:
         logging.debug("ConfigData loaded from disk:")
@@ -4048,9 +3992,13 @@ def load_session_data_post_init():
                 FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
                 frame_extra_steps_value.set(FrameExtraStepsValue)
                 send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
-            if 'FrameVCenter' in ConfigData:
-                FrameVCenterValue = ConfigData["FrameVCenter"]
-                frame_vcenter_value.set(FrameVCenterValue)
+            if 'FrameVCenterImageShift' in ConfigData:
+                FrameVCenterImageShift = ConfigData["FrameVCenterImageShift"]
+                frame_vcenter_value.set(FrameVCenterImageShift)
+            if 'FrameVCenterImageShiftS8' in ConfigData:
+                FrameVCenterImageShiftS8 = ConfigData["FrameVCenterImageShiftS8"]
+            if 'FrameVCenterImageShiftR8' in ConfigData:
+                FrameVCenterImageShiftR8 = ConfigData["FrameVCenterImageShiftR8"]
             if 'PTLevelAuto' in ConfigData:     # Delete legacy name, replace with new
                 ConfigData['AutoPtLevelEnabled'] = ConfigData['PTLevelAuto']
                 del ConfigData['PTLevelAuto']
@@ -4272,15 +4220,9 @@ def init_multidependent_widgets():
         frame_fine_tune_spinbox.disabled_counter += 1
     if  AutoFineTuneEnabled:
         frame_fine_tune_spinbox.disabled_counter += 1
-    frame_vcenter_label.disabled_counter = 0
-    frame_vcenter_spinbox.disabled_counter = 0
-    if not RealTimeDisplay:
-        frame_vcenter_label.disabled_counter += 1
-        frame_vcenter_spinbox.disabled_counter += 1
-    if RealTimeZoom:
-        frame_vcenter_label.disabled_counter += 1
-        frame_vcenter_spinbox.disabled_counter += 1
-    widget_list_refresh([id_HdrBracketAuto, id_AutoPtLevelEnabled, id_AutoFineTuneEnabled, id_RealTimeDisplay, id_RealTimeZoom])
+    frame_vcenter_spinbox.disabled_counter = 1
+    
+    widget_list_refresh([id_HdrBracketAuto, id_AutoPtLevelEnabled, id_AutoFineTuneEnabled, id_FrameVCenterEnabled])
 
 def display_splash():
     global splash_id
@@ -4740,11 +4682,48 @@ def cmd_frame_fine_tune_selection():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
 
 
+def cmd_set_frame_vcenter():
+    global FrameVCenterEnabled, FrameVCenterImage
+    global FrameVCenterHoleShift, FrameVCenterImageShift
+    FrameVCenterEnabled = frame_vcenter_enabled.get()
+    except_widget_global_enable([frame_vcenter_btn, frame_vcenter_spinbox], not FrameVCenterEnabled)
+    widget_list_enable([id_FrameVCenterEnabled])
+    if FrameVCenterEnabled:
+        # Now, center frame as per sproket hole position
+        photo_image = draw_capture_canvas.image   
+        # Convert PhotoImage to PIL Image
+        pil_image = ImageTk.getimage(photo_image)
+        FrameVCenterImage = pil_image # Save PIL image to global var, it will be manipulated lated
+        # Convert PIL Image to NumPy array (RGB)
+        rgb_image = np.array(pil_image)
+        # Convert RGB to BGR
+        bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
+        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, film_type, compensate=False)        
+        width, height = pil_image.size
+        print(f"FrameVCenterHoleShift: {FrameVCenterHoleShift}, width: {width}, height: {height}")
+        cv2.line(bgr_image, (0, height//2+FrameVCenterHoleShift), (100, height//2+FrameVCenterHoleShift), (0, 0, 255), 3)
+        cv2.line(bgr_image, (0, height//2), (100, height//2), (0, 255, 0), 3)
+        new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
+        new_image.paste(pil_image, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
+        photo_image = ImageTk.PhotoImage(new_image)
+        draw_capture_canvas.create_image(0, 0, anchor=NW, image=photo_image)
+        draw_capture_canvas.image = photo_image
+    else:   # Button released, save final value (calculating proportion between previen and real image)
+        ConfigData["FrameVCenterImageShift"] = FrameVCenterImageShift
+        ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
+
+
 def cmd_frame_vcenter_selection():
-    global FrameVCenterValue
-    FrameVCenterValue = value_normalize(frame_vcenter_value, -200, 200, 0)
-    ConfigData["FrameVCenter"] = FrameVCenterValue
-    ConfigData["FrameVCenter" + ConfigData["FilmType"]] = FrameVCenterValue
+    global FrameVCenterImageShift
+    FrameVCenterImageShift = value_normalize(frame_vcenter_value, -200, 200, 0)
+    # Arrange image according to user-defined displacement
+    width, height = FrameVCenterImage.size
+    new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
+    new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
+    photo_image = ImageTk.PhotoImage(new_image)
+    draw_capture_canvas.create_image(0, 0, anchor=NW, image=photo_image)
+    draw_capture_canvas.image = photo_image
+
 
 def fine_tune_validation(new_value):
     return value_validation(new_value, frame_fine_tune_spinbox, 5, 95, 25)
@@ -5032,7 +5011,7 @@ def create_widgets():
     global steps_per_frame_value, frame_fine_tune_value, auto_fine_tune_enabled
     global pt_level_spinbox
     global steps_per_frame_spinbox, frame_fine_tune_spinbox, pt_level_spinbox, pt_level_value, fine_tune_btn
-    global frame_vcenter_spinbox, frame_vcenter_value, frame_vcenter_label
+    global frame_vcenter_spinbox, frame_vcenter_value, frame_vcenter_enabled, frame_vcenter_btn
     global frame_extra_steps_spinbox, frame_extra_steps_value, frame_extra_steps_label
     global scan_speed_spinbox, scan_speed_value
     global exposure_value
@@ -6062,18 +6041,23 @@ def create_widgets():
         frame_align_row += 1
 
         # Spinbox to adjust frame center vertically, usign the focus view
-        frame_vcenter_label = tk.Label(frame_alignment_frame, text='Frame vcenter:', font=("Arial", FontSize - 1),
-                                         name='frame_vcenter_label')
-        frame_vcenter_label.widget_type = "control"
-        frame_vcenter_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        frame_vcenter_enabled = tk.BooleanVar(value=FrameVCenterEnabled)
+        frame_vcenter_btn = tk.Checkbutton(frame_alignment_frame, variable=frame_vcenter_enabled, onvalue=True,
+                                      offvalue=False, font=("Arial", FontSize - 1), command=cmd_set_frame_vcenter,
+                                      text="Frame VCenter:", relief="raised", indicatoron=False, name='frame_vcenter_btn')
+        frame_vcenter_btn.widget_type = "control"
+        if ColorCodedButtons:
+            frame_vcenter_btn.config(selectcolor="pale green")
+        frame_vcenter_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
+        as_tooltips.add(fine_tune_btn, "User define frame vertical center")
 
-        frame_vcenter_value = tk.IntVar(value=FrameVCenterValue)  # To be overridden by config
+        frame_vcenter_value = tk.IntVar(value=FrameVCenterImageShift)  # To be overridden by config
         frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
                                                  readonlybackground='pale green', textvariable=frame_vcenter_value,
-                                                 from_=-100, to=+100, increment=1, font=("Arial", FontSize - 1),
+                                                 from_=-100, to=+100, increment=-1, font=("Arial", FontSize - 1),
                                                  name='frame_vcenter_spinbox')
         frame_vcenter_spinbox.widget_type = "control"
-        frame_vcenter_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        frame_vcenter_spinbox.grid(row=frame_align_row, column=2, padx=x_pad, pady=y_pad, sticky=W)
         cmd_vcenter_validation_cmd = frame_vcenter_spinbox.register(vcenter_validation)
         frame_vcenter_spinbox.configure(validate="key", validatecommand=(cmd_vcenter_validation_cmd, '%P'))
         as_tooltips.add(frame_vcenter_spinbox, "Frame vertical center position: Adjust using focus view so that frame appears vertically centered")
@@ -6341,11 +6325,13 @@ def create_widgets():
         # Spinbox to select Preview module
         preview_module_label = tk.Label(experimental_miscellaneous_frame, text='Preview module:',
                                         font=("Arial", FontSize - 1), name='preview_module_label')
+        preview_module_label.widget_type = "experimental"
         preview_module_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
         preview_module_value = tk.IntVar(value=1)  # Default value, overriden by configuration
         preview_module_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=cmd_preview_module_selection,
                                                 width=2, textvariable=preview_module_value, from_=1, to=50,
                                                 font=("Arial", FontSize - 1), name='preview_module_spinbox')
+        preview_module_spinbox.widget_type = "experimental"
         preview_module_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         cmd_preview_module_validation_cmd = preview_module_spinbox.register(preview_module_validation)
         as_tooltips.add(preview_module_spinbox, "Refresh preview, auto exposure and auto WB values only every 'n' "
@@ -6357,11 +6343,13 @@ def create_widgets():
         # Spinbox to select UV led brightness
         uv_brightness_label = tk.Label(experimental_miscellaneous_frame, text='UV brightness:',
                                         font=("Arial", FontSize - 1), name='uv_brightness_label')
+        uv_brightness_label.widget_type = "experimental"
         uv_brightness_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
         uv_brightness_value = tk.IntVar(value=255)  # Default value, overriden by configuration
         uv_brightness_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, command=cmd_uv_brightness_selection,
                                                 width=3, textvariable=uv_brightness_value, from_=1, to=255,
                                                 font=("Arial", FontSize - 1), name='uv_brightness_spinbox')
+        uv_brightness_spinbox.widget_type = "experimental"
         uv_brightness_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad, sticky=W)
         cmd_uv_brightness_validation_cmd = uv_brightness_spinbox.register(uv_brightness_validation)
         as_tooltips.add(uv_brightness_spinbox, "Adjust UV led brightness (1-255)")
