@@ -36,7 +36,7 @@ import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
 
-from PIL import ImageTk, Image, __version__ as PIL_Version
+from PIL import ImageTk, Image, ImageDraw, __version__ as PIL_Version
 
 import os
 import time
@@ -2148,24 +2148,26 @@ def update_real_time_display():
     global RealTimeDisplay
     global ZoomSize
     if RealTimeDisplay:
-        # Capture frame-by-frame
-        image = camera.capture_image()
-        # Resize image, match canvas size (need to increase a bit to prevent gaps)
-        image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)  
-        # Convert image to PhotoImage
-        photo = ImageTk.PhotoImage(image)
-        # Update the canvas image
-        draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
-        draw_capture_canvas.image = photo
+        if not SimulatedRun and not CameraDisabled:
+            # Capture frame-by-frame
+            image = camera.capture_image()
+            # Resize image, match canvas size (need to increase a bit to prevent gaps)
+            image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)  
+            # Convert image to PhotoImage
+            photo = ImageTk.PhotoImage(image)
+            # Update the canvas image
+            draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+            draw_capture_canvas.image = photo
         # Repeat after 10 milliseconds
         win.after(10, update_real_time_display)
     else:
-        camera.switch_mode(capture_config)
-        time.sleep(0.1)
-        camera.set_controls({"ScalerCrop": ZoomSize})
+        if not SimulatedRun and not CameraDisabled:
+            camera.switch_mode(capture_config)
+            time.sleep(0.1)
+            camera.set_controls({"ScalerCrop": ZoomSize})
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
-        draw_capture_canvas.config(highlightbackground=default_canvas_bg_color)
+        draw_capture_canvas.config(highlightthickness=0, highlightbackground=default_canvas_bg_color)
         
 
 
@@ -2179,20 +2181,31 @@ def cmd_set_real_time_display():
         logging.debug("Real time display on main window enabled")
     else:
         logging.debug("Real time display on main window disabled")
-    if not SimulatedRun and not CameraDisabled:
-        widget_list_enable([id_RealTimeDisplay])
-        if RealTimeDisplay:
-            draw_capture_canvas.config(highlightbackground="red")
+    widget_list_enable([id_RealTimeDisplay])
+    if RealTimeDisplay:
+        draw_capture_canvas.config(highlightthickness=3, highlightbackground="red")
+        if not SimulatedRun and not CameraDisabled:
             camera.switch_mode(vfd_config)
             time.sleep(0.1)
             ZoomSize = camera.capture_metadata()['ScalerCrop']
             time.sleep(0.1)
-            win.after(10, update_real_time_display)
+        win.after(10, update_real_time_display)
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
     widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
     real_time_zoom_checkbox.deselect()
+
+
+def display_left_markers():
+    reference_line_canvas.delete("all")
+    if FrameVCenterEnabled:
+        reference_line_canvas.create_line(0, PreviewHeight // 2, 20, PreviewHeight // 2, fill="red", width=4)
+    elif FilmType == 'S8':
+        reference_line_canvas.create_rectangle(0, FilmHoleY_Top, 20, FilmHoleY_Top+FilmHoleHeightTop, fill="white", width=0)
+    elif FilmType == 'R8':
+        reference_line_canvas.create_rectangle(0, FilmHoleY_Top, 20, FilmHoleY_Top+FilmHoleHeightTop, fill="white", width=0)
+        reference_line_canvas.create_rectangle(0, FilmHoleY_Bottom, 20, FilmHoleY_Bottom+FilmHoleHeightBottom, fill="white", width=0)
 
 
 def cmd_set_s8():
@@ -2216,8 +2229,7 @@ def cmd_set_s8():
     # Size and position of hole markers
     FilmHoleY_Top = int(PreviewHeight / 2.6)
     FilmHoleY_Bottom = FilmHoleY_Top
-    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
-    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
+    display_left_markers()
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else PTLevel)
@@ -2245,8 +2257,7 @@ def cmd_set_r8():
     # Size and position of hole markers
     FilmHoleY_Top = 6
     FilmHoleY_Bottom = int(PreviewHeight / 1.25)
-    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
-    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
+    display_left_markers()
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
         send_arduino_command(CMD_SET_PT_LEVEL, 0 if AutoPtLevelEnabled else PTLevel)
@@ -3455,6 +3466,10 @@ def widget_list_update(cmd, category_list):
     dependent_widget_dict = {
         id_RealTimeDisplay: [[real_time_zoom_checkbox],
                              []],
+        id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
+                          []],
+        id_AutoStopEnabled: [[autostop_no_film_rb, autostop_counter_zero_rb],
+                             []]
     }
     if ExpertMode:
         dependent_widget_dict[id_AutoExpEnabled] = [[ae_constraint_mode_label, AeConstraintMode_dropdown,
@@ -4080,7 +4095,6 @@ def load_session_data_post_init():
         widget_list_enable([id_ManualScanEnabled, id_AutoStopEnabled, id_ExposureWbAdaptPause, 
                             id_HdrCaptureActive, id_HdrBracketAuto])
         if not SimplifiedMode:
-            ### detect_misaligned_frames_btn.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
             scan_error_counter_value_label.config(state=NORMAL if DetectMisalignedFrames else DISABLED)
 
         # Display current capture settings as loaded from file
@@ -4687,25 +4701,35 @@ def cmd_set_frame_vcenter():
     except_widget_global_enable([frame_vcenter_btn, frame_vcenter_spinbox], not FrameVCenterEnabled)
     widget_list_enable([id_FrameVCenterEnabled])
     if FrameVCenterEnabled:
+        # First, draw reference line
+        display_left_markers()
         # Now, center frame as per sproket hole position
         photo_image = draw_capture_canvas.image   
         # Convert PhotoImage to PIL Image
         pil_image = ImageTk.getimage(photo_image)
         FrameVCenterImage = pil_image # Save PIL image to global var, it will be manipulated lated
         # Convert PIL Image to NumPy array (RGB)
-        rgb_image = np.array(pil_image)
+        rgb_image = np.array(FrameVCenterImage)
         # Convert RGB to BGR
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
         _, FrameVCenterHoleShift = is_frame_centered(bgr_image, film_type, compensate=False)        
-        width, height = pil_image.size
-        cv2.line(bgr_image, (0, height//2+FrameVCenterHoleShift), (100, height//2+FrameVCenterHoleShift), (0, 0, 255), 3)
-        cv2.line(bgr_image, (0, height//2), (100, height//2), (0, 255, 0), 3)
+        width, height = FrameVCenterImage.size
+        # Draw a line in the middle of the hole(s)
+        draw = ImageDraw.Draw(FrameVCenterImage)
+        start_point = (0, height//2+FrameVCenterHoleShift)
+        end_point = (20, height//2+FrameVCenterHoleShift)
+        line_color = (255, 0, 0)  # Red color (RGB)
+        draw.line([start_point, end_point], fill=line_color, width=3)
+        #cv2.line(bgr_image, (0, height//2+FrameVCenterHoleShift), (100, height//2+FrameVCenterHoleShift), (0, 0, 255), 3)
+        #cv2.line(bgr_image, (0, height//2), (100, height//2), (0, 255, 0), 3)
         new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
-        new_image.paste(pil_image, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
+        new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.create_image(0, 0, anchor=NW, image=photo_image)
         draw_capture_canvas.image = photo_image
     else:   # Button released, save final value (calculating proportion between previen and real image)
+        # First, draw back S8/R8 markers
+        display_left_markers()
         ConfigData["FrameVCenterImageShift"] = FrameVCenterImageShift
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
 
@@ -4998,7 +5022,8 @@ def create_widgets():
     global save_bg, save_fg
     global auto_exp_wb_change_pause
     global auto_exp_wb_wait_btn
-    global film_hole_frame_top, film_hole_frame_bottom
+    # global film_hole_frame_top, film_hole_frame_bottom
+    global reference_line_canvas
     global FilmHoleHeightTop, FilmHoleHeightBottom, FilmHoleY_Top, FilmHoleY_Bottom
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
@@ -5100,11 +5125,6 @@ def create_widgets():
     # File menu
     file_menu = tk.Menu(menu_bar, tearoff=0)
     menu_bar.add_cascade(label="File", menu=file_menu)
-    """
-    file_menu.add_command(label="Save job list", command=save_named_job_list)
-    file_menu.add_command(label="Load job list", command=load_named_job_list)
-    file_menu.add_separator()  # Optional divider
-    """
     file_menu.add_command(label="Exit", command=lambda: exit_app(True))
 
     # Help Menu
@@ -5123,37 +5143,28 @@ def create_widgets():
 
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame, name='top_left_area_frame')
-    top_left_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
+    top_left_area_frame.pack(side=LEFT, anchor=N, padx=(0, 0))
     # Create a LabelFrame to act as a border of preview canvas
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE, name='draw_capture_frame')
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2, 0))  # Pady+=2 to compensate
+
+    # Create canvas to display sprocket holes and reference line to align frame (VCenter)
+    reference_line_canvas = tk.Canvas(draw_capture_frame, width=20, height=PreviewHeight, bg=draw_capture_frame.cget("bg"), borderwidth=0)
+    reference_line_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y)
+    #reference_line_canvas.grid(column=0, row=0)
+
     # Create the canvas
-    draw_capture_canvas = Canvas(draw_capture_frame, bg='dark grey', width=PreviewWidth, height=PreviewHeight,
-                                 highlightthickness=5, name='draw_capture_canvas')
-    draw_capture_canvas.pack(padx=(20, 5), pady=5)
+    draw_capture_canvas = Canvas(draw_capture_frame, width=PreviewWidth, height=PreviewHeight, bg='dark grey',
+                                 highlightthickness=0, name='draw_capture_canvas', borderwidth=0)
+    draw_capture_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y)
+    #draw_capture_canvas.grid(column=1, row=0)
+
     # Store the default border color
     default_canvas_bg_color = draw_capture_canvas.cget("highlightbackground")
 
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
     top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
-
-    # ***************************************
-    # Display markers for film hole reference
-    # Size & postition of markers relative to preview height
-    film_hole_frame_top = Frame(draw_capture_frame, width=1, height=1, bg='black', name='film_hole_frame_top')
-    film_hole_frame_top.pack(side=TOP, padx=1, pady=1)
-    film_hole_frame_top.place(x=0, y=FilmHoleY_Top, height=FilmHoleHeightTop)
-    film_hole_label_1 = Label(film_hole_frame_top, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
-                              bg='white', fg='white')
-    film_hole_label_1.pack(side=TOP)
-
-    film_hole_frame_bottom = Frame(draw_capture_frame, width=1, height=1, bg='black', name='film_hole_frame_bottom')
-    film_hole_frame_bottom.pack(side=TOP, padx=1, pady=1)
-    film_hole_frame_bottom.place(x=0, y=FilmHoleY_Bottom, height=FilmHoleHeightBottom)
-    film_hole_label_2 = Label(film_hole_frame_bottom, justify=LEFT, font=("Arial", FontSize), width=2, height=11,
-                              bg='white', fg='white')
-    film_hole_label_2.pack(side=TOP)
 
     # Set initial positions for widgets in this frame
     bottom_area_column = 0
