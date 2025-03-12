@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.27"
+__version__ = "1.12.28"
 __date__ = "2025-03-12"
-__version_highlight__ = "Do not pass frame fine tune value to Arduino if it does not change"
+__version_highlight__ = "Fix button click on plotter canvas (not recognized)"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2003,6 +2003,7 @@ def enable_canvas(canvas):
     """Enables the canvas by removing the gray overlay and restoring interaction."""
     canvas.delete("disable_overlay")  # Remove the gray rectangle
     canvas.unbind("<Button-1>")  # Re-enable clicks
+    canvas.bind("<Button-1>", cmd_plotter_canvas_click)
     # Re-enable other relevant events
 
 
@@ -3826,9 +3827,6 @@ def load_session_data_post_init():
                     if ConfigData["VFD"]:
                         FrameDetectMode = 'VFD'
                         disable_canvas(plotter_canvas)
-                    else:
-                        FrameDetectMode = 'PFD'
-                        enable_canvas(plotter_canvas)
                     vfd_mode_value.set(ConfigData["VFD"])
         else:   # If not loading previous session status, restore to default
             ConfigData["NegativeCaptureActive"] = NegativeImage
@@ -3885,9 +3883,6 @@ def load_session_data_post_init():
                 if ConfigData['VFD']:
                     FrameDetectMode = 'VFD'
                     disable_canvas(plotter_canvas)
-                else:
-                    FrameDetectMode = 'PFD'
-                    enable_canvas(plotter_canvas)
         # Expert mode options
         if ExpertMode:
             if 'ExposureWbAdaptPause' in ConfigData:
@@ -6399,6 +6394,7 @@ def create_widgets():
     win.minsize(app_width, app_height)
     win.maxsize(app_width, app_height)
     win.geometry(f'{app_width}x{app_height - 20}')  # setting the size of the window
+
     if FilmType == "R8":
         cmd_set_r8()
     elif FilmType == "S8":
