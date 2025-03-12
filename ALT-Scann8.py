@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.26"
+__version__ = "1.12.27"
 __date__ = "2025-03-12"
-__version_highlight__ = "Fix fatal issue that was breaking the auto fine tune algorithm"
+__version_highlight__ = "Do not pass frame fine tune value to Arduino if it does not change"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -327,6 +327,7 @@ MatchWaitMarginValue = 50
 StepsPerFrame = 250
 PtLevelValue = 200
 FrameFineTuneValue = 20
+PreviousFrameFineTuneValue = 0
 FrameExtraStepsValue = 0
 ScanSpeedValue = 5
 StabilizationDelayValue = 100
@@ -1719,7 +1720,7 @@ def debug_display_image(window_name, img, factor=1):
 
 
 def adjust_auto_fine_tune():
-    global FrameFineTuneValue, auto_fine_tune_wait
+    global FrameFineTuneValue, PreviousFrameFineTuneValue, auto_fine_tune_wait
     offset_avg = offset_image.get_average()
     if offset_avg == None:
         return  # Too early as to rely on average (less than 50 samples)
@@ -1737,9 +1738,11 @@ def adjust_auto_fine_tune():
         FrameFineTuneValue = 0
     elif FrameFineTuneValue > 100:
         FrameFineTuneValue = 100
-    logging.debug(f"Average offset is {offset_avg}, adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
-    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
-    frame_fine_tune_value.set(FrameFineTuneValue)
+    if PreviousFrameFineTuneValue != FrameFineTuneValue:
+        PreviousFrameFineTuneValue = FrameFineTuneValue
+        logging.debug(f"Average offset is {offset_avg}, adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
+        send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+        frame_fine_tune_value.set(FrameFineTuneValue)
     auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
 
 
