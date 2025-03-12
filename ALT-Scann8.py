@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.23"
-__date__ = "2025-03-11"
-__version_highlight__ = "Auto Fine-tune + Focus in place: Work in progress"
+__version__ = "1.12.24"
+__date__ = "2025-03-12"
+__version_highlight__ = "Factorize code to draw sprocket holes, precise reference line alignment"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -219,10 +219,6 @@ PreviewWinX = 90
 PreviewWinY = 75
 PreviewWidth = 0
 PreviewHeight = 0
-FilmHoleY_Top = 0
-FilmHoleY_Bottom = 0
-FilmHoleHeightTop = 0
-FilmHoleHeightBottom = 0
 DeltaX = 0
 DeltaY = 0
 WinInitDone = False
@@ -2019,7 +2015,7 @@ def draw_preview_image(preview_image, curframe, idx):
     if curframe % PreviewModuleValue == 0 and preview_image is not None:
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
             # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
-            preview_image = preview_image.resize((PreviewWidth+4, PreviewHeight+4))
+            preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
             PreviewAreaImage = ImageTk.PhotoImage(preview_image)
         elif HdrViewX4Active:
             # if using View4X mode and there are 5 exposures, we do not display the 5th
@@ -2200,16 +2196,26 @@ def cmd_set_real_time_display():
 def display_left_markers():
     reference_line_canvas.delete("all")
     if FrameVCenterEnabled:
-        reference_line_canvas.create_line(0, PreviewHeight // 2, 20, PreviewHeight // 2, fill="red", width=4)
+        # It is important to keepo the width of the reference lines odd. If they are even, the position will differ by one pixel,
+        # as they are drawn but methods of different elements (canvas vs image) they might round differently
+        reference_line_canvas.create_line(0, PreviewHeight // 2, 20, PreviewHeight // 2, fill="red", width=3)
     elif FilmType == 'S8':
+        # Set hole position & size as proportion of the canvas in case it changes size
+        FilmHoleY_Top = int(PreviewHeight / 2.7)
+        FilmHoleHeightTop = int(PreviewHeight / 4)
         reference_line_canvas.create_rectangle(0, FilmHoleY_Top, 20, FilmHoleY_Top+FilmHoleHeightTop, fill="white", width=0)
     elif FilmType == 'R8':
+        # Set holes position & size as proportion of the canvas in case it changes size
+        FilmHoleY_Top = 0
+        FilmHoleY_Bottom = int(PreviewHeight / 1.3)        
+        FilmHoleHeightTop = int(PreviewHeight / 6.8)
+        FilmHoleHeightBottom = int(PreviewHeight / 3.7)
         reference_line_canvas.create_rectangle(0, FilmHoleY_Top, 20, FilmHoleY_Top+FilmHoleHeightTop, fill="white", width=0)
         reference_line_canvas.create_rectangle(0, FilmHoleY_Bottom, 20, FilmHoleY_Bottom+FilmHoleHeightBottom, fill="white", width=0)
 
 
 def cmd_set_s8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
+    global StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
 
     FilmType = "S8"
     ConfigData["FilmType"] = "S8"
@@ -2226,9 +2232,6 @@ def cmd_set_s8():
         PtLevelValue = PTLevel
         StepsPerFrame = MinFrameSteps
         steps_per_frame_value.set(MinFrameSteps)
-    # Size and position of hole markers
-    FilmHoleY_Top = int(PreviewHeight / 2.6)
-    FilmHoleY_Bottom = FilmHoleY_Top
     display_left_markers()
     if not SimulatedRun:
         send_arduino_command(CMD_SET_SUPER_8)
@@ -2237,7 +2240,7 @@ def cmd_set_s8():
 
 
 def cmd_set_r8():
-    global FilmHoleY_Top, FilmHoleY_Bottom, StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
+    global StepsPerFrame, PtLevelValue, FilmType, FrameVCenterImageShift
 
     FilmType = "R8"
     ConfigData["FilmType"] = "R8"
@@ -2254,9 +2257,6 @@ def cmd_set_r8():
         PtLevelValue = PTLevel
         StepsPerFrame = MinFrameSteps
         steps_per_frame_value.set(MinFrameSteps)
-    # Size and position of hole markers
-    FilmHoleY_Top = 6
-    FilmHoleY_Bottom = int(PreviewHeight / 1.25)
     display_left_markers()
     if not SimulatedRun:
         send_arduino_command(CMD_SET_REGULAR_8)
@@ -4264,7 +4264,6 @@ def create_main_window():
     global FontSize
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
-    global FilmHoleY_Top, FilmHoleY_Bottom, FilmHoleHeightTop, FilmHoleHeightBottom
     global screen_width, screen_height
     resolution_font = [(590, 6), (628, 7), (672, 8), (718, 9), (771, 10), (823, 11), (882, 12), (932, 13), (974, 14),
                        (1022, 15), (1087, 16), (1149, 17), (1195, 18)]
@@ -4301,11 +4300,6 @@ def create_main_window():
     # Set minimum plotter size, to be adjusted later based on left frame width
     plotter_width = 20
     plotter_height = 10
-    # Size and position of hole markers
-    FilmHoleHeightTop = int(PreviewHeight / 5.9)
-    FilmHoleHeightBottom = int(PreviewHeight / 3.7)
-    FilmHoleY_Top = 6
-    FilmHoleY_Bottom = int(PreviewHeight / 1.25)
     if 'WindowPos' in ConfigData:
         win.geometry(f"+{ConfigData['WindowPos'].split('+', 1)[1]}")
 
@@ -4712,7 +4706,7 @@ def cmd_set_frame_vcenter():
         rgb_image = np.array(FrameVCenterImage)
         # Convert RGB to BGR
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, film_type, compensate=False)        
+        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False)        
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
@@ -5024,7 +5018,6 @@ def create_widgets():
     global auto_exp_wb_wait_btn
     # global film_hole_frame_top, film_hole_frame_bottom
     global reference_line_canvas
-    global FilmHoleHeightTop, FilmHoleHeightBottom, FilmHoleY_Top, FilmHoleY_Bottom
     global real_time_display_checkbox, real_time_display
     global real_time_zoom_checkbox, real_time_zoom
     global auto_stop_enabled_checkbox, auto_stop_enabled
@@ -5150,14 +5143,12 @@ def create_widgets():
 
     # Create canvas to display sprocket holes and reference line to align frame (VCenter)
     reference_line_canvas = tk.Canvas(draw_capture_frame, width=20, height=PreviewHeight, bg=draw_capture_frame.cget("bg"), borderwidth=0)
-    reference_line_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y)
-    #reference_line_canvas.grid(column=0, row=0)
+    reference_line_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y, expand=True)
 
     # Create the canvas
     draw_capture_canvas = Canvas(draw_capture_frame, width=PreviewWidth, height=PreviewHeight, bg='dark grey',
                                  highlightthickness=0, name='draw_capture_canvas', borderwidth=0)
-    draw_capture_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y)
-    #draw_capture_canvas.grid(column=1, row=0)
+    draw_capture_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y, expand=True)
 
     # Store the default border color
     default_canvas_bg_color = draw_capture_canvas.cget("highlightbackground")
@@ -6392,9 +6383,6 @@ def create_widgets():
     PreviewHeight = max(top_left_area_frame.winfo_height(), top_right_area_frame.winfo_height()) - 20  # Compensate pady
     PreviewWidth = int(PreviewHeight * 4 / 3)
     draw_capture_canvas.config(width=PreviewWidth, height=PreviewHeight)
-    # Adjust holes size/position
-    FilmHoleHeightTop = int(PreviewHeight / 5.9)
-    FilmHoleHeightBottom = int(PreviewHeight / 3.7)
     # Adjust main window size
     # Prevent window resize
     # Get screen size - maxsize gives the usable screen size
@@ -6499,11 +6487,10 @@ def main(argv):
     global win
     global UserConsent, ConfigData, LastConsentDate
 
-    return  # Not ready to be used yet
-
     DisableToolTips = False
+    goanyway = False
 
-    opts, args = getopt.getopt(argv, "sexl:phntwf:ba:")
+    opts, args = getopt.getopt(argv, "sexl:phntwf:gba:")
 
     for opt, arg in opts:
         if opt == '-s':
@@ -6520,6 +6507,8 @@ def main(argv):
             SimulatedArduinoVersion = arg
         elif opt == '-f':
             FontSize = int(arg)
+        elif opt == '-g':
+            goanyway = True
         elif opt == '-b':
             UIScrollbars = True
         elif opt == '-n':
@@ -6542,6 +6531,8 @@ def main(argv):
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
 
+    if not goanyway:
+        return
     # Set our CWD to the same folder where the script is. 
     # Otherwise webbrowser failt to launch (cannot open path of the current working directory: Permission denied)
     os.chdir(ScriptDir) 
