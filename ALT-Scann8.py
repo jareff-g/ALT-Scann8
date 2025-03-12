@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.25"
+__version__ = "1.12.26"
 __date__ = "2025-03-12"
-__version_highlight__ = "Prevent corruption in canvas size after changing font size"
+__version_highlight__ = "Fix fatal issue that was breaking the auto fine tune algorithm"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1737,7 +1737,6 @@ def adjust_auto_fine_tune():
         FrameFineTuneValue = 0
     elif FrameFineTuneValue > 100:
         FrameFineTuneValue = 100
-    frame_fine_tune_value.set(FrameFineTuneValue)
     logging.debug(f"Average offset is {offset_avg}, adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
     frame_fine_tune_value.set(FrameFineTuneValue)
@@ -1849,11 +1848,9 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     if result != 0:
         if result >= middle - margin and result <= middle + margin:
-            return True, result - middle if result > middle else -(middle - result)
-        elif result < middle - margin:
-            return False, -(middle - result)
-        elif result > middle + margin:
-            return False, result - middle
+            return True, -(result - middle) if result > middle else middle - result
+        else:
+            return False, -(result - middle) if result > middle else middle - result
     return False, -1
 
 
