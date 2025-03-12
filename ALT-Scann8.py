@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.24"
+__version__ = "1.12.25"
 __date__ = "2025-03-12"
-__version_highlight__ = "Factorize code to draw sprocket holes, precise reference line alignment"
+__version_highlight__ = "Prevent corruption in canvas size after changing font size"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -4265,6 +4265,7 @@ def create_main_window():
     global TopWinX, TopWinY
     global WinInitDone, as_tooltips
     global screen_width, screen_height
+
     resolution_font = [(590, 6), (628, 7), (672, 8), (718, 9), (771, 10), (823, 11), (882, 12), (932, 13), (974, 14),
                        (1022, 15), (1087, 16), (1149, 17), (1195, 18)]
 
@@ -4295,8 +4296,6 @@ def create_main_window():
             else:
                 break
         logging.info(f"Font size: {FontSize}")
-    PreviewWidth = 700
-    PreviewHeight = int(PreviewWidth / (4 / 3))
     # Set minimum plotter size, to be adjusted later based on left frame width
     plotter_width = 20
     plotter_height = 10
@@ -4714,8 +4713,6 @@ def cmd_set_frame_vcenter():
         end_point = (20, height//2+FrameVCenterHoleShift)
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
-        #cv2.line(bgr_image, (0, height//2+FrameVCenterHoleShift), (100, height//2+FrameVCenterHoleShift), (0, 0, 255), 3)
-        #cv2.line(bgr_image, (0, height//2), (100, height//2), (0, 255, 0), 3)
         new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
         new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
         photo_image = ImageTk.PhotoImage(new_image)
@@ -4996,11 +4993,14 @@ def cmd_plotter_canvas_click(event):
 # ***************
 # Widget creation
 # ***************
-
-def destroy_widgets(container):
-    for widget in container.winfo_children():
-        destroy_widgets(widget)
-        widget.destroy()
+def destroy_widgets(container, delete_top = False):
+    children = container.winfo_children()
+    for widget in children:
+        destroy_widgets(widget, True)
+    if isinstance(container, tk.Canvas): #check if it is a canvas
+        container.delete("all") #delete all items on the canvas.
+    if delete_top:
+        container.destroy()
 
 
 def create_widgets():
@@ -5142,6 +5142,7 @@ def create_widgets():
     draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2, 0))  # Pady+=2 to compensate
 
     # Create canvas to display sprocket holes and reference line to align frame (VCenter)
+    PreviewWidth = PreviewHeight = 0 # Actual size calculated once all UI has been set up
     reference_line_canvas = tk.Canvas(draw_capture_frame, width=20, height=PreviewHeight, bg=draw_capture_frame.cget("bg"), borderwidth=0)
     reference_line_canvas.pack(padx=0, ipadx=0, pady=0, ipady=0, side=LEFT, fill=Y, expand=True)
 
@@ -6048,7 +6049,8 @@ def create_widgets():
         if ColorCodedButtons:
             frame_vcenter_btn.config(selectcolor="pale green")
         frame_vcenter_btn.grid(row=frame_align_row, column=0, columnspan=2, sticky="EW")
-        as_tooltips.add(frame_vcenter_btn, "In case frame is not centered respect to sprockect holes click here to redefine.")
+        as_tooltips.add(frame_vcenter_btn, "In case frame is not centered respect to sprocket holes click here to redefine."
+                                           " Alignment markers do not neccesarily need to match, only in case of film with perfect vertical simmetry.")
 
         frame_vcenter_value = tk.IntVar(value=FrameVCenterImageShift)  # To be overridden by config
         frame_vcenter_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_vcenter_selection, width=4,
