@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.28"
-__date__ = "2025-03-12"
-__version_highlight__ = "Fix button click on plotter canvas (not recognized)"
+__version__ = "1.12.29"
+__date__ = "2025-03-13"
+__version_highlight__ = "Move 'Frame VCenter' below 'PT Level'"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3482,14 +3482,14 @@ def widget_list_update(cmd, category_list):
                                                    [wb_red_spinbox,wb_blue_spinbox]]
         dependent_widget_dict[id_AutoPtLevelEnabled] = [[fine_tune_btn, frame_fine_tune_spinbox],
                                                         [pt_level_spinbox]]
-        dependent_widget_dict[id_AutoFineTuneEnabled] = [[],
+        dependent_widget_dict[id_AutoFineTuneEnabled] = [[frame_vcenter_btn],
                                                         [frame_fine_tune_spinbox]]
         dependent_widget_dict[id_AutoFrameStepsEnabled] = [[frame_extra_steps_label, frame_extra_steps_spinbox],
                                                            [steps_per_frame_spinbox]]
         dependent_widget_dict[id_ExposureWbAdaptPause] = [[match_wait_margin_spinbox],
                                                           []]
         dependent_widget_dict[id_FrameVCenterEnabled] = [[frame_vcenter_spinbox],
-                                                          []]
+                                                          [fine_tune_btn]]
     if ExperimentalMode:
         dependent_widget_dict[id_HdrCaptureActive] = [[hdr_viewx4_active_checkbox, hdr_min_exp_label,
                                                        hdr_min_exp_spinbox, hdr_max_exp_label, hdr_max_exp_spinbox,
@@ -6014,27 +6014,6 @@ def create_widgets():
         frame_fine_tune_spinbox.bind("<FocusOut>", lambda event: cmd_frame_fine_tune_selection())
         frame_align_row += 1
 
-        # Spinbox to select Extra Steps on Arduino
-        frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1),
-                                           name='frame_extra_steps_label')
-        frame_extra_steps_label.widget_type = "control"
-        frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
-
-        frame_extra_steps_value = tk.IntVar(value=FrameExtraStepsValue)  # To be overridden by config
-        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_extra_steps_selection, width=4,
-                                                   readonlybackground='pale green', from_=0, to=30,
-                                                   textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
-                                                   name='frame_extra_steps_spinbox')
-        frame_extra_steps_spinbox.widget_type = "control"
-        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
-        cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
-        frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
-        as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
-                                                   "detection (n between 0 and 30). Negative values can help if "
-                                                   "film gate is not correctly positioned.")
-        frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
-        frame_align_row += 1
-
         # Spinbox to adjust frame center vertically, usign the focus view
         frame_vcenter_enabled = tk.BooleanVar(value=FrameVCenterEnabled)
         frame_vcenter_btn = tk.Checkbutton(frame_alignment_frame, variable=frame_vcenter_enabled, onvalue=True,
@@ -6060,6 +6039,26 @@ def create_widgets():
         frame_vcenter_spinbox.bind("<FocusOut>", lambda event: cmd_frame_vcenter_selection())
         frame_align_row += 1
 
+        # Spinbox to select Extra Steps on Arduino
+        frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1),
+                                           name='frame_extra_steps_label')
+        frame_extra_steps_label.widget_type = "control"
+        frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+
+        frame_extra_steps_value = tk.IntVar(value=FrameExtraStepsValue)  # To be overridden by config
+        frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_extra_steps_selection, width=4,
+                                                   readonlybackground='pale green', from_=0, to=30,
+                                                   textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
+                                                   name='frame_extra_steps_spinbox')
+        frame_extra_steps_spinbox.widget_type = "control"
+        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
+        frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
+        as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
+                                                   "detection (n between 0 and 30). Negative values can help if "
+                                                   "film gate is not correctly positioned.")
+        frame_extra_steps_spinbox.bind("<FocusOut>", lambda event: cmd_frame_extra_steps_selection())
+        frame_align_row += 1
 
         # Scan error counter
         detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
