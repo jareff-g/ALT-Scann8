@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.30"
+__version__ = "1.12.31"
 __date__ = "2025-03-13"
-__version_highlight__ = "Catch errors in command line parameters"
+__version_highlight__ = "Additional information added on th evertical center screen"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -36,7 +36,7 @@ import tkinter.simpledialog
 from tkinter import DISABLED, NORMAL, LEFT, RIGHT, Y, TOP, BOTTOM, N, W, E, NW, RAISED, SUNKEN
 from tkinter import Label, Button, Frame, LabelFrame, Canvas, OptionMenu
 
-from PIL import ImageTk, Image, ImageDraw, __version__ as PIL_Version
+from PIL import ImageTk, Image, ImageDraw, ImageFont, __version__ as PIL_Version
 
 import os
 import time
@@ -349,6 +349,7 @@ HdrMaxExp = 104
 HdrBracketWidth = 50
 HdrBracketShift = 0
 FilmType = ''
+IsSplashDisplayed = False
 
 # Categories of dependent widget groups (to enable disable them)
 id_HdrCaptureActive = 1
@@ -2009,7 +2010,7 @@ def enable_canvas(canvas):
 
 def draw_preview_image(preview_image, curframe, idx):
     global total_wait_time_preview_display, PreviewModuleValue
-    global preview_image_id_to_delete
+    global preview_image_id_to_delete, IsSplashDisplayed
 
     curtime = time.time()
 
@@ -2038,6 +2039,7 @@ def draw_preview_image(preview_image, curframe, idx):
             aux = preview_image_id_to_delete
             preview_image_id_to_delete = draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
             draw_capture_canvas.image = PreviewAreaImage
+            IsSplashDisplayed = False
             if aux is not None:
                 draw_capture_canvas.delete(aux) # Cleanup
 
@@ -4232,7 +4234,7 @@ def init_multidependent_widgets():
     widget_list_refresh([id_HdrBracketAuto, id_AutoPtLevelEnabled, id_AutoFineTuneEnabled, id_FrameVCenterEnabled])
 
 def display_splash():
-    global splash_id
+    global splash_id, IsSplashDisplayed
     splash_id = None
     splash_path = os.path.join(ScriptDir, "ALT-Scann8.jpg")  # Adjust to your file’s location
     if os.path.isfile(splash_path):
@@ -4246,6 +4248,7 @@ def display_splash():
             # Display splash on canvas
             splash_id = draw_capture_canvas.create_image(canvas_width//2, canvas_height//2, image=splash_photo)  # Center at (width/2, height/2)
             draw_capture_canvas.image = splash_photo  # Keep reference to avoid garbage collection
+            IsSplashDisplayed = True
         except Exception as e:
             logging.error(f"Failed to load splash image: {e}")
     else:
@@ -4682,17 +4685,56 @@ def cmd_frame_fine_tune_selection():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
 
 
+def draw_arrows_image(draw, x, y, size=30, color=(0, 0, 0)):
+    """Draws an up and a down arrow on the ImageDraw object."""
+
+    # Up arrows
+    draw.polygon([
+        (x//2, y - size // 2),
+        (x//2 - size // 2, y + size // 2),
+        (x//2 + size // 2, y + size // 2)
+    ], fill=color)
+
+    draw.polygon([
+        (int(x*1.5), y - size // 2),
+        (int(x*1.5) - size // 2, y + size // 2),
+        (int(x*1.5) + size // 2, y + size // 2)
+    ], fill=color)
+
+    # Down arrows
+    draw.polygon([
+        (x//2, 9*y + size * 1.5),
+        (x//2 - size // 2, 9*y + size // 2),
+        (x//2 + size // 2, 9*y + size // 2)
+    ], fill=color)
+
+    draw.polygon([
+        (int(x*1.5), 9*y + size * 1.5),
+        (int(x*1.5) - size // 2, 9*y + size // 2),
+        (int(x*1.5) + size // 2, 9*y + size // 2)
+    ], fill=color)
+
+
 def cmd_set_frame_vcenter():
-    global FrameVCenterEnabled, FrameVCenterImage
+    global FrameVCenterEnabled, FrameVCenterImage, save_canvas_image
     global FrameVCenterHoleShift, FrameVCenterImageShift
+
+    if IsSplashDisplayed:
+        tk.messagebox.showinfo("Please load a film image", "This function can only be performed when an uncropped film image is displayed. Please load one before proceeding·")
+        frame_vcenter_enabled.set(False)
+        return
+    
     FrameVCenterEnabled = frame_vcenter_enabled.get()
     except_widget_global_enable([frame_vcenter_btn, frame_vcenter_spinbox], not FrameVCenterEnabled)
     widget_list_enable([id_FrameVCenterEnabled])
+    frame_vcenter_spinbox.focus_set()
     if FrameVCenterEnabled:
         # First, draw reference line
         display_left_markers()
+        # Save image to restore it when done
+        save_canvas_image = draw_capture_canvas.image
         # Now, center frame as per sproket hole position
-        photo_image = draw_capture_canvas.image   
+        photo_image = draw_capture_canvas.image
         # Convert PhotoImage to PIL Image
         pil_image = ImageTk.getimage(photo_image)
         FrameVCenterImage = pil_image # Save PIL image to global var, it will be manipulated lated
@@ -4700,7 +4742,8 @@ def cmd_set_frame_vcenter():
         rgb_image = np.array(FrameVCenterImage)
         # Convert RGB to BGR
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False)        
+        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False) 
+        print(f"FrameVCenterHoleShift={FrameVCenterHoleShift}")       
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
@@ -4708,6 +4751,18 @@ def cmd_set_frame_vcenter():
         end_point = (20, height//2+FrameVCenterHoleShift)
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
+        # Draw some explanatory text
+        text_position = (end_point[0] + 20, end_point[1]-20)  # Position the text, slightly to the right, up
+        text_content = "Make sure the image borders (upper and lower) are at the same distance to the edges.\n"\
+                        "The red line markers on the left do not neccesarily need to match. They should only\n"\
+                        "match if the image is vertically centered with respect to the sprocket holes."
+        text_color = (255, 255, 255)  # Blue        
+        # font = ImageFont.load_default(size=16) #Use default font, or load a truetype font.
+        font = ImageFont.truetype("FreeSans.ttf", 16) #load a truetype font.
+        draw.text(text_position, text_content, fill=text_color, font=font)
+        # Draw arrows
+        draw_arrows_image(draw, width // 2, int(height*0.10), size=30, color="green")
+        # Finally, add the line adn text to the image
         new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
         new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
         photo_image = ImageTk.PhotoImage(new_image)
@@ -4718,6 +4773,9 @@ def cmd_set_frame_vcenter():
         display_left_markers()
         ConfigData["FrameVCenterImageShift"] = FrameVCenterImageShift
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
+        # Save image to restore it when done
+        draw_capture_canvas.image = save_canvas_image
+
 
 
 def cmd_frame_vcenter_selection():
@@ -5131,10 +5189,10 @@ def create_widgets():
 
     # Create a frame to contain the top right area (buttons) ***************
     top_left_area_frame = Frame(top_area_frame, name='top_left_area_frame')
-    top_left_area_frame.pack(side=LEFT, anchor=N, padx=(0, 0))
+    top_left_area_frame.pack(side=LEFT, anchor=N, padx=(5, 5))
     # Create a LabelFrame to act as a border of preview canvas
     draw_capture_frame = tk.LabelFrame(top_area_frame, bd=2, relief=tk.GROOVE, name='draw_capture_frame')
-    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(10, 0), pady=(2, 0))  # Pady+=2 to compensate
+    draw_capture_frame.pack(side=LEFT, anchor=N, padx=(0, 0), pady=(2, 0))  # Pady+=2 to compensate
 
     # Create canvas to display sprocket holes and reference line to align frame (VCenter)
     PreviewWidth = PreviewHeight = 0 # Actual size calculated once all UI has been set up
@@ -5151,7 +5209,7 @@ def create_widgets():
 
     # Create a frame to contain the top right area (buttons) ***************
     top_right_area_frame = Frame(top_area_frame, name='top_right_area_frame')
-    top_right_area_frame.pack(side=LEFT, anchor=N, padx=(10, 0))
+    top_right_area_frame.pack(side=LEFT, anchor=N, padx=(5, 5))
 
     # Set initial positions for widgets in this frame
     bottom_area_column = 0
