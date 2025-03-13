@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.29"
+__version__ = "1.12.30"
 __date__ = "2025-03-13"
-__version_highlight__ = "Move 'Frame VCenter' below 'PT Level'"
+__version_highlight__ = "Catch errors in command line parameters"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -6487,7 +6487,11 @@ def main(argv):
     DisableToolTips = False
     goanyway = False
 
-    opts, args = getopt.getopt(argv, "sexl:phntwf:gba:")
+    try:
+        opts, args = getopt.getopt(argv, "sexl:phntwf:ba:", ["goanyway"])
+    except getopt.GetoptError as e:
+        print(f"Invalid command line parameter: {e}")
+        return
 
     for opt, arg in opts:
         if opt == '-s':
@@ -6504,7 +6508,7 @@ def main(argv):
             SimulatedArduinoVersion = arg
         elif opt == '-f':
             FontSize = int(arg)
-        elif opt == '-g':
+        elif opt == '--goanyway':
             goanyway = True
         elif opt == '-b':
             UIScrollbars = True
@@ -6529,6 +6533,8 @@ def main(argv):
             exit()
 
     if not goanyway:
+        print("Work in progress, version not usable yet.")
+        tk.messagebox.showerror("WIP", "Work in progress, version not usable yet.")
         return
     # Set our CWD to the same folder where the script is. 
     # Otherwise webbrowser failt to launch (cannot open path of the current working directory: Permission denied)
