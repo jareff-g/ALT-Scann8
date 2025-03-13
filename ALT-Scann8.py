@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.31"
+__version__ = "1.12.32"
 __date__ = "2025-03-13"
-__version_highlight__ = "Additional information added on th evertical center screen"
+__version_highlight__ = "Write session info to source folder"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -224,6 +224,7 @@ DeltaY = 0
 WinInitDone = False
 FolderProcess = 0
 draw_capture_canvas = 0
+draw_capture_canvas_image_id = None
 
 PiCam2PreviewEnabled = False
 PostviewCounter = 0
@@ -578,6 +579,8 @@ def exit_app(do_save):  # Exit Application
     global win
     global ExitingApp
 
+    log_current_session()   # Before exiting, write session data to disk
+
     # *** ALT-Scann8 shutdown starts ***
     if hw_panel_installed:
         hw_panel.ALT_Scann8_shutdown_started()
@@ -784,6 +787,17 @@ def cmd_set_focus_minus():
                       FocusZoomFactorY)
 
 
+def log_current_session():
+    if CurrentDir != BaseFolder:
+        session_file = os.path.join(CurrentDir, "ALT-Scann8.session.txt")  # Log session info
+        if not os.path.isfile(session_file):    # If not exists, write header
+            with open(session_file, 'a') as f:
+                f.write(f"Date, Folder, Frames Scanned, Errors\n")
+        with open(session_file, 'a') as f:
+            f.write(f"{datetime.today().isoformat()}, {CurrentDir}, {scan_error_total_frames_counter}, {scan_error_counter}\n")
+
+
+
 def cmd_set_new_folder():
     global BaseFolder, CurrentDir, CurrentFrame
     global scan_error_counter, scan_error_total_frames_counter, scan_error_log_fullpath, scan_error_counter_value
@@ -805,7 +819,6 @@ def cmd_set_new_folder():
         try:
             os.mkdir(newly_created_dir)
             CurrentFrame = 0
-            CurrentDir = newly_created_dir
             success = True
         except FileExistsError:
             tk.messagebox.showerror("Error", f"Folder {requested_dir} already exists.")
@@ -821,6 +834,8 @@ def cmd_set_new_folder():
         tk.messagebox.showerror("Error!", "Folder " + requested_dir + " already exists.")
 
     if success:
+        log_current_session()   # Before cleaning up session data, write it to disk
+        CurrentDir = newly_created_dir
         folder_frame_target_dir.config(text=CurrentDir)
         Scanned_Images_number.set(CurrentFrame)
         scan_error_counter = scan_error_total_frames_counter = 0
@@ -882,7 +897,6 @@ def cmd_settings_popup_accept():
             AutoPtLevelEnabled = True
             AutoFineTuneEnabled = True
             FrameFineTuneValue = 20
-            FrameVCenterImageShift = 0
             ScanSpeedValue = 5
         else:
             ExpertMode = ConfigData['ExpertMode'] = True
@@ -893,7 +907,6 @@ def cmd_settings_popup_accept():
             AutoFrameStepsEnabled = ConfigData['AutoFrameStepsEnabled']  # FrameStepsAuto
             AutoPtLevelEnabled = ConfigData['AutoPtLevelEnabled']  # PTLevelAuto
             FrameFineTuneValue = ConfigData["FrameFineTune"]
-            FrameVCenterImageShift = ConfigData["FrameVCenter"]
             ScanSpeedValue = ConfigData["ScanSpeed"]
             AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
         if not SimulatedRun and not CameraDisabled:
@@ -1384,6 +1397,7 @@ def cmd_set_existing_folder():
         confirm = True
 
     if confirm:
+        log_current_session()   # Before cleaning up session data, write it to disk
         CurrentFrame = NewCurrentFrame
         CurrentDir = NewDir
         scan_error_counter = scan_error_total_frames_counter = 0
@@ -2036,12 +2050,9 @@ def draw_preview_image(preview_image, curframe, idx):
         if idx == 0 or (idx == 2 and not HdrViewX4Active) or HdrViewX4Active:
             # The Label widget is a standard Tkinter widget used to display a text or image on the screen.
             # next two lines to avoid flickering. However, they might cause memory problems
-            aux = preview_image_id_to_delete
-            preview_image_id_to_delete = draw_capture_canvas.create_image(0, 0, anchor=NW, image=PreviewAreaImage)
+            draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=PreviewAreaImage)
             draw_capture_canvas.image = PreviewAreaImage
             IsSplashDisplayed = False
-            if aux is not None:
-                draw_capture_canvas.delete(aux) # Cleanup
 
             # The Pack geometry manager packs widgets in rows or columns.
             # draw_capture_label.place(x=0, y=0) # This line is probably causing flickering, to be checked
@@ -2155,7 +2166,7 @@ def update_real_time_display():
             # Convert image to PhotoImage
             photo = ImageTk.PhotoImage(image)
             # Update the canvas image
-            draw_capture_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+            draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo)
             draw_capture_canvas.image = photo
         # Repeat after 10 milliseconds
         win.after(10, update_real_time_display)
@@ -2679,12 +2690,7 @@ def cmd_start_scan_simulated():
     global total_wait_time_save_image
     global session_frames
     global last_frame_time
-    global splash_id
     
-    if splash_id != None:
-        draw_capture_canvas.delete(splash_id)
-        splash_id == None
-
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
                                 "Please specify film type (S8/R8) before starting scan process")
@@ -2857,11 +2863,6 @@ def start_scan():
     global session_frames
     global last_frame_time
     global AutoExpEnabled, AutoWbEnabled
-    global splash_id
-
-    if splash_id != None:
-        draw_capture_canvas.delete(splash_id)
-        splash_id == None
 
     if film_type.get() == '':
         tk.messagebox.showerror("Error!",
@@ -4234,8 +4235,8 @@ def init_multidependent_widgets():
     widget_list_refresh([id_HdrBracketAuto, id_AutoPtLevelEnabled, id_AutoFineTuneEnabled, id_FrameVCenterEnabled])
 
 def display_splash():
-    global splash_id, IsSplashDisplayed
-    splash_id = None
+    global IsSplashDisplayed, draw_capture_canvas_image_id
+
     splash_path = os.path.join(ScriptDir, "ALT-Scann8.jpg")  # Adjust to your file’s location
     if os.path.isfile(splash_path):
         try:
@@ -4245,8 +4246,10 @@ def display_splash():
             splash_img = Image.open(splash_path).resize((canvas_width, canvas_height), Image.LANCZOS)  # Match canvas size
             splash_photo = ImageTk.PhotoImage(splash_img)
 
-            # Display splash on canvas
-            splash_id = draw_capture_canvas.create_image(canvas_width//2, canvas_height//2, image=splash_photo)  # Center at (width/2, height/2)
+            # Display splash on canvas, as this is the first image displayed on the canvas, 
+            # we keep the image id returned here to reuse it for future images
+            # Also keep reference to photoimage in 'image' attribute in call to create image to avoid garbage collection
+            draw_capture_canvas_image_id = draw_capture_canvas.create_image(canvas_width//2, canvas_height//2, image=splash_photo)  # Center at (width/2, height/2)
             draw_capture_canvas.image = splash_photo  # Keep reference to avoid garbage collection
             IsSplashDisplayed = True
         except Exception as e:
@@ -4685,45 +4688,55 @@ def cmd_frame_fine_tune_selection():
     send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
 
 
-def draw_arrows_image(draw, x, y, size=30, color=(0, 0, 0)):
-    """Draws an up and a down arrow on the ImageDraw object."""
+def draw_outlined_text(draw, position, text, fill, outline_color, font):
+    """Draws text with an outline."""
+    x, y = position
+    # Draw outline (slightly offset in each direction)
+    draw.text((x - 1, y), text, font=font, fill=outline_color)
+    draw.text((x + 1, y), text, font=font, fill=outline_color)
+    draw.text((x, y - 1), text, font=font, fill=outline_color)
+    draw.text((x, y + 1), text, font=font, fill=outline_color)
 
-    # Up arrows
-    draw.polygon([
-        (x//2, y - size // 2),
-        (x//2 - size // 2, y + size // 2),
-        (x//2 + size // 2, y + size // 2)
-    ], fill=color)
-
-    draw.polygon([
-        (int(x*1.5), y - size // 2),
-        (int(x*1.5) - size // 2, y + size // 2),
-        (int(x*1.5) + size // 2, y + size // 2)
-    ], fill=color)
-
-    # Down arrows
-    draw.polygon([
-        (x//2, 9*y + size * 1.5),
-        (x//2 - size // 2, 9*y + size // 2),
-        (x//2 + size // 2, 9*y + size // 2)
-    ], fill=color)
-
-    draw.polygon([
-        (int(x*1.5), 9*y + size * 1.5),
-        (int(x*1.5) - size // 2, 9*y + size // 2),
-        (int(x*1.5) + size // 2, 9*y + size // 2)
-    ], fill=color)
+    # Draw the main text
+    draw.text(position, text, font=font, fill=fill)
 
 
+# --- New Arrow Drawing Function ---
+def draw_static_arrows(canvas, width, height, shift):
+    """Draws the static arrows on the canvas."""
+    arrow_color = "green"
+    arrow_size = 30
+
+    # Up arrow
+    canvas.create_polygon(
+        width // 2, int(height * 0.10) - shift - arrow_size // 2,
+        width // 2 - arrow_size // 2, int(height * 0.10) - shift + arrow_size // 2,
+        width // 2 + arrow_size // 2, int(height * 0.10) - shift + arrow_size // 2,
+        fill=arrow_color,
+        tag="static_arrows"
+    )
+
+    # Down arrow
+    canvas.create_polygon(
+        width // 2, int(height * 0.90) - shift + arrow_size * 1.5,
+        width // 2 - arrow_size // 2, int(height * 0.90) - shift + arrow_size // 2,
+        width // 2 + arrow_size // 2, int(height * 0.90) - shift + arrow_size // 2,
+        fill=arrow_color,
+        tag="static_arrows"
+    )
+
+# --- Modified Functions ---
 def cmd_set_frame_vcenter():
     global FrameVCenterEnabled, FrameVCenterImage, save_canvas_image
     global FrameVCenterHoleShift, FrameVCenterImageShift
 
     if IsSplashDisplayed:
-        tk.messagebox.showinfo("Please load a film image", "This function can only be performed when an uncropped film image is displayed. Please load one before proceeding·")
+        tk.messagebox.showinfo(
+            "Please load a film image",
+            "This function can only be performed when an uncropped film image is displayed. Please load one before proceeding·",
+        )
         frame_vcenter_enabled.set(False)
         return
-    
     FrameVCenterEnabled = frame_vcenter_enabled.get()
     except_widget_global_enable([frame_vcenter_btn, frame_vcenter_spinbox], not FrameVCenterEnabled)
     widget_list_enable([id_FrameVCenterEnabled])
@@ -4737,57 +4750,74 @@ def cmd_set_frame_vcenter():
         photo_image = draw_capture_canvas.image
         # Convert PhotoImage to PIL Image
         pil_image = ImageTk.getimage(photo_image)
-        FrameVCenterImage = pil_image # Save PIL image to global var, it will be manipulated lated
+        FrameVCenterImage = pil_image  # Save PIL image to global var, it will be manipulated lated
         # Convert PIL Image to NumPy array (RGB)
         rgb_image = np.array(FrameVCenterImage)
         # Convert RGB to BGR
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
-        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False) 
-        print(f"FrameVCenterHoleShift={FrameVCenterHoleShift}")       
+        _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False)
+        print(f"FrameVCenterHoleShift={FrameVCenterHoleShift}")
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
-        start_point = (0, height//2+FrameVCenterHoleShift)
-        end_point = (20, height//2+FrameVCenterHoleShift)
+        start_point = (0, height // 2 - FrameVCenterHoleShift)
+        end_point = (20, height // 2 - FrameVCenterHoleShift)
+        print(f"height = {height}, red line y = {height // 2 - FrameVCenterHoleShift}")
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
         # Draw some explanatory text
-        text_position = (end_point[0] + 20, end_point[1]-20)  # Position the text, slightly to the right, up
-        text_content = "Make sure the image borders (upper and lower) are at the same distance to the edges.\n"\
-                        "The red line markers on the left do not neccesarily need to match. They should only\n"\
-                        "match if the image is vertically centered with respect to the sprocket holes."
-        text_color = (255, 255, 255)  # Blue        
+        text_position = (end_point[0] + 20, end_point[1] - 20)  # Position the text, slightly to the right, up
+        text_content = (
+            "Make sure the image borders (upper and lower) are at the same distance to the edges.\n"
+            "The red line markers on the left do not neccesarily need to match. They should only\n"
+            "match if the image is vertically centered with respect to the sprocket holes."
+        )
+        text_color = (255, 255, 255)  # Blue
         # font = ImageFont.load_default(size=16) #Use default font, or load a truetype font.
-        font = ImageFont.truetype("FreeSans.ttf", 16) #load a truetype font.
-        draw.text(text_position, text_content, fill=text_color, font=font)
-        # Draw arrows
-        draw_arrows_image(draw, width // 2, int(height*0.10), size=30, color="green")
-        # Finally, add the line adn text to the image
-        new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
-        new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
+        font = ImageFont.truetype("FreeSans.ttf", 16)  # load a truetype font.
+        # draw.text(text_position, text_content, fill=text_color, font=font)
+        draw_outlined_text(draw, text_position, text_content, fill=text_color, outline_color="black", font=font)
+        # Finally, add the line and text to the image
+        new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
+        print(f"pasting image FrameVCenterHoleShift={FrameVCenterHoleShift}, FrameVCenterImageShift={FrameVCenterImageShift}")
+        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift))
         photo_image = ImageTk.PhotoImage(new_image)
-        draw_capture_canvas.create_image(0, 0, anchor=NW, image=photo_image)
+        draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
         draw_capture_canvas.image = photo_image
-    else:   # Button released, save final value (calculating proportion between previen and real image)
+
+        # Draw static arrows (only if they haven't been drawn yet)
+        if not hasattr(draw_capture_canvas, "arrows_drawn"):
+            draw_static_arrows(draw_capture_canvas, width, height, FrameVCenterHoleShift)
+            draw_capture_canvas.arrows_drawn = True  # Set a flag so we don't draw them again
+    else:  # Button released, save final value (calculating proportion between previen and real image)
         # First, draw back S8/R8 markers
         display_left_markers()
         ConfigData["FrameVCenterImageShift"] = FrameVCenterImageShift
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
         # Save image to restore it when done
+        draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=save_canvas_image)
         draw_capture_canvas.image = save_canvas_image
+        # Remove the static arrows
+        draw_capture_canvas.delete("static_arrows")
+        if hasattr(draw_capture_canvas, "arrows_drawn"):
+            del draw_capture_canvas.arrows_drawn
 
-
-
+            
 def cmd_frame_vcenter_selection():
     global FrameVCenterImageShift
+
+    if not frame_vcenter_enabled.get():
+        return
     FrameVCenterImageShift = value_normalize(frame_vcenter_value, -200, 200, 0)
     # Arrange image according to user-defined displacement
     width, height = FrameVCenterImage.size
-    new_image = Image.new('RGB', (width, height), (0, 0, 0, 0)) # Create new image.
-    new_image.paste(FrameVCenterImage, (0, -FrameVCenterHoleShift+FrameVCenterImageShift))
+    new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
+    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift))
     photo_image = ImageTk.PhotoImage(new_image)
-    draw_capture_canvas.create_image(0, 0, anchor=NW, image=photo_image)
+    draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
     draw_capture_canvas.image = photo_image
+    # Move the image and markers
+    #draw_capture_canvas.move("image_and_markers", 0, FrameVCenterImageShift)
 
 
 def fine_tune_validation(new_value):
