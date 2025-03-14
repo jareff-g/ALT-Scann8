@@ -2686,7 +2686,6 @@ def simulate_pt():
         if AutoFineTuneEnabled:
             pass # Not possible to simulate auto fine tune
         pt_level = pt_level * uv_brightness_value.get()//255
-        print(f"min_simulated_pt {min_simulated_pt}, max_simulated_pt {max_simulated_pt}, pt_level {pt_level}")
         if Simulated_Frame_detected and not Simulated_Frame_displayed:
             # Call simulated scan
             capture_loop_simulated()
