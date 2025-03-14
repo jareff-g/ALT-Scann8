@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.33"
+__version__ = "1.12.34"
 __date__ = "2025-03-14"
-__version_highlight__ = "Correct a couple of bugs when setting vrtical center"
+__version_highlight__ = "Improve simulated plotter to take snapshots for documentation"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -559,6 +559,9 @@ Simulated_PT_Levels = [(546, 373),(382, 373),(52, 373),(14, 373),(59, 373),(41, 
 Simulated_PT_Levels_idx = 0
 Simulated_Frame_detected = False
 Simulated_Frame_displayed = False
+max_simulated_pt = 0
+min_simulated_pt = 1000
+simulated_pt_floor_level = 0
 
 # ********************************************************
 # ALT-Scann8 code
@@ -2661,11 +2664,29 @@ def capture(mode):
 
 def simulate_pt():
     global Simulated_PT_Levels_idx, Simulated_Frame_detected, Simulated_Frame_displayed
+    global max_simulated_pt, min_simulated_pt, simulated_pt_floor_level
+
     if ScanOngoing:
         # Retrieve the current item using the current index
         pt_value = Simulated_PT_Levels[Simulated_PT_Levels_idx]
+        if pt_value[0] < max_simulated_pt and simulated_pt_floor_level > 0:
+            pt_value = (pt_value[0] + int((max_simulated_pt - pt_value[0]) * simulated_pt_floor_level//100), pt_value[1])
+        max_simulated_pt = max(max_simulated_pt, pt_value[0])
+        min_simulated_pt = min(min_simulated_pt, pt_value[0])
+        if max_simulated_pt - 5 > max_simulated_pt:
+            max_simulated_pt -=1
+        if min_simulated_pt + 5 < max_simulated_pt:
+            min_simulated_pt +=1
         uv_level = pt_value[0]*uv_brightness_value.get()//255
-        pt_level = (150 + pt_value[1]*FrameFineTuneValue//100) * uv_brightness_value.get()//255
+        if AutoPtLevelEnabled:
+            pt_level = min_simulated_pt + int((max_simulated_pt - min_simulated_pt) * 0.1)
+            pt_level = pt_level + int((max_simulated_pt - min_simulated_pt) * 0.9)*FrameFineTuneValue//100
+        else:
+            pt_level = PtLevelValue
+        if AutoFineTuneEnabled:
+            pass # Not possible to simulate auto fine tune
+        pt_level = pt_level * uv_brightness_value.get()//255
+        print(f"min_simulated_pt {min_simulated_pt}, max_simulated_pt {max_simulated_pt}, pt_level {pt_level}")
         if Simulated_Frame_detected and not Simulated_Frame_displayed:
             # Call simulated scan
             capture_loop_simulated()
@@ -4723,7 +4744,6 @@ def draw_static_arrows(canvas, width, height):
         tag="static_arrows"
     )
 
-# --- Modified Functions ---
 def cmd_set_frame_vcenter():
     global FrameVCenterEnabled, FrameVCenterImage, save_canvas_image
     global FrameVCenterHoleShift, FrameVCenterImageShift
@@ -4754,13 +4774,11 @@ def cmd_set_frame_vcenter():
         # Convert RGB to BGR
         bgr_image = cv2.cvtColor(rgb_image, cv2.COLOR_RGB2BGR)
         _, FrameVCenterHoleShift = is_frame_centered(bgr_image, FilmType, compensate=False)
-        print(f"FrameVCenterHoleShift={FrameVCenterHoleShift}")
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
         start_point = (0, height // 2 - FrameVCenterHoleShift)
         end_point = (20, height // 2 - FrameVCenterHoleShift)
-        print(f"height = {height}, red line y = {height // 2 - FrameVCenterHoleShift}")
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
         # Draw some explanatory text
@@ -4777,7 +4795,6 @@ def cmd_set_frame_vcenter():
         draw_outlined_text(draw, text_position, text_content, fill=text_color, outline_color="black", font=font)
         # Finally, add the line and text to the image
         new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-        print(f"pasting image FrameVCenterHoleShift={FrameVCenterHoleShift}, FrameVCenterImageShift={FrameVCenterImageShift}")
         new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
@@ -5053,7 +5070,7 @@ def update_target_dir_wraplength(event):
 
 def cmd_plotter_canvas_click(event):
     global PlotterEnabled, PlotterScroll, PlotterWindowPos
-
+    plotter_canvas.focus_set()
     if FrameDetectMode == 'PFD':    # Plotter window only functional in PFD mode
         if PlotterEnabled:
             if not PlotterScroll:
@@ -5068,7 +5085,16 @@ def cmd_plotter_canvas_click(event):
             PlotterScroll = False
             PlotterWindowPos = 0
             logging.debug("Enable Plotter, without scroll")
-        
+
+
+def cmd_plotter_canvas_change_floor(event):
+    global simulated_pt_floor_level
+    if event.keysym == 'plus' and simulated_pt_floor_level < 100:
+        simulated_pt_floor_level += 5
+    elif event.keysym == 'minus' and simulated_pt_floor_level > 0:
+        simulated_pt_floor_level -= 5
+
+
 
 # ***************
 # Widget creation
@@ -5684,6 +5710,8 @@ def create_widgets():
         as_tooltips.add(plotter_canvas, "Plotter canvas, click to disable/enable/scroll.")
         # Bind the mouse click event to the canvas widget
         plotter_canvas.bind("<Button-1>", cmd_plotter_canvas_click)
+        plotter_canvas.bind("+", cmd_plotter_canvas_change_floor)
+        plotter_canvas.bind("-", cmd_plotter_canvas_change_floor)
     top_right_area_row += 1
 
 
