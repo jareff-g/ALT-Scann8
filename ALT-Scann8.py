@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.32"
-__date__ = "2025-03-13"
-__version_highlight__ = "Write session info to source folder"
+__version__ = "1.12.33"
+__date__ = "2025-03-14"
+__version_highlight__ = "Correct a couple of bugs when setting vrtical center"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1861,7 +1861,7 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
             break
         if end-start > bigger:
             bigger = end-start
-            center = (start + end) // 2
+            center = int((start + end) // 2)
             result = center
 
     if result != 0:
@@ -2237,6 +2237,7 @@ def cmd_set_s8():
 
     PTLevel = PTLevelS8
     FrameVCenterImageShift = FrameVCenterImageShiftS8
+    frame_vcenter_value.set(FrameVCenterImageShift)
     MinFrameSteps = MinFrameStepsS8
     if ALT_scann_init_done:
         ConfigData["PTLevel"] = PTLevel
@@ -2262,6 +2263,7 @@ def cmd_set_r8():
 
     PTLevel = PTLevelR8
     FrameVCenterImageShift = FrameVCenterImageShiftR8
+    frame_vcenter_value.set(FrameVCenterImageShift)
     MinFrameSteps = MinFrameStepsR8
     if ALT_scann_init_done:
         ConfigData["PTLevel"] = PTLevel
@@ -3755,6 +3757,11 @@ def load_session_data_post_init():
                 NegativeImage = ConfigData["NegativeCaptureActive"]
                 negative_image.set(NegativeImage)
                 cmd_set_negative_image()
+            # FrameVCenter required to set film type
+            if 'FrameVCenterImageShiftS8' in ConfigData:
+                FrameVCenterImageShiftS8 = ConfigData["FrameVCenterImageShiftS8"]
+            if 'FrameVCenterImageShiftR8' in ConfigData:
+                FrameVCenterImageShiftR8 = ConfigData["FrameVCenterImageShiftR8"]
             if 'FilmType' in ConfigData:
                 FilmType = ConfigData["FilmType"]
                 film_type.set(FilmType)
@@ -3831,6 +3838,235 @@ def load_session_data_post_init():
                         FrameDetectMode = 'VFD'
                         disable_canvas(plotter_canvas)
                     vfd_mode_value.set(ConfigData["VFD"])
+                if 'PreviewModule' in ConfigData:
+                    aux = int(ConfigData["PreviewModule"])
+                    PreviewModuleValue = aux
+                    preview_module_value.set(aux)
+                if 'UVBrightness' in ConfigData:
+                    aux = int(ConfigData["UVBrightness"])
+                    send_arduino_command(CMD_SET_UV_LEVEL, aux)
+                    uv_brightness_value.set(aux)
+                if 'VFD' in ConfigData:
+                    if ConfigData['VFD']:
+                        FrameDetectMode = 'VFD'
+                        disable_canvas(plotter_canvas)
+            if 'CaptureResolution' in ConfigData:
+                valid_resolution_list = camera_resolutions.get_list()
+                selected_resolution = ConfigData["CaptureResolution"]
+                if selected_resolution not in valid_resolution_list:
+                    if selected_resolution + ' *' in valid_resolution_list:
+                        selected_resolution = selected_resolution + ' *'
+                    else:
+                        selected_resolution = valid_resolution_list[2]
+                CaptureResolution = selected_resolution
+                if CaptureResolution == "4056x3040":
+                    max_inactivity_delay = reference_inactivity_delay * 2
+                else:
+                    max_inactivity_delay = reference_inactivity_delay
+                send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
+                logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
+            if 'CapstanDiameter' in ConfigData:
+                CapstanDiameter = ConfigData["CapstanDiameter"]
+                logging.debug(f"Retrieved from config: CapstanDiameter = {CapstanDiameter} ({ConfigData['CapstanDiameter']})")
+                send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter * 10))
+            if 'AutoStopType' in ConfigData:
+                autostop_type.set(ConfigData["AutoStopType"])
+            if 'AutoStopActive' in ConfigData:
+                auto_stop_enabled.set(ConfigData["AutoStopActive"])
+                cmd_set_auto_stop_enabled()
+            # Expert mode options
+            if ExpertMode:
+                if 'ExposureWbAdaptPause' in ConfigData:
+                    ExposureWbAdaptPause = ConfigData["ExposureWbAdaptPause"]
+                    auto_exp_wb_change_pause.set(ExposureWbAdaptPause)
+                    if ExposureWbAdaptPause:
+                        auto_exp_wb_wait_btn.select()
+                    else:
+                        auto_exp_wb_wait_btn.deselect()
+                if 'MatchWaitMargin' in ConfigData:
+                    MatchWaitMarginValue = ConfigData["MatchWaitMargin"]
+                else:
+                    MatchWaitMarginValue = 50
+                aux = int(MatchWaitMarginValue)
+                match_wait_margin_value.set(aux)
+                if 'CaptureStabilizationDelay' in ConfigData:
+                    aux = float(ConfigData["CaptureStabilizationDelay"])
+                    StabilizationDelayValue = round(aux)
+                else:
+                    StabilizationDelayValue = 100
+                stabilization_delay_value.set(StabilizationDelayValue)
+                if 'CurrentExposure' in ConfigData:
+                    aux = ConfigData["CurrentExposure"]
+                    if isinstance(aux, str):
+                        aux = int(float(aux))
+                    manual_exposure_value = aux
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"ExposureTime": int(aux)})
+                    exposure_value.set(aux / 1000)
+                if 'AutoExpEnabled' in ConfigData:
+                    AutoExpEnabled = ConfigData["AutoExpEnabled"]
+                    AE_enabled.set(AutoExpEnabled)
+                    cmd_set_auto_exposure()
+                if 'CurrentAwbAuto' in ConfigData:     # Delete legacy name, replace with new
+                    ConfigData['AutoWbEnabled'] = ConfigData['CurrentAwbAuto']
+                    del ConfigData['CurrentAwbAuto']
+                if 'AutoWbEnabled' in ConfigData:
+                    if isinstance(ConfigData["AutoWbEnabled"], bool):
+                        aux = ConfigData["AutoWbEnabled"]
+                    else:
+                        aux = eval(ConfigData["AutoWbEnabled"])
+                    AutoWbEnabled = aux
+                    AWB_enabled.set(AutoWbEnabled)
+                    cmd_set_auto_wb()
+                # Set initial value of auto_exp_wb_wait_btn, as it depends of two variables
+                if not AutoExpEnabled and not AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = 1
+                elif AutoExpEnabled != AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = 0
+                elif AutoExpEnabled and AutoWbEnabled:
+                    auto_exp_wb_wait_btn.disabled_counter = -1
+                widget_enable(auto_exp_wb_wait_btn, True)
+                widget_enable(auto_exp_wb_wait_btn, False)
+                if 'GainRed' in ConfigData:
+                    aux = float(ConfigData["GainRed"])
+                    wb_red_value.set(round(aux, 1))
+                    manual_wb_red_value = aux
+                if 'GainBlue' in ConfigData:
+                    aux = float(ConfigData["GainBlue"])
+                    wb_blue_value.set(round(aux, 1))
+                    manual_wb_blue_value = aux
+                if not (SimulatedRun or CameraDisabled):
+                    camera_colour_gains = (manual_wb_red_value, manual_wb_blue_value)
+                    camera.set_controls({"ColourGains": camera_colour_gains})
+                # Recover miscellaneous PiCamera2 controls
+                if "AeConstraintMode" in ConfigData:
+                    aux = ConfigData["AeConstraintMode"]
+                    AeConstraintMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[aux]})
+                if "AeMeteringMode" in ConfigData:
+                    aux = ConfigData["AeMeteringMode"]
+                    if aux == "CentreWeighted": # Change on 9th Feb 2025: Legacy name, convert to new name
+                        aux = "CentreWgt"
+                    AeMeteringMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[aux]})
+                if "AeExposureMode" in ConfigData:
+                    aux = ConfigData["AeExposureMode"]
+                    AeExposureMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AeExposureMode": AeExposureMode_dict[aux]})
+                if "AwbMode" in ConfigData:
+                    aux = ConfigData["AwbMode"]
+                    AwbMode_dropdown_selected.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AwbMode": AwbMode_dict[aux]})
+                # Recover frame alignment values
+                if 'MinFrameSteps' in ConfigData:
+                    MinFrameSteps = int(ConfigData["MinFrameSteps"])
+                    StepsPerFrame = MinFrameSteps
+                    steps_per_frame_value.set(MinFrameSteps)
+                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
+                if 'FrameStepsAuto' in ConfigData:     # Delete legacy name, replace with new
+                    ConfigData['AutoFrameStepsEnabled'] = ConfigData['FrameStepsAuto']
+                    del ConfigData['FrameStepsAuto']
+                if 'AutoFrameStepsEnabled' in ConfigData:
+                    AutoFrameStepsEnabled = ConfigData["AutoFrameStepsEnabled"]
+                    auto_framesteps_enabled.set(AutoFrameStepsEnabled)
+                    cmd_steps_per_frame_auto()
+                    if AutoFrameStepsEnabled:
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+                    else:
+                        send_arduino_command(CMD_SET_MIN_FRAME_STEPS, StepsPerFrame)
+                if 'MinFrameStepsS8' in ConfigData:
+                    MinFrameStepsS8 = ConfigData["MinFrameStepsS8"]
+                if 'MinFrameStepsR8' in ConfigData:
+                    MinFrameStepsR8 = ConfigData["MinFrameStepsR8"]
+                if 'FrameFineTune' in ConfigData:
+                    FrameFineTuneValue = ConfigData["FrameFineTune"]
+                    frame_fine_tune_value.set(FrameFineTuneValue)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+                if 'FrameExtraSteps' in ConfigData:
+                    FrameExtraStepsValue = ConfigData["FrameExtraSteps"]
+                    FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
+                    frame_extra_steps_value.set(FrameExtraStepsValue)
+                    send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
+                if 'PTLevelAuto' in ConfigData:     # Delete legacy name, replace with new
+                    ConfigData['AutoPtLevelEnabled'] = ConfigData['PTLevelAuto']
+                    del ConfigData['PTLevelAuto']
+                if 'AutoPtLevelEnabled' in ConfigData:
+                    AutoPtLevelEnabled = ConfigData["AutoPtLevelEnabled"]
+                    auto_pt_level_enabled.set(AutoPtLevelEnabled)
+                    cmd_set_auto_pt_level()
+                    if AutoPtLevelEnabled:
+                        send_arduino_command(CMD_SET_PT_LEVEL, 0)
+                    else:
+                        send_arduino_command(CMD_SET_PT_LEVEL, PtLevelValue)
+                if 'PTLevel' in ConfigData:
+                    PTLevel = int(ConfigData["PTLevel"])
+                    pt_level_value.set(PTLevel)
+                    PtLevelValue = PTLevel
+                    if not AutoPtLevelEnabled:
+                        send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
+                if 'PTLevelS8' in ConfigData:
+                    PTLevelS8 = ConfigData["PTLevelS8"]
+                if 'PTLevelR8' in ConfigData:
+                    PTLevelR8 = ConfigData["PTLevelR8"]
+                if 'ScanSpeed' in ConfigData:
+                    ScanSpeedValue = int(ConfigData["ScanSpeed"])
+                    scan_speed_value.set(ScanSpeedValue)
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
+                if 'AutoFineTuneEnabled' in ConfigData:
+                    AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
+                    auto_fine_tune_enabled.set(AutoFineTuneEnabled)
+                    cmd_set_auto_fine_tune()
+                if 'Brightness' in ConfigData:
+                    aux = ConfigData["Brightness"]
+                    brightness_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"Brightness": aux})
+                if 'Contrast' in ConfigData:
+                    aux = ConfigData["Contrast"]
+                    contrast_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"Contrast": aux})
+                if 'Saturation' in ConfigData:
+                    aux = ConfigData["Saturation"]
+                    saturation_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"Saturation": aux})
+                if 'AnalogueGain' in ConfigData:
+                    aux = ConfigData["AnalogueGain"]
+                    analogue_gain_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"AnalogueGain": aux})
+                if 'ExposureCompensation' in ConfigData:
+                    aux = ConfigData["ExposureCompensation"]
+                    exposure_compensation_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"ExposureValue": aux})
+                if 'SharpnessValue' in ConfigData:
+                    aux = int(ConfigData["SharpnessValue"])  # In case it is stored as string
+                    sharpness_value.set(aux)
+                    if not SimulatedRun and not CameraDisabled:
+                        camera.set_controls({"Sharpness": aux})
+            else:
+                # If expert mode not enabled, activate automated options
+                # (but do not set in session data to keep configuration options)
+                AutoExpEnabled = True
+                AutoWbEnabled = True
+                AutoFrameStepsEnabled = True
+                AutoPtLevelEnabled = True
+                AutoFineTuneEnabled = True
+                FrameFineTuneValue = 20
+                ScanSpeedValue = 5
+                if not SimulatedRun and not CameraDisabled:
+                    camera.set_controls({"AeEnable": AutoExpEnabled})
+                    camera.set_controls({"AwbEnable": AutoWbEnabled})
+                    send_arduino_command(CMD_SET_PT_LEVEL, 0)
+                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
+                    send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
+                    send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
         else:   # If not loading previous session status, restore to default
             ConfigData["NegativeCaptureActive"] = NegativeImage
             ConfigData["FilmType"] = FilmType
@@ -3848,244 +4084,6 @@ def load_session_data_post_init():
             ConfigData["HdrBracketWidth"] = HdrBracketWidth
             ConfigData["HdrBracketShift"] = HdrBracketShift
 
-        if 'CaptureResolution' in ConfigData:
-            valid_resolution_list = camera_resolutions.get_list()
-            selected_resolution = ConfigData["CaptureResolution"]
-            if selected_resolution not in valid_resolution_list:
-                if selected_resolution + ' *' in valid_resolution_list:
-                    selected_resolution = selected_resolution + ' *'
-                else:
-                    selected_resolution = valid_resolution_list[2]
-            CaptureResolution = selected_resolution
-            if CaptureResolution == "4056x3040":
-                max_inactivity_delay = reference_inactivity_delay * 2
-            else:
-                max_inactivity_delay = reference_inactivity_delay
-            send_arduino_command(CMD_SET_STALL_TIME, max_inactivity_delay)
-            logging.debug(f"max_inactivity_delay: {max_inactivity_delay}")
-        if 'CapstanDiameter' in ConfigData:
-            CapstanDiameter = ConfigData["CapstanDiameter"]
-            logging.debug(f"Retrieved from config: CapstanDiameter = {CapstanDiameter} ({ConfigData['CapstanDiameter']})")
-            send_arduino_command(CMD_ADJUST_MIN_FRAME_STEPS, int(CapstanDiameter * 10))
-        if 'AutoStopType' in ConfigData:
-            autostop_type.set(ConfigData["AutoStopType"])
-        if 'AutoStopActive' in ConfigData:
-            auto_stop_enabled.set(ConfigData["AutoStopActive"])
-            cmd_set_auto_stop_enabled()
-        # Experimental mode options
-        if ExperimentalMode:
-            if 'PreviewModule' in ConfigData:
-                aux = int(ConfigData["PreviewModule"])
-                PreviewModuleValue = aux
-                preview_module_value.set(aux)
-            if 'UVBrightness' in ConfigData:
-                aux = int(ConfigData["UVBrightness"])
-                send_arduino_command(CMD_SET_UV_LEVEL, aux)
-                uv_brightness_value.set(aux)
-            if 'VFD' in ConfigData:
-                if ConfigData['VFD']:
-                    FrameDetectMode = 'VFD'
-                    disable_canvas(plotter_canvas)
-        # Expert mode options
-        if ExpertMode:
-            if 'ExposureWbAdaptPause' in ConfigData:
-                ExposureWbAdaptPause = ConfigData["ExposureWbAdaptPause"]
-                auto_exp_wb_change_pause.set(ExposureWbAdaptPause)
-                if ExposureWbAdaptPause:
-                    auto_exp_wb_wait_btn.select()
-                else:
-                    auto_exp_wb_wait_btn.deselect()
-            if 'MatchWaitMargin' in ConfigData:
-                MatchWaitMarginValue = ConfigData["MatchWaitMargin"]
-            else:
-                MatchWaitMarginValue = 50
-            aux = int(MatchWaitMarginValue)
-            match_wait_margin_value.set(aux)
-            if 'CaptureStabilizationDelay' in ConfigData:
-                aux = float(ConfigData["CaptureStabilizationDelay"])
-                StabilizationDelayValue = round(aux)
-            else:
-                StabilizationDelayValue = 100
-            stabilization_delay_value.set(StabilizationDelayValue)
-            if 'CurrentExposure' in ConfigData:
-                aux = ConfigData["CurrentExposure"]
-                if isinstance(aux, str):
-                    aux = int(float(aux))
-                manual_exposure_value = aux
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"ExposureTime": int(aux)})
-                exposure_value.set(aux / 1000)
-            if 'AutoExpEnabled' in ConfigData:
-                AutoExpEnabled = ConfigData["AutoExpEnabled"]
-                AE_enabled.set(AutoExpEnabled)
-                cmd_set_auto_exposure()
-            if 'CurrentAwbAuto' in ConfigData:     # Delete legacy name, replace with new
-                ConfigData['AutoWbEnabled'] = ConfigData['CurrentAwbAuto']
-                del ConfigData['CurrentAwbAuto']
-            if 'AutoWbEnabled' in ConfigData:
-                if isinstance(ConfigData["AutoWbEnabled"], bool):
-                    aux = ConfigData["AutoWbEnabled"]
-                else:
-                    aux = eval(ConfigData["AutoWbEnabled"])
-                AutoWbEnabled = aux
-                AWB_enabled.set(AutoWbEnabled)
-                cmd_set_auto_wb()
-            # Set initial value of auto_exp_wb_wait_btn, as it depends of two variables
-            if not AutoExpEnabled and not AutoWbEnabled:
-                auto_exp_wb_wait_btn.disabled_counter = 1
-            elif AutoExpEnabled != AutoWbEnabled:
-                auto_exp_wb_wait_btn.disabled_counter = 0
-            elif AutoExpEnabled and AutoWbEnabled:
-                auto_exp_wb_wait_btn.disabled_counter = -1
-            widget_enable(auto_exp_wb_wait_btn, True)
-            widget_enable(auto_exp_wb_wait_btn, False)
-            if 'GainRed' in ConfigData:
-                aux = float(ConfigData["GainRed"])
-                wb_red_value.set(round(aux, 1))
-                manual_wb_red_value = aux
-            if 'GainBlue' in ConfigData:
-                aux = float(ConfigData["GainBlue"])
-                wb_blue_value.set(round(aux, 1))
-                manual_wb_blue_value = aux
-            if not (SimulatedRun or CameraDisabled):
-                camera_colour_gains = (manual_wb_red_value, manual_wb_blue_value)
-                camera.set_controls({"ColourGains": camera_colour_gains})
-            # Recover miscellaneous PiCamera2 controls
-            if "AeConstraintMode" in ConfigData:
-                aux = ConfigData["AeConstraintMode"]
-                AeConstraintMode_dropdown_selected.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"AeConstraintMode": AeConstraintMode_dict[aux]})
-            if "AeMeteringMode" in ConfigData:
-                aux = ConfigData["AeMeteringMode"]
-                if aux == "CentreWeighted": # Change on 9th Feb 2025: Legacy name, convert to new name
-                    aux = "CentreWgt"
-                AeMeteringMode_dropdown_selected.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"AeMeteringMode": AeMeteringMode_dict[aux]})
-            if "AeExposureMode" in ConfigData:
-                aux = ConfigData["AeExposureMode"]
-                AeExposureMode_dropdown_selected.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"AeExposureMode": AeExposureMode_dict[aux]})
-            if "AwbMode" in ConfigData:
-                aux = ConfigData["AwbMode"]
-                AwbMode_dropdown_selected.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"AwbMode": AwbMode_dict[aux]})
-            # Recover frame alignment values
-            if 'MinFrameSteps' in ConfigData:
-                MinFrameSteps = int(ConfigData["MinFrameSteps"])
-                StepsPerFrame = MinFrameSteps
-                steps_per_frame_value.set(MinFrameSteps)
-                send_arduino_command(CMD_SET_MIN_FRAME_STEPS, MinFrameSteps)
-            if 'FrameStepsAuto' in ConfigData:     # Delete legacy name, replace with new
-                ConfigData['AutoFrameStepsEnabled'] = ConfigData['FrameStepsAuto']
-                del ConfigData['FrameStepsAuto']
-            if 'AutoFrameStepsEnabled' in ConfigData:
-                AutoFrameStepsEnabled = ConfigData["AutoFrameStepsEnabled"]
-                auto_framesteps_enabled.set(AutoFrameStepsEnabled)
-                cmd_steps_per_frame_auto()
-                if AutoFrameStepsEnabled:
-                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
-                else:
-                    send_arduino_command(CMD_SET_MIN_FRAME_STEPS, StepsPerFrame)
-            if 'MinFrameStepsS8' in ConfigData:
-                MinFrameStepsS8 = ConfigData["MinFrameStepsS8"]
-            if 'MinFrameStepsR8' in ConfigData:
-                MinFrameStepsR8 = ConfigData["MinFrameStepsR8"]
-            if 'FrameFineTune' in ConfigData:
-                FrameFineTuneValue = ConfigData["FrameFineTune"]
-                frame_fine_tune_value.set(FrameFineTuneValue)
-                send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
-            if 'FrameExtraSteps' in ConfigData:
-                FrameExtraStepsValue = ConfigData["FrameExtraSteps"]
-                FrameExtraStepsValue = min(FrameExtraStepsValue, 20)
-                frame_extra_steps_value.set(FrameExtraStepsValue)
-                send_arduino_command(CMD_SET_EXTRA_STEPS, FrameExtraStepsValue)
-            if 'FrameVCenterImageShift' in ConfigData:
-                FrameVCenterImageShift = ConfigData["FrameVCenterImageShift"]
-                frame_vcenter_value.set(FrameVCenterImageShift)
-            if 'FrameVCenterImageShiftS8' in ConfigData:
-                FrameVCenterImageShiftS8 = ConfigData["FrameVCenterImageShiftS8"]
-            if 'FrameVCenterImageShiftR8' in ConfigData:
-                FrameVCenterImageShiftR8 = ConfigData["FrameVCenterImageShiftR8"]
-            if 'PTLevelAuto' in ConfigData:     # Delete legacy name, replace with new
-                ConfigData['AutoPtLevelEnabled'] = ConfigData['PTLevelAuto']
-                del ConfigData['PTLevelAuto']
-            if 'AutoPtLevelEnabled' in ConfigData:
-                AutoPtLevelEnabled = ConfigData["AutoPtLevelEnabled"]
-                auto_pt_level_enabled.set(AutoPtLevelEnabled)
-                cmd_set_auto_pt_level()
-                if AutoPtLevelEnabled:
-                    send_arduino_command(CMD_SET_PT_LEVEL, 0)
-                else:
-                    send_arduino_command(CMD_SET_PT_LEVEL, PtLevelValue)
-            if 'PTLevel' in ConfigData:
-                PTLevel = int(ConfigData["PTLevel"])
-                pt_level_value.set(PTLevel)
-                PtLevelValue = PTLevel
-                if not AutoPtLevelEnabled:
-                    send_arduino_command(CMD_SET_PT_LEVEL, PTLevel)
-            if 'PTLevelS8' in ConfigData:
-                PTLevelS8 = ConfigData["PTLevelS8"]
-            if 'PTLevelR8' in ConfigData:
-                PTLevelR8 = ConfigData["PTLevelR8"]
-            if 'ScanSpeed' in ConfigData:
-                ScanSpeedValue = int(ConfigData["ScanSpeed"])
-                scan_speed_value.set(ScanSpeedValue)
-                send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
-            if 'AutoFineTuneEnabled' in ConfigData:
-                AutoFineTuneEnabled = ConfigData["AutoFineTuneEnabled"]
-                auto_fine_tune_enabled.set(AutoFineTuneEnabled)
-                cmd_set_auto_fine_tune()
-            if 'Brightness' in ConfigData:
-                aux = ConfigData["Brightness"]
-                brightness_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"Brightness": aux})
-            if 'Contrast' in ConfigData:
-                aux = ConfigData["Contrast"]
-                contrast_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"Contrast": aux})
-            if 'Saturation' in ConfigData:
-                aux = ConfigData["Saturation"]
-                saturation_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"Saturation": aux})
-            if 'AnalogueGain' in ConfigData:
-                aux = ConfigData["AnalogueGain"]
-                analogue_gain_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"AnalogueGain": aux})
-            if 'ExposureCompensation' in ConfigData:
-                aux = ConfigData["ExposureCompensation"]
-                exposure_compensation_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"ExposureValue": aux})
-            if 'SharpnessValue' in ConfigData:
-                aux = int(ConfigData["SharpnessValue"])  # In case it is stored as string
-                sharpness_value.set(aux)
-                if not SimulatedRun and not CameraDisabled:
-                    camera.set_controls({"Sharpness": aux})
-        else:
-            # If expert mode not enabled, activate automated options
-            # (but do not set in session data to keep configuration options)
-            AutoExpEnabled = True
-            AutoWbEnabled = True
-            AutoFrameStepsEnabled = True
-            AutoPtLevelEnabled = True
-            AutoFineTuneEnabled = True
-            FrameFineTuneValue = 20
-            ScanSpeedValue = 5
-            if not SimulatedRun and not CameraDisabled:
-                camera.set_controls({"AeEnable": AutoExpEnabled})
-                camera.set_controls({"AwbEnable": AutoWbEnabled})
-                send_arduino_command(CMD_SET_PT_LEVEL, 0)
-                send_arduino_command(CMD_SET_MIN_FRAME_STEPS, 0)
-                send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
-                send_arduino_command(CMD_SET_SCAN_SPEED, ScanSpeedValue)
 
         # Refresh plotter mode in Arduino here since when reading from config I2C has not been enabled yet
         send_arduino_command(CMD_REPORT_PLOTTER_INFO, PlotterEnabled)
@@ -4702,25 +4700,25 @@ def draw_outlined_text(draw, position, text, fill, outline_color, font):
 
 
 # --- New Arrow Drawing Function ---
-def draw_static_arrows(canvas, width, height, shift):
+def draw_static_arrows(canvas, width, height):
     """Draws the static arrows on the canvas."""
     arrow_color = "green"
     arrow_size = 30
 
     # Up arrow
     canvas.create_polygon(
-        width // 2, int(height * 0.10) - shift - arrow_size // 2,
-        width // 2 - arrow_size // 2, int(height * 0.10) - shift + arrow_size // 2,
-        width // 2 + arrow_size // 2, int(height * 0.10) - shift + arrow_size // 2,
+        width // 2, int(height * 0.10) - arrow_size // 2,
+        width // 2 - arrow_size // 2, int(height * 0.10) + arrow_size // 2,
+        width // 2 + arrow_size // 2, int(height * 0.10) + arrow_size // 2,
         fill=arrow_color,
         tag="static_arrows"
     )
 
     # Down arrow
     canvas.create_polygon(
-        width // 2, int(height * 0.90) - shift + arrow_size * 1.5,
-        width // 2 - arrow_size // 2, int(height * 0.90) - shift + arrow_size // 2,
-        width // 2 + arrow_size // 2, int(height * 0.90) - shift + arrow_size // 2,
+        width // 2, int(height * 0.90) + arrow_size // 2,
+        width // 2 - arrow_size // 2, int(height * 0.90) - arrow_size // 2,
+        width // 2 + arrow_size // 2, int(height * 0.90) - arrow_size // 2,
         fill=arrow_color,
         tag="static_arrows"
     )
@@ -4780,19 +4778,18 @@ def cmd_set_frame_vcenter():
         # Finally, add the line and text to the image
         new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
         print(f"pasting image FrameVCenterHoleShift={FrameVCenterHoleShift}, FrameVCenterImageShift={FrameVCenterImageShift}")
-        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift))
+        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
         draw_capture_canvas.image = photo_image
 
         # Draw static arrows (only if they haven't been drawn yet)
         if not hasattr(draw_capture_canvas, "arrows_drawn"):
-            draw_static_arrows(draw_capture_canvas, width, height, FrameVCenterHoleShift)
+            draw_static_arrows(draw_capture_canvas, width, height)
             draw_capture_canvas.arrows_drawn = True  # Set a flag so we don't draw them again
     else:  # Button released, save final value (calculating proportion between previen and real image)
         # First, draw back S8/R8 markers
         display_left_markers()
-        ConfigData["FrameVCenterImageShift"] = FrameVCenterImageShift
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
         # Save image to restore it when done
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=save_canvas_image)
@@ -4812,7 +4809,7 @@ def cmd_frame_vcenter_selection():
     # Arrange image according to user-defined displacement
     width, height = FrameVCenterImage.size
     new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift))
+    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
     photo_image = ImageTk.PhotoImage(new_image)
     draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
     draw_capture_canvas.image = photo_image
