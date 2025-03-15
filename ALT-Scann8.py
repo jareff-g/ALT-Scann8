@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.12.35"
-__date__ = "2025-03-14"
-__version_highlight__ = "Bugfix: Automatic fine tune was adjusted on the wrong direction."
+__version__ = "1.20.00"
+__date__ = "2025-03-15"
+__version_highlight__ = "ALT-Scann8 1.20: Focus in place + Auto Fine-tune"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -791,7 +791,7 @@ def cmd_set_focus_minus():
 
 
 def log_current_session():
-    if CurrentDir != BaseFolder:
+    if CurrentDir != BaseFolder and scan_error_total_frames_counter > 1000: # Only register when more then 1000 frames scanned in a row
         session_file = os.path.join(CurrentDir, "ALT-Scann8.session.txt")  # Log session info
         if not os.path.isfile(session_file):    # If not exists, write header
             with open(session_file, 'a') as f:
@@ -1762,46 +1762,6 @@ def adjust_auto_fine_tune():
         send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
         frame_fine_tune_value.set(FrameFineTuneValue)
     auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
-
-
-def is_frame_centered_grok(img, film_type='S8', threshold=10, slice_width=20):
-    height, width = img.shape[:2]
-    if slice_width > width:
-        raise ValueError("Slice width exceeds image width")
-    stripe = img[:, :slice_width]
-    gray = cv2.cvtColor(stripe, cv2.COLOR_BGR2GRAY)
-    _, binary_img = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    
-    middle = height // 2
-    margin = height * threshold // 100
-    height_profile = np.sum(binary_img, axis=1)
-    
-    # Dynamic thresholds
-    white_thresh = slice_width * 255 * 0.75
-    black_thresh = slice_width * 255 * 0.25
-    white_heights = np.where(height_profile > white_thresh)[0] if film_type == 'S8' else np.where(height_profile < black_thresh)[0]
-    
-    # Contiguous zones
-    min_gap_size = int(height * 0.08)
-    if len(white_heights) > 0:
-        gaps = np.where(np.diff(white_heights) > 1)[0]
-        areas = np.split(white_heights, gaps + 1) if len(gaps) > 0 else [white_heights]
-        areas = [a for a in areas if len(a) > min_gap_size]
-        
-        result = 0
-        bigger = 0
-        for area in areas:
-            if len(area) > bigger:
-                bigger = len(area)
-                result = (area[0] + area[-1]) // 2
-                break
-        
-        if result != 0:
-            if middle - margin <= result <= middle + margin:
-                return True, result - middle if result > middle else -(middle - result)
-            #return False, result - middle if result > middle else -(middle - result)
-            return False, result - middle if result > middle else -(middle - result)
-    return False, -1
 
 
 def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice_width=10):
@@ -6644,7 +6604,7 @@ def main(argv):
             print("  -l <log mode>  Set log level (standard Python values (DEBUG, INFO, WARNING, ERROR)")
             exit()
 
-    if not goanyway:
+    if goanyway:
         print("Work in progress, version not usable yet.")
         tk.messagebox.showerror("WIP", "Work in progress, version not usable yet.")
         return
