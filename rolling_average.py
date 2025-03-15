@@ -14,9 +14,9 @@ __copyright__ = "Copyright 2022¡4, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "RollingAverage"
-__version__ = "1.0.5"
-__date__ = "2025-03-01"
-__version_highlight__ = "Prevent retruning average before 25 samples, also add clear function"
+__version__ = "1.0.7"
+__date__ = "2025-03-10"
+__version_highlight__ = "Bug fix: Allow window size < 25"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -41,7 +41,7 @@ class RollingAverage:
 
 
     def get_average(self):
-        if len(self.window) <= 25:  # Do not start returning averages until at least 25 elements collected
+        if len(self.window) <= 0:  # Return averages as soon as possible
             return None
         return self.sum / len(self.window)
 
