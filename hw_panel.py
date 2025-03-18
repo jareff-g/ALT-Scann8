@@ -65,13 +65,13 @@ class HwPanel():
     hwpanel_num_i2c_add = 4
     hwpanel_current_add = 0 # Round robin counter to poll all MCP23017 chip addresses
 
-    # ALT-Scann8 'buttons'
-    ALT_SCAN_8_START  = 1
-    ALT_SCAN_8_STOP = 2
-    ALT_SCAN_8_FORWARD = 3
-    ALT_SCAN_8_BACKWARD = 4
-    ALT_SCAN_8_FF = 5
-    ALT_SCAN_8_RW = 6
+    # Panel 'buttons'
+    HWPANEL_CALLBACK = 1
+    HWPANEL_START_STOP  = 2
+    HWPANEL_FORWARD = 3
+    HWPANEL_BACKWARD = 4
+    HWPANEL_FF = 5
+    HWPANEL_RW = 6
 
 
     rpi_after = None
@@ -85,86 +85,38 @@ class HwPanel():
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, master_win, i2c, callback):
+    def __init__(self, master_win, callback):
+        print("Entered HwPanel.__init__")
         if not hasattr(self, 'initialized'):
             self.main_win = master_win
-            self.i2c = i2c
             self.AltScan8Callback = callback
-            print(f"master_win: {master_win}, self.main_win: {self.main_win}")
-            self.hwpanel_after = self.main_win.after(10, self.hwpanel_listen_loop)
-            self.rpi_after = self.main_win.after(10, self.rpi_listen_loop)
+            # Use self.AltScan8Callback to call functions on ALT-Scann8 UI
+            print(f"master_win: {master_win}, self.main_win: {self.main_win}, callback: {callback}")
 
-    def hwpanel_listen_loop(self):  # Waits for events from MCP23017 chips
-        try:
-            HwPanelData = self.i2c.read_i2c_block_data(self.hwpanel_first_i2c_add+self.hwpanel_current_add, self.CMD_GET_CNT_STATUS, 5)
-            HwPanelTrigger = HwPanelData[0]
-            HwPanelParam1 = HwPanelData[1] * 256 + HwPanelData[2]
-            HwPanelParam2 = HwPanelData[3] * 256 + HwPanelData[4]  # Sometimes this part arrives as 255, 255, no idea why
-            hwpanel_current_add += 1
-            hwpanel_current_add %= hwpanel_num_i2c_add
-        except IOError as e:
-            HwPanelTrigger = 0
-            # Log error to console
-            # When error is 121, not really an error, means HwPanel has nothing to data available for us
-            if e.errno != 121:
-                logging.warning(
-                    f"Non-critical IOError ({e}) while checking incoming event from HwPanel. Will check again.")
-
-        if HwPanelTrigger == 0:  # Do nothing
-            pass
-        # Code below just an example, to be redefined
-        elif HwPanelTrigger == 1:  # Button 1
-            pass
-        elif HwPanelTrigger == 2:
-            pass
-        elif HwPanelTrigger == 2:
-            pass
-
-        if not self.ExitingApp:
-            self.hwpanel_after = self.main_win.after(10, self.hwpanel_listen_loop)
-
-    def rpi_listen_loop(self):  # Waits for events from Raspberry Pi
-        try:
-            RPiData = self.i2c.read_i2c_block_data(self.rpi_i2c_add, self.CMD_GET_CNT_STATUS, 5)
-            RPiTrigger = RPiData[0]
-            RPiParam1 = RPiData[1] * 256 + RPiData[2]
-            RPiParam2 = RPiData[3] * 256 + RPiData[4]  # Sometimes this part arrives as 255, 255, no idea why
-        except IOError as e:
-            RPiTrigger = 0
-            # Log error to console
-            # When error is 121, not really an error, means RPi has nothing to data available for us
-            if e.errno != 121:
-                logging.warning(
-                    f"Non-critical IOError ({e}) while checking incoming event from RPi. Will check again.")
-
-        if RPiTrigger == 0:  # Do nothing
-            pass
-        # Code below just an sample, to be expanded and adjusted
-        elif RPiTrigger == ALT_SCAN_8_START:  # Button 1
-            pass
-        elif RPiTrigger == ALT_SCAN_8_STOP:
-            pass
-        elif RPiTrigger == ALT_SCAN_8_FORWARD:
-            pass
-        elif RPiTrigger == ALT_SCAN_8_BACKWARD:
-            pass
-        elif RPiTrigger == ALT_SCAN_8_FF:
-            pass
-        elif RPiTrigger == ALT_SCAN_8_RW:
-            pass
-
-        if not self.ExitingApp:
-            self.RPi_after = self.main_win.after(10, self.RPi_listen_loop)
-
-    def ALT_Scann8_init_completed(self):
+    def init_completed(self):
         pass
         # Replace pass statement with whatever you want to do at init time
 
-    def ALT_Scann8_shutdown_started(self):
+    def shutdown_started(self):
         global ExitingApp
         self.ExitingApp = True
         # Add more statements with whatever you want to do at termination time
 
-    def ALT_Scann8_captured_frame(self):
+    def captured_frame(self):
         pass
         # Replace pass statement with whatever you want to do when a frame is captured
+
+    def start_stop_scan(self):
+        self.AltScan8Callback(self.HWPANEL_START_STOP, None)
+
+    def fast_forward(self):
+        self.AltScan8Callback(self.HWPANEL_FF, None)
+
+    def rewind(self):
+        self.AltScan8Callback(self.HWPANEL_RW, None)
+
+    def film_forward(self):
+        self.AltScan8Callback(self.HWPANEL_FORWARD, None)
+
+    def film_backward(self):
+        self.AltScan8Callback(self.HWPANEL_BACKWARD, None)

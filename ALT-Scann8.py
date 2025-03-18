@@ -94,7 +94,8 @@ except Exception as e:
     print(f"Qr import issue: {e}")
     qr_lib_installed = False
 
-hw_panel_installed = False
+hw_panel_installed = True
+hwpanel_callback = None # Callback function for ALT-Scann8 to call hwpanel module
 if hw_panel_installed:
     try:
         from hw_panel import HwPanel
@@ -294,6 +295,14 @@ RSP_REPORT_PLOTTER_INFO = 87
 RSP_SCAN_ENDED = 88
 RSP_FILM_FORWARD_ENDED = 89
 RSP_ADVANCE_FRAME_FRACTION = 90
+
+# Panel 'buttons'
+HWPANEL_CALLBACK = 1
+HWPANEL_START_STOP  = 2
+HWPANEL_FORWARD = 3
+HWPANEL_BACKWARD = 4
+HWPANEL_FF = 5
+HWPANEL_RW = 6
 
 # Options variables
 ExpertMode = True
@@ -588,7 +597,7 @@ def exit_app(do_save):  # Exit Application
 
     # *** ALT-Scann8 shutdown starts ***
     if hw_panel_installed:
-        hw_panel.ALT_Scann8_shutdown_started()
+        hw_panel.shutdown_started()
 
     win.config(cursor="watch")
     win.update()
@@ -2443,7 +2452,7 @@ def capture_single(mode):
 
     # *** ALT-Scann8 capture frame ***
     if hw_panel_installed:
-        hw_panel.ALT_Scann8_captured_frame()
+        hw_panel.captured_frame()
 
     is_dng = FileType == 'dng'
     is_png = FileType == 'png'
@@ -4348,19 +4357,19 @@ def init_logging():
 
 # HwPanel callback function
 # Used to invoke ALT-Scann8 functions from HwPanel extension
-def hw_panel_callback(command):
-    if command == ALT_SCAN_8_START:
+def hw_panel_callback(command, param1=None):
+    global hwpanel_callback
+    if command == HWPANEL_START_STOP:
+        start_scan()
+    elif command == HWPANEL_FORWARD:
+        cmd_advance_movie()
+    elif command == HWPANEL_BACKWARD:
+        cmd_retreat_movie()
+    elif command == HWPANEL_FF:
+        cmd_fast_forward_movie()
         pass
-    elif command == ALT_SCAN_8_STOP:
-        pass
-    elif command == ALT_SCAN_8_FORWARD:
-        pass
-    elif command == ALT_SCAN_8_BACKWARD:
-        pass
-    elif command == ALT_SCAN_8_FF:
-        pass
-    elif command == ALT_SCAN_8_RW:
-        pass
+    elif command == HWPANEL_RW:
+        cmd_rewind_movie()
 
 def tscann8_init():
     global win
@@ -4412,11 +4421,8 @@ def tscann8_init():
     create_main_window()
 
     # Check if hw panel module available
-    if SimulatedRun:
-        hw_panel_installed = False
-
     if hw_panel_installed:
-        hw_panel = HwPanel(win, i2c, hw_panel_callback)
+        hw_panel = HwPanel(win, hw_panel_callback)
     else:
         hw_panel = None
 
@@ -6696,7 +6702,7 @@ def main(argv):
     # *** ALT-Scann8 load complete ***
 
     if hw_panel_installed:
-        hw_panel.ALT_Scann8_init_completed()
+        hw_panel.init_completed()
 
     onesec_periodic_checks()
 
