@@ -1,42 +1,91 @@
-## Join Our Community on Discord
+# ALT-Scann8
 
+ALT-Scann8 is an enhanced user interface and controller for the [T-Scann 8](http://tscann8.torulf.com/index.html) Super 8/Regular 8 film scanner by Torulf Holmström, designed for Raspberry Pi OS.
+
+## Community and Support
+
+### Discord
 [![Discord](https://img.shields.io/badge/Join%20Discord-Chat%20Now-blue.svg)](https://discord.gg/r2UGkH7qg2)
 
-Feel free to join our Discord server to discuss and get support!
+Join our Discord server to chat about ALT-Scann8 and get help!
 
-You can also visit the [wiki](https://github.com/jareff-g/ALT-Scann8/wiki), where you can find a [description of the ALT-Scann UI](https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface), and a [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions) with answers to the most common questions (including [intial set up of the Raspberry Pi](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions#question-1))
+### Wiki
+Check the [ALT-Scann8 Wiki](https://github.com/jareff-g/ALT-Scann8/wiki) for details:
+- [UI Description](https://github.com/jareff-g/ALT-Scann8/wiki/ALT%E2%80%90Scann8:-Description-of-user-interface)
+- [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions), including [Initial Raspberry Pi Setup](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions#question-1)
+- [T-Scann 8 Mods](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods)
 
-# ALT-Scann 8 User Interface
+## ALT-Scann8 User Interface
 
-The application is an alternate user interface for [T-Scann 8](http://tscann8.torulf.com/index.html), the Super8/Regular8 film scanner designed by Torulf Holmström.  It is a fork of the original UI ('T-Scann8-UserInterface v2.1') from Torulf, licensed under a [Creative Commons Attribution-NonCommercial 4.0 International License](http://creativecommons.org/licenses/by-nc/4.0/). ALT-Scann8-UI is licensed under a MIT License by Juan Remirez de Esparza.
+This UI is a fork of Torulf Holmström’s “T-Scann8-UserInterface v2.1” ([CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/)). ALT-Scann8 is licensed under the [MIT License](https://github.com/jareff-g/ALT-Scann8/blob/main/LICENSE) by Juan Remirez de Esparza.
 
-The original intention of this version was to adapt the original code by Torulf Holmström to use the PiCamera2 library, with the objetive of allowing its use with Bullseye 64 bit version, but afterwards some other changes were implemented, including code refactoring and a few additional features. 
+### Purpose
+Originally adapted to support the PiCamera2 library for Bullseye 64-bit Raspberry Pi OS, we’ve expanded it with refactoring and new features.
 
-Some of the changes done over original version:
-- Code refactoring (use of Tkinter instead of Pygame)
-- Reorganization of UI widgets
-- Support of PiCamera2
-- Implement 'post-view' to replace standard preview mode in PiCamera2, which proved too slow and inaccurate compared to PiCamera legacy, not really usable for this kind of project.
-- Support for automatic exposure, with optional adjustable adaptation delay (enabled by default)
-- Support for automatic white balance, with optional adjustable adaptation delay (disabled by default)
-- Support for multi-exposure capture (4 snapshots with different exposures, automatic bracket calculation)
-- Fast-forward added, plus protection blocking FF/Rwnd if film present in filmgate
-- Settings saved when exiting, so that it is easier to continue from the same point if applications need to be restarted
+### Key Enhancements
+- **PiCamera2 Integration**: Full support for Bullseye 64-bit Raspberry Pi OS with modern camera controls.
+- **Tkinter UI**: Lightweight, responsive interface replacing Pygame, with streamlined widget layout.
+- **Post-View Mode**: Fast, custom preview for real-time film alignment, outpacing PiCamera2’s default.
+- **Exposure Flexibility**: Auto-exposure with adjustable delays, multi-exposure capture (up to 5 bracketed shots), and manual overrides.
+- **FrameSync Viewer**: Interactive tool to manually align tricky frames (e.g., overexposed or damaged), with zoom and threshold tweaks.
+- **Misalignment Detection**: Real-time frame error checking (Super 8/Regular 8), with DNG support via rawpy—catches friction-based drift.
+- **Film Transport**: Enhanced fast-forward/rewind with progressive stops and gate protection, plus auto-stop at reel end.
+- **Workflow Persistence**: Auto-saved settings and session data (e.g., frame counts, folders) for seamless restarts.
+- **UI Polish**: Tooltips, resizable fonts, QR code debug aids, and a rolling plotter for PT level tuning.
+- **Stability**: Robust error handling (e.g., disk space, folder issues) and bug fixes for smooth scanning.
 
-# ALT-Scann8-Controller
+## ALT-Scann8 Controller
 
-This is the application handling the Arduino board in the T-Scann 8 film scanner. It is a fork of 'Arduino to card Controll T-Scann 8 v1.61' by Torulf.
+The controller manages the Arduino board, forked from Torulf Holmström’s “Arduino to Card Control T-Scann 8 v1.61.”
 
-The original intention of this version was to add a specific feature to the existing software, but finally some other changes were done, including code refactoring and an extended feature set. 
+### Purpose
+Started to add a feature, it evolved with refactoring and enhancements.
 
-Some of the changes done over original version:
-Added features
-- Code refactoring
-- Fast forward
-- Protection against FF/Rwnd when film is in film gate
-- Improved FF/Rwnd function (progressive stop)
-- Improved outgoing film winding algorithm
+### Key Enhancements
+- **Code Refactor**: Cleaner, maintainable structure for reliability.
+- **Transport Precision**: Fast-forward/rewind with progressive stops and improved winding for consistent tension.
+- **Safety Locks**: Prevents FF/Rewind with film in the gate, plus auto-stop on reel end.
+- **Pi Sync**: Enhanced I2C communication with UI, reporting PT levels and controller version.
+- **Startup Sync**: First-frame alignment now locks in within one frame (vs. up to five).
 
-__Important notes:__ 
-- Always use both ALT-Scann8 modules (UI + Arduino) toghether, do not mix with T-Scann8 original software. At this point in time (October 2023) the interface between both has changed a lot and is no longer compatible.
-- ALT-Scann8 behavior in some areas is not neccesarily the same as T-Scann 8. For better performance, I reccomend to use a pich roller (details in [T-Scann 8 mods page](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods) in the wiki) to help the capstan keep traction. 
+### Important Notes
+- **Compatibility**: Use both ALT-Scann8 UI and Controller together—interface changes (as of October 2023) break compatibility with original T-Scann 8 software.
+- **Performance**: For best results, add a pinch roller (see [T-Scann 8 Mods](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods)) to aid capstan traction.
+
+## Getting Started
+1. **Download**: Get the repo via [ZIP](https://github.com/jareff-g/ALT-Scann8/archive/refs/heads/main.zip) or `git clone https://github.com/jareff-g/ALT-Scann8.git`.
+2. **Python Setup**:
+   - Update your system: `sudo apt update && sudo apt upgrade -y`.
+   - Install required libraries: 
+     ```bash
+     sudo apt install -y python3-opencv python3-numpy python3-pil python3-psutil python3-qrencode python3-smbus python3-picamera2 python3-rawpy
+     ```
+   - Optional for usage reporting: `sudo apt install -y python3-requests`.
+   - Tkinter is included with Python 3.
+3. **Arduino Setup**:
+   - Open `Controller/ALT-Scann8-Controller.ino` in the Arduino IDE.
+   - Compile and upload to your Arduino board.
+4. **Run**: On your Raspberry Pi, execute `python3 ALT-Scann8.py`.
+
+### Usage Reporting
+ALT-Scann8 optionally pings an anonymous usage count (UI+Controller version pair) to track active users and compatibility. Enable it at first run—no personal data collected. See `ALT-Scann8.py` for details.
+
+## Attributions
+
+### Splash Image
+- **Splash Screen**: Generated by Grok, created by xAI. Adds a retro film vibe to startup.
+
+### Python Libraries
+- **Python**: Core language. ([python.org](https://www.python.org/))
+- **OpenCV**: Frame analysis. ([opencv.org](https://opencv.org/))
+- **NumPy**: Array operations. ([numpy.org](https://numpy.org/))
+- **Pillow**: Image processing. ([pillow.readthedocs.io](https://pillow.readthedocs.io/))
+- **Tkinter**: GUI toolkit (built-in). ([docs.python.org/3/library/tkinter.html](https://docs.python.org/3/library/tkinter.html))
+- **psutil**: Resource monitoring. ([github.com/giampaolo/psutil](https://github.com/giampaolo/psutil))
+- **qrcode**: QR codes (via `python3-qrencode`). ([github.com/lincolnloop/python-qrcode](https://github.com/lincolnloop/python-qrcode))
+- **smbus**: I2C for Pi/Arduino. ([pypi.org/project/smbus2/](https://pypi.org/project/smbus2/))
+- **Picamera2**: Frame capture. ([github.com/raspberrypi/picamera2](https://github.com/raspberrypi/picamera2))
+- **rawpy**: DNG processing. ([rawpy.readthedocs.io](https://rawpy.readthedocs.io/))
+
+### Arduino Module
+- **Arduino Core**: Framework and `Wire.h` for I2C, plus C libraries (`stdio.h`, `string.h`, `stdlib.h`). ([arduino.cc](https://www.arduino.cc/))
