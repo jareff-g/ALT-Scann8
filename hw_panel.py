@@ -66,13 +66,12 @@ class HwPanel():
     hwpanel_current_add = 0 # Round robin counter to poll all MCP23017 chip addresses
 
     # Panel 'buttons'
-    HWPANEL_CALLBACK = 1
+    HWPANEL_REGISTER = 1
     HWPANEL_START_STOP  = 2
     HWPANEL_FORWARD = 3
     HWPANEL_BACKWARD = 4
     HWPANEL_FF = 5
     HWPANEL_RW = 6
-
 
     rpi_after = None
     rpi_i2c_add = 17
@@ -91,7 +90,9 @@ class HwPanel():
             self.main_win = master_win
             self.AltScan8Callback = callback
             # Use self.AltScan8Callback to call functions on ALT-Scann8 UI
-            print(f"master_win: {master_win}, self.main_win: {self.main_win}, callback: {callback}")
+            print(f"hwpanel initialized: win={master_win}, self.main_win={self.main_win}, callback={callback}")
+            self.register_to_altscann8()
+            self.initialized = True
 
     def init_completed(self):
         pass
@@ -105,6 +106,9 @@ class HwPanel():
     def captured_frame(self):
         pass
         # Replace pass statement with whatever you want to do when a frame is captured
+
+    def register_to_altscann8(self):
+        self.AltScan8Callback(self.HWPANEL_REGISTER, True)
 
     def start_stop_scan(self):
         self.AltScan8Callback(self.HWPANEL_START_STOP, None)

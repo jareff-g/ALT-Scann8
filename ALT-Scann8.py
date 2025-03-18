@@ -95,7 +95,7 @@ except Exception as e:
     qr_lib_installed = False
 
 hw_panel_installed = True
-hwpanel_callback = None # Callback function for ALT-Scann8 to call hwpanel module
+hwpanel_registered = False
 if hw_panel_installed:
     try:
         from hw_panel import HwPanel
@@ -297,7 +297,7 @@ RSP_FILM_FORWARD_ENDED = 89
 RSP_ADVANCE_FRAME_FRACTION = 90
 
 # Panel 'buttons'
-HWPANEL_CALLBACK = 1
+HWPANEL_REGISTER = 1
 HWPANEL_START_STOP  = 2
 HWPANEL_FORWARD = 3
 HWPANEL_BACKWARD = 4
@@ -4358,8 +4358,11 @@ def init_logging():
 # HwPanel callback function
 # Used to invoke ALT-Scann8 functions from HwPanel extension
 def hw_panel_callback(command, param1=None):
-    global hwpanel_callback
-    if command == HWPANEL_START_STOP:
+    global hwpanel_registered
+    if command == HWPANEL_REGISTER:
+        hwpanel_registered = param1
+        logo_label.config(bg="light blue")
+    elif command == HWPANEL_START_STOP:
         start_scan()
     elif command == HWPANEL_FORWARD:
         cmd_advance_movie()
@@ -5165,6 +5168,7 @@ def create_widgets():
     global capture_info_str
     global vfd_mode_value
     global default_canvas_bg_color
+    global logo_label
 
     # Global value for separations between widgets
     y_pad = 2
