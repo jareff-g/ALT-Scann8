@@ -95,12 +95,13 @@ except Exception as e:
     qr_lib_installed = False
 
 hw_panel_installed = False
-#try:
-#    from hw_panel import HwPanel
-#    hw_panel_installed = True
-#except Exception as e:
-#    print(f"Hw panel import issue: {e}")
-#    hw_panel_installed = False
+if hw_panel_installed:
+    try:
+        from hw_panel import HwPanel
+        hw_panel_installed = True
+    except Exception as e:
+        print(f"Hw panel import issue: {e}")
+        hw_panel_installed = False
 
 import threading
 import queue
@@ -581,6 +582,7 @@ def cmd_app_standard_exit():
 def exit_app(do_save):  # Exit Application
     global win
     global ExitingApp
+    global hw_panel, hw_panel_installed
 
     log_current_session()   # Before exiting, write session data to disk
 
@@ -2327,6 +2329,7 @@ def adjust_hdr_bracket():
 
 def capture_hdr(mode):
     global recalculate_hdr_exp_list, PreviewModuleValue
+    global hw_panel_installed
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -2436,6 +2439,7 @@ def capture_hdr(mode):
 def capture_single(mode):
     global CurrentFrame
     global total_wait_time_save_image, PreviewModuleValue
+    global hw_panel, hw_panel_installed
 
     # *** ALT-Scann8 capture frame ***
     if hw_panel_installed:
@@ -4342,6 +4346,21 @@ def init_logging():
     logging.info("Scan error log file: %s", scan_error_log_fullpath)
     logging.info("Config file: %s", ConfigurationDataFilename)
 
+# HwPanel callback function
+# Used to invoke ALT-Scann8 functions from HwPanel extension
+def hw_panel_callback(command):
+    if command == ALT_SCAN_8_START:
+        pass
+    elif command == ALT_SCAN_8_STOP:
+        pass
+    elif command == ALT_SCAN_8_FORWARD:
+        pass
+    elif command == ALT_SCAN_8_BACKWARD:
+        pass
+    elif command == ALT_SCAN_8_FF:
+        pass
+    elif command == ALT_SCAN_8_RW:
+        pass
 
 def tscann8_init():
     global win
@@ -4397,7 +4416,7 @@ def tscann8_init():
         hw_panel_installed = False
 
     if hw_panel_installed:
-        hw_panel = HwPanel(win, i2c)
+        hw_panel = HwPanel(win, i2c, hw_panel_callback)
     else:
         hw_panel = None
 
@@ -6553,7 +6572,7 @@ def main(argv):
     global FontSize, UIScrollbars
     global WidgetsEnabledWhileScanning
     global DisableToolTips
-    global win
+    global win, hw_panel, hw_panel_installed
     global UserConsent, ConfigData, LastConsentDate
 
     DisableToolTips = False
