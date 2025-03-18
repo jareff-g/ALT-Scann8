@@ -1,3 +1,5 @@
+## Update 15th March 2025: ALT-Scann8 1.20
+New version available in [develop branch](https://github.com/jareff-g/ALT-Scann8/tree/develop). Main changes in [this page](https://github.com/jareff-g/ALT-Scann8/wiki/Recent-Changes)
 ## Join Our Community on Discord
 
 [![Discord](https://img.shields.io/badge/Join%20Discord-Chat%20Now-blue.svg)](https://discord.gg/r2UGkH7qg2)
