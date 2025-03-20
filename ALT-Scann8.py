@@ -4429,7 +4429,7 @@ def hw_panel_callback(command, param1=None):
     elif command == HWPANEL_GET_AUTOSTOP_TIME:
         return frames_to_go_time_str.get()
     elif command == HWPANEL_SET_AUTOSTOP_FRAMES:
-        return frames_to_go_str.get()
+        frames_to_go_str.set(param1)
     elif command == HWPANEL_GET_FILM_TIME:
         return scanned_Images_time_value.get()
     elif command == HWPANEL_GET_FPS:

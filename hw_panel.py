@@ -188,16 +188,19 @@ class HwPanel():
         self.AltScan8Callback(self.HWPANEL_AUTOSTOP_ENABLE, None)
 
     def _autostop_time(self):
-        self.AltScan8Callback(self.HWPANEL_GET_AUTOSTOP_TIME, None)
+        autostop_time = self.AltScan8Callback(self.HWPANEL_GET_AUTOSTOP_TIME, None)
+        # Mariano to do something with this value (display on led alphanumeric panel?)
 
     def _set_frame_counter(self):
-        self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, None)
+        self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, frame_count)
 
     def _set_filmtime(self):
-        self.AltScan8Callback(self.HWPANEL_GET_FILM_TIME, None)
+        tilm_time = self.AltScan8Callback(self.HWPANEL_GET_FILM_TIME, None)
+        # Mariano to do something with this value (display on led alphanumeric panel?)
 
     def _set_fps(self):
-        self.AltScan8Callback(self.HWPANEL_GET_FPS, None)
+        fps = self.AltScan8Callback(self.HWPANEL_GET_FPS, None)
+        # Mariano to do something with this value (display on led alphanumeric panel?)
 
     def _set_film_S8(self):
         self.AltScan8Callback(self.HWPANEL_SET_FILM_S8, None)
