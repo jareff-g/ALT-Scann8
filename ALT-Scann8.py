@@ -114,6 +114,7 @@ if hw_panel_installed:
     try:
         from hw_panel import HwPanel
         hw_panel_installed = True
+        import RPi.GPIO as GPIO
     except Exception as e:
         print(f"Hw panel import issue: {e}")
         hw_panel_installed = False
