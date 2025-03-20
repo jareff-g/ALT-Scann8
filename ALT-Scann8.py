@@ -1618,9 +1618,12 @@ def cmd_rewind_movie():
         # Invoke rewind_loop to continue processing until error or end event
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
-        confirm = tk.messagebox.askyesno(title='Error during rewind',
-                                         message='It seems there is film loaded via filmgate. \
-                                         \r\nAre you sure you want to proceed?')
+        if hw_panel_installed:
+            confirm = hw_panel.film_in_filmgate_warning()
+        else:
+            confirm = tk.messagebox.askyesno(title='Error during rewind',
+                                            message='It seems there is film loaded via filmgate. \
+                                            \r\nAre you sure you want to proceed?')
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
@@ -1677,9 +1680,12 @@ def cmd_fast_forward_movie():
         # Invoke fast_forward_loop a first time when fast-forward starts
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
-        confirm = tk.messagebox.askyesno(title='Error during fast forward',
-                                         message='It seems there is film loaded via filmgate. \
-                                         \r\nAre you sure you want to proceed?')
+        if hw_panel_installed:
+            confirm = hw_panel.film_in_filmgate_warning()
+        else:
+            confirm = tk.messagebox.askyesno(title='Error during fast forward',
+                                            message='It seems there is film loaded via filmgate. \
+                                            \r\nAre you sure you want to proceed?')
         if confirm:
             time.sleep(0.2)
             if not SimulatedRun:
