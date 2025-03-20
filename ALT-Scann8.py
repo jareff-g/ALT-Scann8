@@ -822,6 +822,16 @@ def cmd_set_focus_minus():
                       FocusZoomFactorY)
 
 
+def custom_messagebox_yes_no(title, message):
+    popup = tk.Toplevel()
+    popup.title(title)
+    label = tk.Label(popup, text=message, padx=20, pady=10, wraplength=400)
+    label.pack()
+    button = tk.Button(popup, text='Dismiss', command=popup.destroy)
+    button.pack(pady=5)
+    return popup
+
+
 def log_current_session():
     if CurrentDir != BaseFolder and scan_error_total_frames_counter > 1000: # Only register when more then 1000 frames scanned in a row
         session_file = os.path.join(CurrentDir, "ALT-Scann8.session.txt")  # Log session info
@@ -1597,10 +1607,22 @@ def cmd_retreat_movie():
     global RetreatMovieActive
 
     if not RetreatMovieActive:
-        confirm = tk.messagebox.askyesno(title="Move film back",
-                                        message="This operation requires manually moving the source reel to collect film being moved back. "
-                                        "If you don't, film will probably end up jammed in the film gate."
-                                        "\r\nAre you sure you want to proceed?")
+        if hw_panel_installed:
+            popup_window = custom_messagebox_yes_no(title='Move film back',
+                                            message="This operation requires manually moving the source reel to collect film being moved back. "
+                                            "If you don't, film will probably end up jammed in the film gate. "
+                                            "Are you sure you want to proceed?"
+                                            "\r\n(Please accept using panel physical buttons)")
+            win.update_idletasks()
+            confirm = hw_panel.film_back_warning()
+            if SimulatedRun:
+                time.sleep(5)
+            popup_window.destroy()
+        else:
+            confirm = tk.messagebox.askyesno(title="Move film back",
+                                            message="This operation requires manually moving the source reel to collect film being moved back. "
+                                            "If you don't, film will probably end up jammed in the film gate."
+                                            "\r\nAre you sure you want to proceed?")
         if not confirm:
             return
 
@@ -1640,7 +1662,12 @@ def cmd_rewind_movie():
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
         if hw_panel_installed:
+            popup_window = custom_messagebox_yes_no(title='Error during rewind',
+                                     message='It seems there is film loaded via filmgate. Are you sure you want to proceed?\
+                                     \r\n(Please accept or cancel using panel physical buttons)')
+            win.update_idletasks()
             confirm = hw_panel.film_in_filmgate_warning()
+            popup_window.destroy()
         else:
             confirm = tk.messagebox.askyesno(title='Error during rewind',
                                             message='It seems there is film loaded via filmgate. \
@@ -1702,7 +1729,12 @@ def cmd_fast_forward_movie():
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
         if hw_panel_installed:
+            popup_window = custom_messagebox_yes_no(title='Error during fast forward',
+                                     message='It seems there is film loaded via filmgate. Are you sure you want to proceed?\
+                                     \r\n(Please accept or cancel using panel physical buttons)')
+            win.update_idletasks()
             confirm = hw_panel.film_in_filmgate_warning()
+            popup_window.destroy()
         else:
             confirm = tk.messagebox.askyesno(title='Error during fast forward',
                                             message='It seems there is film loaded via filmgate. \

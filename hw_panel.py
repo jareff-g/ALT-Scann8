@@ -128,9 +128,15 @@ class HwPanel():
         # Replace pass statement with whatever you want to do when a frame is captured
 
     def film_in_filmgate_warning(self):
-        # Mariano: Implement her ewhichever code is required to determine next step usign panel inputs
+        # Mariano: Implement here whichever code is required to determine next step using panel inputs
         # Return 'False' to cancel Rewind/FF operation, 'True' to proceed with it despite the issue
         return False    # By default return cancel
+
+    def film_back_warning(self):
+        # Mariano: Implement here whichever code is required to proceed usign panel inputs
+        # Return 'False' to cancel film move back operation, 'True' to proceed with it
+        return False    # By default return cancel
+
 
     """
     Internal functions: Funciona below this point are to be used internally to hw panel module
