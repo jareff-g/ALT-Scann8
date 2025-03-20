@@ -73,7 +73,21 @@ except ImportError:
     check_disk_space = False
 
 try:
-    import smbus
+    import smbus2
+    print("Using smbus2")
+    SimulatedRun = False
+except ImportError:
+    print("smbus2 not available")        
+    try:
+        import smbus
+        print("Using smbus")        
+        SimulatedRun = False
+    except ImportError:
+        # Global variable to allow basic UI testing on PC (where PiCamera imports should fail)
+        SimulatedRun = True
+        SimulatedArduinoVersion = None
+
+try:
     from picamera2 import Picamera2, Preview
     from libcamera import Transform
     from libcamera import controls
@@ -612,12 +626,12 @@ def cmd_app_standard_exit():
 def exit_app(do_save):  # Exit Application
     global win
     global ExitingApp
-    global hw_panel, hw_panel_installed
+    global hw_panel
 
     log_current_session()   # Before exiting, write session data to disk
 
     # *** ALT-Scann8 shutdown starts ***
-    if hw_panel_installed:
+    if hwpanel_registered:
         hw_panel.shutdown_started()
 
     win.config(cursor="watch")
@@ -1607,7 +1621,7 @@ def cmd_retreat_movie():
     global RetreatMovieActive
 
     if not RetreatMovieActive:
-        if hw_panel_installed:
+        if hwpanel_registered:
             popup_window = custom_messagebox_yes_no(title='Move film back',
                                             message="This operation requires manually moving the source reel to collect film being moved back. "
                                             "If you don't, film will probably end up jammed in the film gate. "
@@ -1661,7 +1675,7 @@ def cmd_rewind_movie():
         # Invoke rewind_loop to continue processing until error or end event
         win.after(5, rewind_loop)
     elif RewindErrorOutstanding:
-        if hw_panel_installed:
+        if hwpanel_registered:
             popup_window = custom_messagebox_yes_no(title='Error during rewind',
                                      message='It seems there is film loaded via filmgate. Are you sure you want to proceed?\
                                      \r\n(Please accept or cancel using panel physical buttons)')
@@ -1728,7 +1742,7 @@ def cmd_fast_forward_movie():
         # Invoke fast_forward_loop a first time when fast-forward starts
         win.after(5, fast_forward_loop)
     elif FastForwardErrorOutstanding:
-        if hw_panel_installed:
+        if hwpanel_registered:
             popup_window = custom_messagebox_yes_no(title='Error during fast forward',
                                      message='It seems there is film loaded via filmgate. Are you sure you want to proceed?\
                                      \r\n(Please accept or cancel using panel physical buttons)')
@@ -2397,7 +2411,6 @@ def adjust_hdr_bracket():
 
 def capture_hdr(mode):
     global recalculate_hdr_exp_list, PreviewModuleValue
-    global hw_panel_installed
 
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
@@ -2507,10 +2520,10 @@ def capture_hdr(mode):
 def capture_single(mode):
     global CurrentFrame
     global total_wait_time_save_image, PreviewModuleValue
-    global hw_panel, hw_panel_installed
+    global hw_panel
 
     # *** ALT-Scann8 capture frame ***
-    if hw_panel_installed:
+    if hwpanel_registered:
         hw_panel.captured_frame()
 
     is_dng = FileType == 'dng'
@@ -4491,7 +4504,7 @@ def tscann8_init():
     global MergeMertens, camera_resolutions
     global active_threads
     global time_save_image, time_preview_display, time_awb, time_autoexp, offset_image
-    global hw_panel, hw_panel_installed
+    global hw_panel
 
     if SimulatedRun:
         logging.info("Not running on Raspberry Pi, simulated run for UI debugging purposes only")
@@ -6688,7 +6701,7 @@ def main(argv):
     global FontSize, UIScrollbars
     global WidgetsEnabledWhileScanning
     global DisableToolTips
-    global win, hw_panel, hw_panel_installed
+    global win, hw_panel
     global UserConsent, ConfigData, LastConsentDate
 
     DisableToolTips = False

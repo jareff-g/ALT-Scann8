@@ -111,7 +111,8 @@ class HwPanel():
             self.AltScan8Callback = callback
             # Use self.AltScan8Callback to call functions on ALT-Scann8 UI
             print(f"hwpanel initialized: win={master_win}, self.main_win={self.main_win}, callback={callback}")
-            self._register_to_altscann8()
+            # Uncomment next line if panel available
+            # self._register_to_altscann8()
             self.initialized = True
 
     def init_completed(self):
