@@ -125,7 +125,7 @@ class HwPanel():
     def film_backward(self):
         self.AltScan8Callback(self.HWPANEL_BACKWARD, None)
 
-    def film_in_filmgate_warning():
+    def film_in_filmgate_warning(self):
         # Mariano: Implement her ewhichever code is required to determine next step usign panel inputs
         # Return 'False' to cancel Rewind/FF operation, 'True' to proceed with it despite the issue
         return False    # By default return cancel
