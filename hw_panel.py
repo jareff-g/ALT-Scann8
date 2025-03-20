@@ -72,6 +72,26 @@ class HwPanel():
     HWPANEL_BACKWARD = 4
     HWPANEL_FF = 5
     HWPANEL_RW = 6
+    HWPANEL_FOCUS_VIEW = 7
+    HWPANEL_ZOOM_VIEW = 8
+    HWPANEL_ZOOM_VIEW_PLUS = 9
+    HWPANEL_ZOOM_VIEW_MINUS = 10
+    HWPANEL_ZOOM_VIEW_RIGHT = 11
+    HWPANEL_ZOOM_VIEW_LEFT = 12
+    HWPANEL_ZOOM_VIEW_UP = 13
+    HWPANEL_ZOOM_VIEW_DOWN = 14
+    HWPANEL_AUTO_EXPOSURE = 15
+    HWPANEL_AUTO_WB = 16
+    HWPANEL_AUTOSTOP_ENABLE = 17
+    HWPANEL_GET_AUTOSTOP_TIME = 18
+    HWPANEL_SET_AUTOSTOP_FRAMES = 19
+    HWPANEL_GET_FILM_TIME = 20
+    HWPANEL_GET_FPS = 21
+    HWPANEL_SET_FILM_S8 = 22
+    HWPANEL_SET_FILM_R8 = 23
+    HWPANEL_SET_EXPOSURE = 24
+    HWPANEL_SET_WB_RED = 25
+    HWPANEL_SET_WB_BLUE = 26
 
     rpi_after = None
     rpi_i2c_add = 17
@@ -91,7 +111,7 @@ class HwPanel():
             self.AltScan8Callback = callback
             # Use self.AltScan8Callback to call functions on ALT-Scann8 UI
             print(f"hwpanel initialized: win={master_win}, self.main_win={self.main_win}, callback={callback}")
-            self.register_to_altscann8()
+            self._register_to_altscann8()
             self.initialized = True
 
     def init_completed(self):
@@ -107,25 +127,90 @@ class HwPanel():
         pass
         # Replace pass statement with whatever you want to do when a frame is captured
 
-    def register_to_altscann8(self):
-        self.AltScan8Callback(self.HWPANEL_REGISTER, True)
-
-    def start_stop_scan(self):
-        self.AltScan8Callback(self.HWPANEL_START_STOP, None)
-
-    def fast_forward(self):
-        self.AltScan8Callback(self.HWPANEL_FF, None)
-
-    def rewind(self):
-        self.AltScan8Callback(self.HWPANEL_RW, None)
-
-    def film_forward(self):
-        self.AltScan8Callback(self.HWPANEL_FORWARD, None)
-
-    def film_backward(self):
-        self.AltScan8Callback(self.HWPANEL_BACKWARD, None)
-
     def film_in_filmgate_warning(self):
         # Mariano: Implement her ewhichever code is required to determine next step usign panel inputs
         # Return 'False' to cancel Rewind/FF operation, 'True' to proceed with it despite the issue
         return False    # By default return cancel
+
+    """
+    Internal functions: Funciona below this point are to be used internally to hw panel module
+    Most of them invoke functionallity in ALT-Scann8
+    """
+    def _register_to_altscann8(self):
+        self.AltScan8Callback(self.HWPANEL_REGISTER, True)
+
+    def _start_stop_scan(self):
+        self.AltScan8Callback(self.HWPANEL_START_STOP, None)
+
+    def _fast_forward(self):
+        self.AltScan8Callback(self.HWPANEL_FF, None)
+
+    def _rewind(self):
+        self.AltScan8Callback(self.HWPANEL_RW, None)
+
+    def _film_forward(self):
+        self.AltScan8Callback(self.HWPANEL_FORWARD, None)
+
+    def _film_backward(self):
+        self.AltScan8Callback(self.HWPANEL_BACKWARD, None)
+
+    def _focus_view(self):
+        self.AltScan8Callback(self.HWPANEL_FOCUS_VIEW, None)
+
+    def _zoom_view(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW, None)
+
+    def _zoom_view_plus(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_PLUS, None)
+
+    def _zoom_view_minus(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_MINUS, None)
+
+    def _zoom_view_right(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_RIGHT, None)
+
+    def _zoom_view_left(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_LEFT, None)
+
+    def _zoom_view_up(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_UP, None)
+
+    def _zoom_view_down(self):
+        self.AltScan8Callback(self.HWPANEL_ZOOM_VIEW_DOWN, None)
+
+    def _auto_exposure(self):
+        self.AltScan8Callback(self.HWPANEL_AUTO_EXPOSURE, None)
+
+    def _auto_white(self):
+        self.AltScan8Callback(self.HWPANEL_AUTO_WB, None)
+
+    def _autoStop_enable(self):
+        self.AltScan8Callback(self.HWPANEL_AUTOSTOP_ENABLE, None)
+
+    def _autostop_time(self):
+        self.AltScan8Callback(self.HWPANEL_GET_AUTOSTOP_TIME, None)
+
+    def _set_frame_counter(self):
+        self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, None)
+
+    def _set_filmtime(self):
+        self.AltScan8Callback(self.HWPANEL_GET_FILM_TIME, None)
+
+    def _set_fps(self):
+        self.AltScan8Callback(self.HWPANEL_GET_FPS, None)
+
+    def _set_film_S8(self):
+        self.AltScan8Callback(self.HWPANEL_SET_FILM_S8, None)
+
+    def _set_film_R8(self):
+        self.AltScan8Callback(self.HWPANEL_SET_FILM_R8, None)
+
+    def _set_exposure(self, exp_value):
+        self.AltScan8Callback(self.HWPANEL_SET_EXPOSURE, exp_value)
+
+    def _set_red(self, red_value):
+        self.AltScan8Callback(self.HWPANEL_SET_WB_RED, red_value)
+
+    def _set_blue(self, blue_value):
+        self.AltScan8Callback(self.HWPANEL_SET_WB_BLUE, blue_value)
+

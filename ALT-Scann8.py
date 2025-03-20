@@ -297,12 +297,33 @@ RSP_FILM_FORWARD_ENDED = 89
 RSP_ADVANCE_FRAME_FRACTION = 90
 
 # Panel 'buttons'
+    # Panel 'buttons'
 HWPANEL_REGISTER = 1
 HWPANEL_START_STOP  = 2
 HWPANEL_FORWARD = 3
 HWPANEL_BACKWARD = 4
 HWPANEL_FF = 5
 HWPANEL_RW = 6
+HWPANEL_FOCUS_VIEW = 7
+HWPANEL_ZOOM_VIEW = 8
+HWPANEL_ZOOM_VIEW_PLUS = 9
+HWPANEL_ZOOM_VIEW_MINUS = 10
+HWPANEL_ZOOM_VIEW_RIGHT = 11
+HWPANEL_ZOOM_VIEW_LEFT = 12
+HWPANEL_ZOOM_VIEW_UP = 13
+HWPANEL_ZOOM_VIEW_DOWN = 14
+HWPANEL_AUTO_EXPOSURE = 15
+HWPANEL_AUTO_WB = 16
+HWPANEL_AUTOSTOP_ENABLE = 17
+HWPANEL_GET_AUTOSTOP_TIME = 18
+HWPANEL_SET_AUTOSTOP_FRAMES = 19
+HWPANEL_GET_FILM_TIME = 20
+HWPANEL_GET_FPS = 21
+HWPANEL_SET_FILM_S8 = 22
+HWPANEL_SET_FILM_R8 = 23
+HWPANEL_SET_EXPOSURE = 24
+HWPANEL_SET_WB_RED = 25
+HWPANEL_SET_WB_BLUE = 26
 
 # Options variables
 ExpertMode = True
@@ -4376,9 +4397,56 @@ def hw_panel_callback(command, param1=None):
         cmd_retreat_movie()
     elif command == HWPANEL_FF:
         cmd_fast_forward_movie()
-        pass
     elif command == HWPANEL_RW:
         cmd_rewind_movie()
+    elif command == HWPANEL_FOCUS_VIEW:
+        real_time_display.set(not RealTimeDisplay)
+        cmd_set_real_time_display()
+    elif command == HWPANEL_ZOOM_VIEW:
+        real_time_zoom.set(not RealTimeZoom)
+        cmd_set_focus_zoom()
+    elif command == HWPANEL_ZOOM_VIEW_PLUS:
+        cmd_set_focus_plus()
+    elif command == HWPANEL_ZOOM_VIEW_MINUS:
+        cmd_set_focus_minus()
+    elif command == HWPANEL_ZOOM_VIEW_RIGHT:
+        cmd_set_focus_right()
+    elif command == HWPANEL_ZOOM_VIEW_LEFT:
+        cmd_set_focus_left()
+    elif command == HWPANEL_ZOOM_VIEW_UP:
+        cmd_set_focus_up()
+    elif command == HWPANEL_ZOOM_VIEW_DOWN:
+        cmd_set_focus_down()
+    elif command == HWPANEL_AUTO_EXPOSURE:
+        AE_enabled.set(not AutoExpEnabled)
+        cmd_set_auto_exposure()
+    elif command == HWPANEL_AUTO_WB:
+        AWB_enabled.set(not AutoWbEnabled)
+        cmd_set_auto_wb()
+    elif command == HWPANEL_AUTOSTOP_ENABLE:
+        auto_stop_enabled.set(not AutoStopEnabled)
+        cmd_set_auto_stop_enabled()
+    elif command == HWPANEL_GET_AUTOSTOP_TIME:
+        return frames_to_go_time_str.get()
+    elif command == HWPANEL_SET_AUTOSTOP_FRAMES:
+        return frames_to_go_str.get()
+    elif command == HWPANEL_GET_FILM_TIME:
+        return scanned_Images_time_value.get()
+    elif command == HWPANEL_GET_FPS:
+        return scanned_Images_fps_value.get()
+    elif command == HWPANEL_SET_FILM_S8:
+        cmd_set_s8()
+    elif command == HWPANEL_SET_FILM_R8:
+        cmd_set_r8()
+    elif command == HWPANEL_SET_EXPOSURE:
+        exposure_value.set(param1)
+        cmd_exposure_selection()
+    elif command == HWPANEL_SET_WB_RED:
+        wb_red_value.set(param1)
+        cmd_wb_red_selection()
+    elif command == HWPANEL_SET_WB_BLUE:
+        wb_blue_value.set(param1)
+        cmd_wb_blue_selection()
 
 def tscann8_init():
     global win
