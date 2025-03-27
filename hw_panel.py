@@ -59,6 +59,7 @@ class HwPanel():
     """
     _instance = None
     ExitingApp = False
+    ActiveCmd = 0
     active = ''
     hwpanel_after = None
     hwpanel_first_i2c_add = 0x20
@@ -92,6 +93,13 @@ class HwPanel():
     HWPANEL_SET_EXPOSURE = 24
     HWPANEL_SET_WB_RED = 25
     HWPANEL_SET_WB_BLUE = 26
+
+    # Active command IDs
+    CMD_SCAN = 1
+    CMD_RWND = 2
+    CMD_FFWD = 3
+    CMD_FORWARD = 4
+    CMD_BACKWARD = 5
 
     rpi_after = None
     rpi_i2c_add = 17
@@ -146,19 +154,52 @@ class HwPanel():
     def _register_to_altscann8(self):
         self.AltScan8Callback(self.HWPANEL_REGISTER, True)
 
+    def _generic_stop(self):
+        if self.ActiveCmd == CMD_SCAN:
+            self._start_stop_scan()
+        elif self.ActiveCmd == CMD_FFWD:
+            self._fast_forward()
+        elif self.ActiveCmd == CMD_RWND:
+            self._rewind()
+        elif self.ActiveCmd == CMD_FORWARD:
+            self._film_forward()
+        elif self.ActiveCmd == CMD_BACKWARD:
+            self._film_backward()
+
+
     def _start_stop_scan(self):
+        if self.ActiveCmd == self.CMD_SCAN:
+            self.ActiveCmd = 0
+        elif self.ActiveCmd == 0:   # Can only transition to CMD_SCAN from zero
+            self.ActiveCmd = self.CMD_SCAN
         self.AltScan8Callback(self.HWPANEL_START_STOP, None)
 
     def _fast_forward(self):
+        if self.ActiveCmd == self.CMD_FFWD:
+            self.ActiveCmd = 0
+        elif self.ActiveCmd == 0:   # Can only transition to CMD_FFWD from zero
+            self.ActiveCmd = self.CMD_FFWD
         self.AltScan8Callback(self.HWPANEL_FF, None)
 
     def _rewind(self):
+        if self.ActiveCmd == self.CMD_RWND:
+            self.ActiveCmd = 0
+        elif self.ActiveCmd == 0:   # Can only transition to CMD_RWND from zero
+            self.ActiveCmd = self.CMD_RWND
         self.AltScan8Callback(self.HWPANEL_RW, None)
 
     def _film_forward(self):
+        if self.ActiveCmd == self.CMD_FORWARD:
+            self.ActiveCmd = 0
+        elif self.ActiveCmd == 0:   # Can only transition to CMD_FORWARD from zero
+            self.ActiveCmd = self.CMD_FORWARD
         self.AltScan8Callback(self.HWPANEL_FORWARD, None)
 
     def _film_backward(self):
+        if self.ActiveCmd == self.CMD_BACKWARD:
+            self.ActiveCmd = 0
+        elif self.ActiveCmd == 0:   # Can only transition to CMD_BACKWARD from zero
+            self.ActiveCmd = self.CMD_BACKWARD
         self.AltScan8Callback(self.HWPANEL_BACKWARD, None)
 
     def _focus_view(self):
