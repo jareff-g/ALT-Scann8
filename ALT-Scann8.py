@@ -110,6 +110,7 @@ except Exception as e:
 
 hw_panel_installed = True
 hwpanel_registered = False
+hwpanel_callback_active = False
 if hw_panel_installed:
     try:
         from hw_panel import HwPanel
@@ -1614,6 +1615,10 @@ def cmd_advance_movie(from_arduino=False):
     if not SimulatedRun and not from_arduino:  # Do not send Arduino command if triggered by Arduino response
         send_arduino_command(CMD_FILM_FORWARD)
 
+    # Tell ha panel about this action
+    if hwpanel_registered:
+        hw_panel.film_forward(AdvanceMovieActive) # True is film forward started, False if stopped
+
     # Enable/Disable related buttons
     except_widget_global_enable([AdvanceMovie_btn], not AdvanceMovieActive)
 
@@ -1652,6 +1657,10 @@ def cmd_retreat_movie():
     # Send instruction to Arduino
     if not SimulatedRun:
         send_arduino_command(CMD_FILM_BACKWARD)
+
+    # Tell ha panel about this action
+    if hwpanel_registered:
+        hw_panel.film_backward(RetreatMovieActive) # True is Film backward started, False if stopped
 
     # Enable/Disable related buttons
     except_widget_global_enable([retreat_movie_btn], not RetreatMovieActive)
@@ -1708,6 +1717,10 @@ def cmd_rewind_movie():
         time.sleep(0.2)
         if not SimulatedRun:
             send_arduino_command(CMD_REWIND)
+
+    # Tell ha panel about this action
+    if hwpanel_registered:
+        hw_panel.rewind(not RewindErrorOutstanding and not RewindEndOutstanding) # True is RWND started, False if stopped
 
     if RewindErrorOutstanding:
         RewindErrorOutstanding = False
@@ -1774,6 +1787,10 @@ def cmd_fast_forward_movie():
         time.sleep(0.2)
         if not SimulatedRun:
             send_arduino_command(CMD_FAST_FORWARD)
+
+    # Tell ha panel about this action
+    if hwpanel_registered:
+        hw_panel.fast_forward(not FastForwardErrorOutstanding and not FastForwardEndOutstanding) # True is FF started, False if stopped
 
     if FastForwardErrorOutstanding:
         FastForwardErrorOutstanding = False
@@ -2992,6 +3009,11 @@ def start_scan():
 
         refresh_qr_code()
 
+        # Tell ha panel about this action
+        if hwpanel_registered:
+            hw_panel.start_stop_scan(not ScanStopRequested) # True is scan started, False if stopped
+
+        # Update remaining time
         # Invoke capture_loop a first time when scan starts
         win.after(5, capture_loop)
 
@@ -4431,7 +4453,10 @@ def init_logging():
 # HwPanel callback function
 # Used to invoke ALT-Scann8 functions from HwPanel extension
 def hw_panel_callback(command, param1=None):
-    global hwpanel_registered
+    global hwpanel_registered, hwpanel_callback_active
+
+    hwpanel_callback_active = True
+
     if command == HWPANEL_REGISTER:
         hwpanel_registered = param1
         logo_label.config(bg="light blue")
@@ -4493,6 +4518,8 @@ def hw_panel_callback(command, param1=None):
     elif command == HWPANEL_SET_WB_BLUE:
         wb_blue_value.set(param1)
         cmd_wb_blue_selection()
+
+    hwpanel_callback_active = False
 
 def tscann8_init():
     global win

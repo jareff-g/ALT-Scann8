@@ -148,7 +148,87 @@ class HwPanel():
 
 
     """
-    Internal functions: Funciona below this point are to be used internally to hw panel module
+    External functions: Funcions below this point are used by ALT-Scann8 to tell he panel when an action has 
+    been triggered from the GUI
+    """
+    def start_stop_scan(self, status):
+        pass
+
+    def fast_forward(self, status):
+        pass
+
+    def rewind(self, status):
+        pass
+
+    def film_forward(self, status):
+        pass
+
+    def film_backward(self, status):
+        pass
+
+    def focus_view(self, status):
+        pass
+
+    def zoom_view(self, status):
+        pass
+
+    def zoom_view_plus(self):
+        pass
+
+    def zoom_view_minus(self):
+        pass
+
+    def zoom_view_right(self):
+        pass
+
+    def zoom_view_left(self):
+        pass
+
+    def zoom_view_up(self):
+        pass
+
+    def zoom_view_down(self):
+        pass
+
+    def auto_exposure(self, status):
+        pass
+
+    def auto_white(self, status):
+        pass
+
+    def autoStop_enable(self, status):
+        pass
+
+    def autostop_time(self, status):
+        pass
+
+    def set_frame_counter(self):
+        pass
+
+    def set_filmtime(self):
+        pass
+
+    def set_fps(self):
+        pass
+
+    def set_film_S8(self):
+        pass
+
+    def set_film_R8(self):
+        pass
+
+    def set_exposure(self, exp_value):
+        pass
+
+    def set_red(self, red_value):
+        pass
+
+    def set_blue(self, blue_value):
+        pass
+
+
+    """
+    Internal functions: Funcions below this point are to be used internally to hw panel module
     Most of them invoke functionallity in ALT-Scann8
     """
     def _register_to_altscann8(self):
