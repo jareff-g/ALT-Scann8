@@ -340,6 +340,7 @@ HWPANEL_SET_FILM_R8 = 23
 HWPANEL_SET_EXPOSURE = 24
 HWPANEL_SET_WB_RED = 25
 HWPANEL_SET_WB_BLUE = 26
+HWPANEL_GET_TOTAL_FRAMES = 27
 
 # Options variables
 ExpertMode = True
@@ -724,6 +725,11 @@ def cmd_set_auto_stop_enabled():
         send_arduino_command(CMD_SET_AUTO_STOP, AutoStopEnabled and autostop_type.get() == 'No_film')
         logging.debug(f"Sent Auto Stop to Arduino: {AutoStopEnabled and autostop_type.get() == 'No_film'}")
     logging.debug(f"Set Auto Stop: {AutoStopEnabled}, {autostop_type.get()}")
+    # Tell ha panel about this action
+    if hwpanel_registered:
+        hw_panel.autoStop_enable(AutoStopEnabled) # True means auto stop is enabled
+        hw_panel.autostop_time(int(frames_to_go_time_str.get()))
+        hw_panel.autostop_frame_counter(int(frames_to_go_str.get()))
 
 
 # Enable/Disable camera zoom to facilitate focus
@@ -4518,6 +4524,9 @@ def hw_panel_callback(command, param1=None):
     elif command == HWPANEL_SET_WB_BLUE:
         wb_blue_value.set(param1)
         cmd_wb_blue_selection()
+    elif command == HWPANEL_GET_TOTAL_FRAMES:
+        return CurrentFrame
+        
 
     hwpanel_callback_active = False
 

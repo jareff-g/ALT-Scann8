@@ -93,6 +93,7 @@ class HwPanel():
     HWPANEL_SET_EXPOSURE = 24
     HWPANEL_SET_WB_RED = 25
     HWPANEL_SET_WB_BLUE = 26
+    HWPANEL_GET_TOTAL_FRAMES = 27
 
     # Active command IDs
     CMD_SCAN = 1
@@ -196,14 +197,19 @@ class HwPanel():
     def auto_white(self, status):
         pass
 
-    def autoStop_enable(self, status):
+    def set_autostop_enable(self, status):
         pass
 
     def autostop_time(self, status):
         pass
 
-    def set_frame_counter(self):
+    def set_autoStop_frame_counter(self, status):
+        global autostop_frame_couter
         pass
+
+    def autostop_type_no_film(self, status):
+        global autostop_type_no_film
+        autostop_type_no_film = status  # If True autotop if no film detected, else autostop if frame countdown reaches zero
 
     def set_filmtime(self):
         pass
@@ -312,15 +318,19 @@ class HwPanel():
     def _auto_white(self):
         self.AltScan8Callback(self.HWPANEL_AUTO_WB, None)
 
-    def _autoStop_enable(self):
+    def _set_autostop_enable(self):
         self.AltScan8Callback(self.HWPANEL_AUTOSTOP_ENABLE, None)
 
     def _autostop_time(self):
-        autostop_time = self.AltScan8Callback(self.HWPANEL_GET_AUTOSTOP_TIME, None)
+        return self.AltScan8Callback(self.HWPANEL_GET_AUTOSTOP_TIME, None)
         # Mariano to do something with this value (display on led alphanumeric panel?)
 
-    def _set_frame_counter(self):
-        self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, frame_count)
+    def _autostop_frames(self):
+        return self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, None)
+        # Mariano to do something with this value (display on led alphanumeric panel?)
+
+    def _set_autoStop_frame_counter(self, status):
+        pass
 
     def _set_filmtime(self):
         tilm_time = self.AltScan8Callback(self.HWPANEL_GET_FILM_TIME, None)
@@ -345,3 +355,6 @@ class HwPanel():
     def _set_blue(self, blue_value):
         self.AltScan8Callback(self.HWPANEL_SET_WB_BLUE, blue_value)
 
+    def _get_total_frames(self):
+        return self.AltScan8Callback(self.HWPANEL_GET_TOTAL_FRAMES, None)
+        # Mariano to do something with this value (display on led alphanumeric panel?)
