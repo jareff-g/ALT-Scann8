@@ -727,7 +727,7 @@ def cmd_set_auto_stop_enabled():
     logging.debug(f"Set Auto Stop: {AutoStopEnabled}, {autostop_type.get()}")
     # Tell ha panel about this action
     if hwpanel_registered:
-        hw_panel.autoStop_enable(AutoStopEnabled) # True means auto stop is enabled
+        hw_panel.set_autoStop_enable(AutoStopEnabled) # True means auto stop is enabled
         hw_panel.autostop_time(int(frames_to_go_time_str.get()))
         hw_panel.autostop_frame_counter(int(frames_to_go_str.get()))
 
@@ -886,6 +886,8 @@ def cmd_set_new_folder():
         try:
             os.mkdir(newly_created_dir)
             CurrentFrame = 0
+            if hwpanel_registered:
+                hw_panel.set_total_frames(CurrentFrame)
             success = True
         except FileExistsError:
             tk.messagebox.showerror("Error", f"Folder {requested_dir} already exists.")
@@ -1466,6 +1468,8 @@ def cmd_set_existing_folder():
     if confirm:
         log_current_session()   # Before cleaning up session data, write it to disk
         CurrentFrame = NewCurrentFrame
+        if hwpanel_registered:
+            hw_panel.set_total_frames(CurrentFrame)
         CurrentDir = NewDir
         scan_error_counter = scan_error_total_frames_counter = 0
         scan_error_counter_value.set(f"0 (0%)")
@@ -3867,6 +3871,8 @@ def load_session_data_post_init():
                 if isinstance(ConfigData["CurrentFrame"], str):
                     ConfigData["CurrentFrame"] = int(ConfigData["CurrentFrame"])
                 CurrentFrame = ConfigData["CurrentFrame"]
+                if hwpanel_registered:
+                    hw_panel.set_total_frames(CurrentFrame)
                 Scanned_Images_number.set(ConfigData["CurrentFrame"])
             if 'FramesToGo' in ConfigData:
                 if ConfigData["FramesToGo"] != -1:

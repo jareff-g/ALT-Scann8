@@ -198,13 +198,18 @@ class HwPanel():
         pass
 
     def set_autostop_enable(self, status):
+        # ALT-Scann8 calls this function when autostop status is changed (status = True means enabled, else disabled)
+        # Replace pass statement below with whichever code is required for panel management
         pass
 
-    def autostop_time(self, status):
+    def autostop_time(self, time_to_go):
+        # ALT-Scann8 calls this function when autostop time is changed
+        # Replace pass statement below with whichever code is required for panel management
         pass
 
-    def set_autoStop_frame_counter(self, status):
-        global autostop_frame_couter
+    def set_autoStop_frame_counter(self, frames_to_go):
+        # ALT-Scann8 calls this function when autostop remaining frames is changed
+        # Replace pass statement below with whichever code is required for panel management
         pass
 
     def autostop_type_no_film(self, status):
@@ -230,6 +235,11 @@ class HwPanel():
         pass
 
     def set_blue(self, blue_value):
+        pass
+
+    def set_total_frames(self, num_frames):
+        # ALT-Scann8 calls this function when processed frames number is changed (num_frames = frames to go)
+        # Replace pass statement below with whichever code is required for panel management
         pass
 
 
