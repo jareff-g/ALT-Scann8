@@ -3019,9 +3019,9 @@ def start_scan():
 
         refresh_qr_code()
 
-        # Tell ha panel about this action
+        # Tell hw panel about this action
         if hwpanel_registered:
-            hw_panel.start_stop_scan(not ScanStopRequested) # True is scan started, False if stopped
+            hw_panel.start_stop_scan(True) # True is scan started, False if stopped
 
         # Update remaining time
         # Invoke capture_loop a first time when scan starts
@@ -3088,6 +3088,9 @@ def capture_loop():
                                       f"Running out of disk space, only {int(available_space_mb)} MB remain. "
                                       "Please delete some files before continuing current scan.")
             disk_space_error_to_notify = False
+        # Tell hw panel about this action
+        if hwpanel_registered:
+            hw_panel.start_stop_scan(False) # True is scan started, False if stopped
     elif ScanOngoing:
         if FrameDetectMode == 'VFD':
             # If we are in Visual Frame Detection mode, we need to:
