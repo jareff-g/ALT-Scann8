@@ -238,7 +238,7 @@ class HwPanel():
         pass
 
     def set_total_frames(self, num_frames):
-        # ALT-Scann8 calls this function when processed frames number is changed (num_frames = frames to go)
+        # ALT-Scann8 calls this function when processed frames number is changed (num_frames = processed frames)
         # Replace pass statement below with whichever code is required for panel management
         pass
 
@@ -368,3 +368,87 @@ class HwPanel():
     def _get_total_frames(self):
         return self.AltScan8Callback(self.HWPANEL_GET_TOTAL_FRAMES, None)
         # Mariano to do something with this value (display on led alphanumeric panel?)
+
+    """
+    Getters and setters requested by Mariano
+    """
+
+    def get_autoexposure(self):
+        global AE_enabled
+        return AE_enabled.get()
+    
+    def set_autoexposure(self, value):
+        global AE_enabled
+        AE_enabled.set(value)
+
+    def get_auto_wb(self):
+        global AWB_enabled
+        return AWB_enabled.get()
+    
+    def set_auto_wb(self, value):
+        global AWB_enabled
+        AWB_enabled.set(value)
+
+    # Get Exposure value: Return value in micro seconds
+    def get_exposure_value(self):
+        global exposure_value
+        return exposure_value.get()
+    
+    # Set Exposure value: Value in micro seconds
+    def set_exposure_value(self, value):
+        global exposure_value
+        exposure_value.set(value)
+
+    # Get WB Red value
+    def get_wb_red(self):
+        global wb_red_value
+        return wb_red_value.get()
+    
+    # Set WB Red value
+    def set_wb_red(self, value):
+        global wb_red_value
+        wb_red_value.set(value)
+
+    # Get WB Blue value
+    def get_wb_blue(self):
+        global wb_blue_value
+        return wb_blue_value.get()
+    
+    # Set WB Blue value
+    def set_wb_blue(self, value):
+        global wb_blue_value
+        wb_blue_value.set(value)
+
+    # Get autostop enabled (boolean)
+    def get_autostop_enabled(self):
+        global auto_stop_enabled
+        return auto_stop_enabled.get()
+    
+    # Set autostop enabled (boolean)
+    def set_autostop_enabled(self, value):
+        global auto_stop_enabled
+        auto_stop_enabled.set(value)
+
+    def get_autostop_frames(self):
+        global frames_to_go_str
+        return frames_to_go_str.get()
+
+    def set_autostop_frames(self, value):
+        global frames_to_go_str
+        frames_to_go_str.set(value) 
+    
+    def get_film_type(self):
+        global FilmType
+        return FilmType
+
+    def set_film_type(self, value):
+        global FilmType
+        if value == 'S8':
+            self.AltScan8Callback(self.HWPANEL_SET_FILM_S8, None)
+        else:
+            self.AltScan8Callback(self.HWPANEL_SET_FILM_R8, None)
+    
+    def get_bad_frames(self):
+        global scan_error_counter
+        return scan_error_counter
+
