@@ -207,7 +207,7 @@ class HwPanel():
         # Replace pass statement below with whichever code is required for panel management
         pass
 
-    def set_autoStop_frame_counter(self, frames_to_go):
+    def set_autostop_frame_counter(self, frames_to_go):
         # ALT-Scann8 calls this function when autostop remaining frames is changed
         # Replace pass statement below with whichever code is required for panel management
         pass
@@ -339,7 +339,7 @@ class HwPanel():
         return self.AltScan8Callback(self.HWPANEL_SET_AUTOSTOP_FRAMES, None)
         # Mariano to do something with this value (display on led alphanumeric panel?)
 
-    def _set_autoStop_frame_counter(self, status):
+    def _set_autostop_frame_counter(self, status):
         pass
 
     def _set_filmtime(self):

@@ -727,7 +727,7 @@ def cmd_set_auto_stop_enabled():
     logging.debug(f"Set Auto Stop: {AutoStopEnabled}, {autostop_type.get()}")
     # Tell ha panel about this action
     if hwpanel_registered:
-        hw_panel.set_autoStop_enable(AutoStopEnabled) # True means auto stop is enabled
+        hw_panel.set_autostop_enable(AutoStopEnabled) # True means auto stop is enabled
         hw_panel.autostop_time(int(frames_to_go_time_str.get()))
         hw_panel.autostop_frame_counter(int(frames_to_go_str.get()))
 
