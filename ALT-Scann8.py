@@ -84,7 +84,6 @@ try:
     SimulatedRun = False
 except ImportError:
     SimulatedRun = True
-    SimulatedArduinoVersion = None
 
 try:
     import qrcode
@@ -137,6 +136,7 @@ BaseFolder = os.environ['HOME']
 CurrentDir = ''
 NewBaseFolder = ''
 saved_locale = locale.getlocale(locale.LC_NUMERIC)   # Save current locale to restore it after displaying preview
+SimulatedArduinoVersion = None
 
 FrameFilenamePattern = "picture-%05d.%s"
 HdrFrameFilenamePattern = "picture-%05d.%1d.%s"  # HDR frames using standard filename (2/12/2023)
