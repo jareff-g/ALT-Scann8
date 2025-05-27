@@ -6579,7 +6579,7 @@ def main(argv):
     goanyway = False
 
     try:
-        opts, args = getopt.getopt(argv, "sexl:phntwf:ba:", ["goanyway"])
+        opts, args = getopt.getopt(argv, "sexdl:phntwf:ba:", ["goanyway"])
     except getopt.GetoptError as e:
         print(f"Invalid command line parameter: {e}")
         return
