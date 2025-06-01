@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.00"
-__date__ = "2025-03-15"
-__version_highlight__ = "ALT-Scann8 1.20: Focus in place + Auto Fine-tune"
+__version__ = "1.20.01"
+__date__ = "2025-06-01"
+__version_highlight__ = "Bugfix: WB settings not appied on start up"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3922,6 +3922,7 @@ def load_session_data_post_init():
                 if not (SimulatedRun or CameraDisabled):
                     camera_colour_gains = (manual_wb_red_value, manual_wb_blue_value)
                     camera.set_controls({"ColourGains": camera_colour_gains})
+                    time.sleep(0.5) # Try 0.1 seconds (100 milliseconds)
                 # Recover miscellaneous PiCamera2 controls
                 if "AeConstraintMode" in ConfigData:
                     aux = ConfigData["AeConstraintMode"]
