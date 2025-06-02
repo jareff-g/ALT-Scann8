@@ -1778,7 +1778,6 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     # Convert to grayscale
     img = cv2.cvtColor(sliced_image, cv2.COLOR_BGR2GRAY)
-    #img = cv2.medianBlur(img, 5)
 
     # Convert to pure black and white (binary image)
     # _, binary_img = cv2.threshold(sliced_image, 220, 255, cv2.THRESH_BINARY)
