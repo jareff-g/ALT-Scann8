@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.02"
+__version__ = "1.20.03"
 __date__ = "2025-06-02"
-__version_highlight__ = "Bugfix: Issues when saving in PNG or DNG format"
+__version_highlight__ = "Bugfix: Various problems with VFD mode: Offset calculation, returned with the wrong sign. No need to be so precise when advancing film"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1751,7 +1751,7 @@ def adjust_auto_fine_tune():
         return
     if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.005:
         return  # Ignore if average offset is less than 0.5% of total height
-    direction = -1 if offset_avg > 0 else 1
+    direction = 1 if offset_avg > 0 else -1
     step = min(10, int(abs(offset_avg)/10)) # big steps for big offsets
     FrameFineTuneValue += int(direction * step)
     if FrameFineTuneValue < 0:
@@ -1831,9 +1831,9 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     if result != 0:
         if result >= middle - margin and result <= middle + margin:
-            return True, -(result - middle) if result > middle else middle - result
+            return True, (result - middle) if result > middle else -(middle - result)
         else:
-            return False, -(result - middle) if result > middle else middle - result
+            return False, (result - middle) if result > middle else -(middle - result)
     return False, -1
 
 
@@ -3008,9 +3008,9 @@ def capture_loop():
                 if offset > 100:
                     steps_to_advance = (offset // pixels_per_step) - 5
                 elif offset > 20:
-                    steps_to_advance = 4
+                    steps_to_advance = 8
                 else:
-                    steps_to_advance = 1
+                    steps_to_advance = 4
                 if vfd_attempts_on_same_frame > 1:
                     logging.debug(f"VFD attempts on same frame {CurrentFrame} = {vfd_attempts_on_same_frame}, offset = {offset}, steps = {steps_to_advance}")
                 if steps_to_advance > 0:
@@ -3022,7 +3022,7 @@ def capture_loop():
                     logging.error(f"VFD: {CurrentFrame} produced no steps to advance ({steps_to_advance}), to be captured as-is.")
             else:
                 NewFrameAvailable = True
-                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) + (offset//pixels_per_step) - 20 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
+                steps_to_next = (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8) - (offset//pixels_per_step) - 20 # Add (or remove) the small ofset allowed by margin when centered, or excess offfset if too far
                 scan_error_total_frames_counter += 1
                 scan_error_counter_value.set(f"{scan_error_counter} ({scan_error_counter*100/scan_error_total_frames_counter:.1f}%)")
                 if centered:
