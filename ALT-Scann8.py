@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.01"
-__date__ = "2025-06-01"
-__version_highlight__ = "Bugfix: WB settings not appied on start up"
+__version__ = "1.20.02"
+__date__ = "2025-06-02"
+__version_highlight__ = "Bugfix: Issues when saving in PNG or DNG format"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2383,7 +2383,7 @@ def capture_hdr(mode):
         else:
             if is_dng or is_png:  # If not using DNG we can still use multithread (if not disabled)
                 # DNG + HDR, save threads not possible due to request conflicting with retrieve metadata
-                request = camera.capture_request(capture_config)
+                request = camera.capture_request()
                 if CurrentFrame % PreviewModuleValue == 0:
                     captured_image = request.make_image('main')
                     # Display preview using thread, not directly
@@ -2450,7 +2450,7 @@ def capture_single(mode):
     curtime = time.time()
     if not DisableThreads:
         if is_dng or is_png:  # Save as request only for DNG captures
-            request = camera.capture_request(capture_config)
+            request = camera.capture_request()
             # For PiCamera2, preview and save to file are handled in asynchronous threads
             if CurrentFrame % PreviewModuleValue == 0:
                 captured_image = request.make_image('main')
@@ -2483,7 +2483,7 @@ def capture_single(mode):
             Scanned_Images_number.set(CurrentFrame)
     else:
         if is_dng or is_png:
-            request = camera.capture_request(capture_config)
+            request = camera.capture_request()
             if CurrentFrame % PreviewModuleValue == 0:
                 captured_image = request.make_image('main')
             else:
