@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.03"
-__date__ = "2025-06-02"
-__version_highlight__ = "Bugfix: Various problems with VFD mode: Offset calculation, returned with the wrong sign. No need to be so precise when advancing film"
+__version__ = "1.20.04"
+__date__ = "2025-06-03"
+__version_highlight__ = "Bugfix: Minor VFS fix - Align is_frame_centered parameters when detecting frame and saving it"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2997,7 +2997,7 @@ def capture_loop():
             # Convert PIL Image to NumPy array (RGB -> BGR for cv2)
             image_np = np.array(sample_image)  # PIL gives RGB by default
             image_bgr = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR
-            centered, offset = is_frame_centered(image_bgr, FilmType, threshold = 0.6, slice_width = 10)
+            centered, offset = is_frame_centered(image_bgr, FilmType, threshold=MisalignedFrameTolerance)
             img_height = sample_image.size[1]
             pixels_per_step = img_height // (FrameStepsS8 if FilmType == 'S8' else FrameStepsR8)   # Height divided by number of steps = pixels per step
             vfd_CurrentFrame_previous = CurrentFrame
