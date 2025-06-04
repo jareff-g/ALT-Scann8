@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.04"
-__date__ = "2025-06-03"
-__version_highlight__ = "Bugfix: Minor VFS fix - Align is_frame_centered parameters when detecting frame and saving it"
+__version__ = "1.20.05"
+__date__ = "2025-06-04"
+__version_highlight__ = "Allow to set a different frame number by double clicking on the number in the UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1415,6 +1415,15 @@ def cmd_set_existing_folder():
 
         folder_frame_target_dir.config(text=CurrentDir)
         ConfigData["CurrentDir"] = str(CurrentDir)
+
+
+def cmd_next_frame(event):
+    global CurrentFrame
+    
+    CurrentFrame = get_last_frame_popup(CurrentFrame)
+    ConfigData["CurrentFrame"] = CurrentFrame
+    Scanned_Images_number.set(ConfigData["CurrentFrame"])
+
 
 
 def cmd_set_auto_wb():
@@ -5555,6 +5564,7 @@ def create_widgets():
                                         font=("Arial", FontSize-2), name='scanned_images_number_label')
     scanned_images_number_label.grid(row=0, column=1, sticky="E")
     as_tooltips.add(scanned_images_number_label, "Number of film frames scanned so far.")
+    scanned_images_number_label.bind("<Double-Button-1>", cmd_next_frame)
 
     scanned_images_fps_label = Label(scanned_images_frame, text="Frames/Sec:", font=("Arial", FontSize-2),
                                  name='scanned_images_fps_label')
