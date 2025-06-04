@@ -882,6 +882,7 @@ def cmd_settings_popup_accept():
     global qr_code_frame
     global CapstanDiameter, capstan_diameter_float
     global ConfigData, BaseFolder, CurrentDir
+    global CurrentFrame, Scanned_Images_number
 
 
     ConfigData["PopupPos"] = options_dlg.geometry()
@@ -1006,11 +1007,15 @@ def cmd_settings_popup_accept():
     else:
         as_tooltips.enable()
 
+    new_frame = options_dlg.start_frame_int.get()
+    if new_frame != CurrentFrame:
+        CurrentFrame = new_frame
+        ConfigData["CurrentFrame"] = str(CurrentFrame)
+        Scanned_Images_number.set(CurrentFrame)
     save_configuration_data_to_disk()
 
     options_dlg.grab_release()
     options_dlg.destroy()
-
 
 def cmd_settings_popup():
     global options_dlg, win
@@ -1122,6 +1127,18 @@ def cmd_settings_popup():
     capstan_diameter_spinbox.pack(side=LEFT)
     capstan_diameter_mm_label = tk.Label(capstan_diameter_frame, text="mm", font=("Arial", FontSize-1))
     capstan_diameter_mm_label.pack(side=LEFT)
+    options_row += 1
+
+    start_frame_label = tk.Label(options_dlg, text="Start Frame:", font=("Arial", FontSize-1))
+    start_frame_label.grid(row=options_row, column=0, sticky="W", padx=(2*FontSize,0))
+    start_frame_frame = Frame(options_dlg)
+    start_frame_frame.grid(row=options_row, column=1, sticky='W')
+    start_frame_int = tk.IntVar(value=int(ConfigData.get("CurrentFrame", "0")))
+    options_dlg.start_frame_int = start_frame_int
+    start_frame_spinbox = DynamicSpinbox(start_frame_frame, width=6, from_=0, to=99999999, textvariable=options_dlg.start_frame_int, increment=1, font=("Arial", FontSize - 1))
+    start_frame_spinbox.pack(side=LEFT)
+    start_frame_unit_label = tk.Label(start_frame_frame, text="frames", font=("Arial", FontSize-1))
+    start_frame_unit_label.pack(side=LEFT)
     options_row += 1
 
     # Capture resolution Dropdown
