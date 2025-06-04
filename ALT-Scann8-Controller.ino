@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.8"
-#define  __date__       "2025-02-27"
-#define  __version_highlight__  "Save scan mode to global var to prevent sending capstan advance message to RPi in PFD mode"
+#define __version__     "1.1.9"
+#define  __date__       "2025-06-04"
+#define  __version_highlight__  "Fix Auto Stop. Increase PT level min variance to 50"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -848,7 +848,7 @@ boolean film_detected(int pt_value)
     min_value = min(min_value, pt_value);
 
     instant_variance = max_value - min_value;
-    if (instant_variance > 30)
+    if (instant_variance > 50)
         return(true);
     else
         return(false);
@@ -878,9 +878,6 @@ int GetLevelPT() {
     // If relevant diff between max/min dinamic it means we have film passing by
     if (CurrentTime > FilmDetectedTime) {
         NoFilmDetected = true;
-    }
-    else if (FilmDetectedTime - CurrentTime > MaxFilmStallTime) { // Overrun: Normalize value
-        FilmDetectedTime = millis() + MaxFilmStallTime;
     }
     else if (film_detected(PT_SignalLevelRead)) {
         FilmDetectedTime = millis() + MaxFilmStallTime;
