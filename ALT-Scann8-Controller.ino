@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.9"
-#define  __date__       "2025-06-04"
-#define  __version_highlight__  "Fix Auto Stop. Increase PT level min variance to 50"
+#define __version__     "1.1.10"
+#define  __date__       "2025-06-06"
+#define  __version_highlight__  "New no film detection, based on traction switch"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -181,7 +181,9 @@ int LastPTLevel = 0;                        // Stores last PT level (stats only)
 
 boolean IsS8 = true;
 
-boolean TractionSwitchActive = true;  // When traction micro-switch is closed
+boolean TractionSwitchActive = false;  // When traction micro-switch is closed
+boolean TractionSwitchActiveLast = false;  // Last value of traction micro-switch, to detect changes
+unsigned long TractionSwitchTimeLimit = 0; // Last time traction switch was active, to detect changes
 
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
@@ -467,6 +469,7 @@ void loop() {
                         }
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
+                        TractionSwitchTimeLimit = millis() + MaxFilmStallTime; // Traction switch last time initialize
                         scan_process_ongoing = true;
                         delay(50);     // Wait for PT to stabilize after switching UV led on
                         collect_timer = scan_collect_timer;
@@ -524,6 +527,7 @@ void loop() {
                         collect_timer = 500;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
+                        TractionSwitchTimeLimit = millis() + MaxFilmStallTime; // Traction switch last time initialize
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         delay(50);
@@ -803,6 +807,10 @@ void CollectOutgoingFilm(void) {
     }
     else {
         TractionSwitchActive = digitalRead(TractionStopPin);
+        if (TractionSwitchActiveLast != TractionSwitchActive) {  // Traction switch changed state
+            TractionSwitchTimeLimit = CurrentTime + MaxFilmStallTime;
+            TractionSwitchActiveLast = TractionSwitchActive;
+        }
         if (!TractionSwitchActive) {  //Motor allowed to turn
             digitalWrite(MotorC_Stepper, LOW);
             digitalWrite(MotorC_Stepper, HIGH);
@@ -876,12 +884,14 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
+    /*
     if (CurrentTime > FilmDetectedTime) {
         NoFilmDetected = true;
     }
     else if (film_detected(PT_SignalLevelRead)) {
         FilmDetectedTime = millis() + MaxFilmStallTime;
     }
+    */
 
     return(PT_SignalLevelRead);
 }
@@ -918,7 +928,8 @@ boolean SlowForward(){
         LastMove = CurrentTime + 400;
     }
     // Check if film still present (auto stop at end of reel)
-    if (AutoStopEnabled && NoFilmDetected) {
+    //if (AutoStopEnabled && NoFilmDetected) {
+    if (AutoStopEnabled && millis() > TractionSwitchTimeLimit) {
         SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
         return(false);
     }
@@ -1070,7 +1081,8 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         // Check if film still present (auto stop at end of reel)
-        if (AutoStopEnabled && NoFilmDetected) {
+        //if (AutoStopEnabled && NoFilmDetected) {
+    if (AutoStopEnabled && millis() > TractionSwitchTimeLimit) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);
         }
