@@ -5411,7 +5411,7 @@ def create_widgets():
         focus_peaking_checkbox.config(selectcolor="pale green")
     focus_peaking_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
                                 pady=y_pad, sticky='NSEW')
-    as_tooltips.add(focus_peaking_checkbox,
+    as_tooltips.add(focus_peaking_checkbox, "Enables or disables visual overlay (red) and numerical Focus assist score.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
