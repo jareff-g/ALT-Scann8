@@ -2023,7 +2023,7 @@ def draw_preview_image(preview_image, curframe, idx):
                 combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
                 preview_image = Image.fromarray(combined_rgb)
             except Exception as e:
-                print(f"[DEBUG] FocusAssist error: {e}")
+                print(f"[DEBUG] Focus assist error: {e}")
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
             # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
             preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
@@ -2194,7 +2194,7 @@ def update_real_time_display():
                     draw_outlined_text(draw, text_position, score_text, fill="yellow", outline_color="black", font=font)
 
                 except Exception as e:
-                    print(f"[DEBUG] RealTime FocusAssist error: {e}")
+                    print(f"[DEBUG] RealTime Focus assist error: {e}")
 
             # Resize image, match canvas size (need to increase a bit to prevent gaps)
             image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)
@@ -5402,7 +5402,7 @@ def create_widgets():
     bottom_area_row += 1
 
     focus_peaking_enabled_var = tk.BooleanVar(value=FocusPeakingEnabled)
-    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus Assist', height=1,
+    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus assist', height=1,
                                             variable=focus_peaking_enabled_var, onvalue=True, offvalue=False,
                                             font=("Arial", FontSize), command=cmd_toggle_focus_peaking,
                                             indicatoron=False, name='focus_peaking_checkbox')
@@ -5411,7 +5411,7 @@ def create_widgets():
         focus_peaking_checkbox.config(selectcolor="pale green")
     focus_peaking_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
                                 pady=y_pad, sticky='NSEW')
-    as_tooltips.add(focus_peaking_checkbox, "Abilita o disabilita l'overlay visivo (rosso) e il punteggio numerico del Focus Assist.")
+    as_tooltips.add(focus_peaking_checkbox,
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
