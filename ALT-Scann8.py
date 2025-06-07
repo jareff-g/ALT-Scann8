@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.05"
-__date__ = "2025-06-04"
-__version_highlight__ = "Allow to set a different frame number by double clicking on the number in the UI"
+__version__ = "1.20.06"
+__date__ = "2025-06-07"
+__version_highlight__ = "New Focus Assist, by Marco Robustini"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -318,6 +318,8 @@ PreviewModuleValue = 1
 NegativeImage = False
 RealTimeDisplay = False
 RealTimeZoom = False
+FocusViewEnabled = False
+FocusPeakingEnabled = False
 AutoStopEnabled = False
 AutoExpEnabled = True
 AutoWbEnabled = False
@@ -715,6 +717,11 @@ def adjust_focus_zoom():
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[2]), int(FocusZoomPosY * ZoomSize[3])) +
                                            (int(FocusZoomFactorX * ZoomSize[2]), int(FocusZoomFactorY * ZoomSize[3]))})
+
+
+def cmd_toggle_focus_peaking():
+    global FocusPeakingEnabled, focus_peaking_enabled_var
+    FocusPeakingEnabled = focus_peaking_enabled_var.get()
 
 
 def cmd_set_focus_up():
@@ -1997,12 +2004,31 @@ def enable_canvas(canvas):
 
 
 def draw_preview_image(preview_image, curframe, idx):
-    global total_wait_time_preview_display, PreviewModuleValue
-    global preview_image_id_to_delete, IsSplashDisplayed
+    global total_wait_time_preview_display, PreviewModuleValue, preview_image_id_to_delete, IsSplashDisplayed, RealTimeZoom, ZoomSize, RealTimeDisplay
+    global preview_image_id_to_delete, IsSplashDisplayed, FocusViewEnabled, ScanOngoing, FocusPeakingEnabled
 
     curtime = time.time()
 
     if curframe % PreviewModuleValue == 0 and preview_image is not None:
+        if FocusViewEnabled and FocusPeakingEnabled and preview_image is not None:
+            try:
+                img_rgb = preview_image.convert("RGB")
+                img_np = np.array(img_rgb)
+                img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                grad = np.sqrt(sobelx ** 2 + sobely ** 2)
+                grad_norm = np.uint8(255 * (grad / (grad.max() + 1e-6)))
+                _, mask = cv2.threshold(grad_norm, 40, 255, cv2.THRESH_BINARY)
+                # Create overlay red on edges
+                overlay = img_bgr.copy()
+                overlay[mask > 0] = [0, 0, 255]
+                combined = cv2.addWeighted(img_bgr, 0.5, overlay, 0.5, 0)
+                combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+                preview_image = Image.fromarray(combined_rgb)
+            except Exception as e:
+                logging.debug(f"Focus assist error: {e}")
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
             # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
             preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
@@ -2129,14 +2155,56 @@ def cmd_set_negative_image():
 
 
 def update_real_time_display():
-    global RealTimeDisplay
-    global ZoomSize
+    global RealTimeDisplay, ZoomSize
     if RealTimeDisplay:
         if not SimulatedRun and not CameraDisabled:
             # Capture frame-by-frame
             image = camera.capture_image()
+            
+            if FocusViewEnabled and FocusPeakingEnabled:
+                try:
+                    # Apply focus peaking overlay to real-time preview
+                    img_np = np.array(image.convert("RGB"))
+                    img_bgr = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+                    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+                    sobelx = cv2.Sobel(gray, cv2.CV_64F, 1, 0, ksize=3)
+                    sobely = cv2.Sobel(gray, cv2.CV_64F, 0, 1, ksize=3)
+                    grad = np.sqrt(sobelx ** 2 + sobely ** 2)
+                    grad_norm = np.uint8(255 * (grad / (grad.max() + 1e-6)))
+
+                    _, mask = cv2.threshold(grad_norm, 40, 255, cv2.THRESH_BINARY)
+                    focus_score = np.mean(grad_norm)
+
+                    overlay = img_bgr.copy()
+                    overlay[mask > 0] = [0, 0, 255]
+                    combined = cv2.addWeighted(img_bgr, 0.5, overlay, 0.5, 0)
+                    combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
+
+                    image = Image.fromarray(combined_rgb).convert("RGBA")
+                    draw = ImageDraw.Draw(image)
+
+                    try:
+                        font = ImageFont.truetype("FreeSans.ttf", 80)
+                    except IOError:
+                        font = ImageFont.load_default(size=80)
+
+                    score_text = f"Focus: {focus_score:.2f}"
+                    text_position = (15, 15)
+
+                    left, top, right, bottom = draw.textbbox(text_position, score_text, font=font)
+                    padding = 10
+                    box_coords = [
+                        (left - padding, top - padding),
+                        (right + padding, bottom + padding)
+                    ]
+                    draw.rectangle(box_coords, fill=(0, 0, 0, 128))
+                    draw_outlined_text(draw, text_position, score_text, fill="yellow", outline_color="black", font=font)
+
+                except Exception as e:
+                    logging.debug(f"RealTime Focus assist error: {e}")
+
             # Resize image, match canvas size (need to increase a bit to prevent gaps)
-            image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)  
+            image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)
             # Convert image to PhotoImage
             photo = ImageTk.PhotoImage(image)
             # Update the canvas image
@@ -2152,15 +2220,33 @@ def update_real_time_display():
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
         draw_capture_canvas.config(highlightthickness=0, highlightbackground=default_canvas_bg_color)
-        
+
+
+def draw_outlined_text(draw, position, text, fill, outline_color, font):
+    #Draws text with a thicker, more prominent outline.
+    x, y = position
+    outline_thickness = 2  # Aumentiamo lo spessore del bordo
+
+    # Draws the outline in all directions (including diagonals)
+    draw.text((x - outline_thickness, y - outline_thickness), text, font=font, fill=outline_color)
+    draw.text((x + outline_thickness, y - outline_thickness), text, font=font, fill=outline_color)
+    draw.text((x - outline_thickness, y + outline_thickness), text, font=font, fill=outline_color)
+    draw.text((x + outline_thickness, y + outline_thickness), text, font=font, fill=outline_color)
+    draw.text((x - outline_thickness, y), text, font=font, fill=outline_color)
+    draw.text((x + outline_thickness, y), text, font=font, fill=outline_color)
+    draw.text((x, y - outline_thickness), text, font=font, fill=outline_color)
+    draw.text((x, y + outline_thickness), text, font=font, fill=outline_color)
+
+    # Draw the main text above the outline
+    draw.text(position, text, font=font, fill=fill)
 
 
 # Function to enable 'real-time' view on main window
 # Not a direct video feed from PiCamera2 but images capured an displayed sequentially
 def cmd_set_real_time_display():
-    global RealTimeDisplay
-    global ZoomSize
+    global RealTimeDisplay, ZoomSize, FocusViewEnabled
     RealTimeDisplay = real_time_display.get()
+    FocusViewEnabled = RealTimeDisplay  # Sync focus peaking with Focus View toggling
     if RealTimeDisplay:
         logging.debug("Real time display on main window enabled")
     else:
@@ -2177,7 +2263,11 @@ def cmd_set_real_time_display():
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
-    widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
+    if not RealTimeDisplay:
+        # This reset logic is still correct and necessary
+        focus_peaking_checkbox.deselect()
+        cmd_toggle_focus_peaking()
+    
     real_time_zoom_checkbox.deselect()
 
 
@@ -3463,7 +3553,7 @@ def widget_list_update(cmd, category_list):
     # First list contains the widgets to enable when boolean key is true
     # Second list contains the widgets to enable when boolean key is false
     dependent_widget_dict = {
-        id_RealTimeDisplay: [[real_time_zoom_checkbox],
+        id_RealTimeDisplay: [[real_time_zoom_checkbox, focus_peaking_checkbox],
                              []],
         id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
                           []],
@@ -4528,8 +4618,7 @@ def cmd_set_auto_exposure():
         if KeepManualValues:
             camera.set_controls({"ExposureTime": int(manual_exposure_value)})
         elif not AutoExpEnabled:
-            camera.set_controls({"ExposureTime": int(int(exposure_value.get() * 1000))})
-
+            camera.set_controls({"ExposureTime": int(exposure_value.get() * 1000)})
 
 def cmd_auto_exp_wb_change_pause_selection():
     global ExposureWbAdaptPause
@@ -5169,6 +5258,7 @@ def create_widgets():
     global capture_info_str
     global vfd_mode_value
     global default_canvas_bg_color
+    global focus_peaking_enabled_var, focus_peaking_checkbox
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5322,6 +5412,21 @@ def create_widgets():
                                                 "useful mainly to focus the film.")
     bottom_area_row += 1
 
+    # Focus Asist checkbox
+    focus_peaking_enabled_var = tk.BooleanVar(value=FocusPeakingEnabled)
+    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus assist', height=1,
+                                            variable=focus_peaking_enabled_var, onvalue=True, offvalue=False,
+                                            font=("Arial", FontSize), command=cmd_toggle_focus_peaking,
+                                            indicatoron=False, name='focus_peaking_checkbox',
+                                            state='disabled')
+    focus_peaking_checkbox.widget_type = "general"
+    if ColorCodedButtons:
+        focus_peaking_checkbox.config(selectcolor="pale green")
+    focus_peaking_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
+                                pady=y_pad, sticky='NSEW')
+    as_tooltips.add(focus_peaking_checkbox, "Enables or disables visual overlay (red) and numerical Focus Assist score.")
+    bottom_area_row += 1
+
     # Activate focus zoom, to facilitate focusing the camera
     real_time_zoom = tk.BooleanVar(value=RealTimeZoom)
     real_time_zoom_checkbox = tk.Checkbutton(top_left_area_frame, text='Zoom view', height=1,
@@ -5465,7 +5570,7 @@ def create_widgets():
         bottom_area_row += 1
 
     # Settings button, at the bottom of top left area
-    options_btn = Button(top_left_area_frame, text="Settings", command=cmd_settings_popup, 
+    options_btn = Button(top_left_area_frame, text="Settings", command=cmd_settings_popup,
                          activebackground='#f0f0f0', relief=RAISED, font=("Arial", FontSize - 1), name='options_btn')
     options_btn.widget_type = "general"
     options_btn.grid(row=bottom_area_row, column=0, columnspan=2, padx=x_pad, pady=y_pad, sticky='NSEW')
@@ -5500,7 +5605,7 @@ def create_widgets():
     top_right_area_row = 0
 
     # Emergency exit (exit without saving)
-    emergency_exit_btn = Button(top_right_area_frame, text="Exit (do not save)", height=1, command=cmd_app_emergency_exit, 
+    emergency_exit_btn = Button(top_right_area_frame, text="Exit (do not save)", height=1, command=cmd_app_emergency_exit,
                                 activebackground='red', activeforeground='white', relief=RAISED,
                                 font=("Arial", FontSize - 1), name='emergency_exit_btn')
     emergency_exit_btn.widget_type = "general"
@@ -5640,7 +5745,7 @@ def create_widgets():
                                          name='autostop_no_film_rb', state='disabled')
     autostop_no_film_rb.grid(row=frames_to_go_area_row, column=0, columnspan = 2, sticky="W") # , padx=(10, 0))
     as_tooltips.add(autostop_no_film_rb, "Stop when film is not detected by PT")
-    
+
     frames_to_go_area_row += 1
 
     autostop_counter_zero_rb = tk.Radiobutton(frames_to_go_frame, text="Count zero", variable=autostop_type,
@@ -6169,7 +6274,7 @@ def create_widgets():
         detect_misaligned_frames_btn.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
         as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
         scan_error_counter_value = tk.StringVar(value="0 (0%)")
-        scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value, 
+        scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value,
                                   font=("Arial", FontSize-1), justify="right", name='scan_error_counter_value_label')
         scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
         as_tooltips.add(scan_error_counter_value_label, "Number of frames missed or misaligned during scanning.")
