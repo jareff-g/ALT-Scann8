@@ -5404,7 +5404,7 @@ def create_widgets():
 
     # Checkbox per il Focus Peaking
     focus_peaking_enabled_var = tk.BooleanVar(value=FocusPeakingEnabled)
-    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus Assist', height=1,
+    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus assist', height=1,
                                             variable=focus_peaking_enabled_var, onvalue=True, offvalue=False,
                                             font=("Arial", FontSize), command=cmd_toggle_focus_peaking,
                                             indicatoron=False, name='focus_peaking_checkbox',
@@ -5414,7 +5414,7 @@ def create_widgets():
         focus_peaking_checkbox.config(selectcolor="pale green")
     focus_peaking_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
                                 pady=y_pad, sticky='NSEW')
-    as_tooltips.add(focus_peaking_checkbox, "Abilita o disabilita l'overlay visivo (rosso) e il punteggio numerico del Focus Assist.")
+    as_tooltips.add(focus_peaking_checkbox, "Enables or disables visual overlay (red) and numerical Focus Assist score.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
