@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.05"
-__date__ = "2025-06-04"
-__version_highlight__ = "Allow to set a different frame number by double clicking on the number in the UI"
+__version__ = "1.20.06"
+__date__ = "2025-06-07"
+__version_highlight__ = "New Focus Assist, by Marco Robustini"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -576,6 +576,7 @@ def cmd_app_emergency_exit():
     if confirm:
         exit_app(False)
 
+
 def cmd_app_standard_exit():
     exit_app(True)
 
@@ -716,9 +717,12 @@ def adjust_focus_zoom():
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"ScalerCrop": (int(FocusZoomPosX * ZoomSize[2]), int(FocusZoomPosY * ZoomSize[3])) +
                                            (int(FocusZoomFactorX * ZoomSize[2]), int(FocusZoomFactorY * ZoomSize[3]))})
+
+
 def cmd_toggle_focus_peaking():
     global FocusPeakingEnabled, focus_peaking_enabled_var
     FocusPeakingEnabled = focus_peaking_enabled_var.get()
+
 
 def cmd_set_focus_up():
     global FocusZoomPosY
@@ -1998,6 +2002,7 @@ def enable_canvas(canvas):
     canvas.bind("<Button-1>", cmd_plotter_canvas_click)
     # Re-enable other relevant events
 
+
 def draw_preview_image(preview_image, curframe, idx):
     global total_wait_time_preview_display, PreviewModuleValue, preview_image_id_to_delete, IsSplashDisplayed, RealTimeZoom, ZoomSize, RealTimeDisplay
     global preview_image_id_to_delete, IsSplashDisplayed, FocusViewEnabled, ScanOngoing, FocusPeakingEnabled
@@ -2023,7 +2028,7 @@ def draw_preview_image(preview_image, curframe, idx):
                 combined_rgb = cv2.cvtColor(combined, cv2.COLOR_BGR2RGB)
                 preview_image = Image.fromarray(combined_rgb)
             except Exception as e:
-                print(f"[DEBUG] Focus assist error: {e}")
+                logging.debug(f"Focus assist error: {e}")
         if idx == 0 or (idx == 2 and not HdrViewX4Active):
             # Resiz image to fit canvas. Need to add 4 to each, otherwise there is a canvas cap not covered.
             preview_image = preview_image.resize((PreviewWidth, PreviewHeight))
@@ -2056,6 +2061,7 @@ def draw_preview_image(preview_image, curframe, idx):
     total_wait_time_preview_display += aux
     time_preview_display.add_value(aux)
     logging.debug("Display preview image: %s ms", str(round((time.time() - curtime) * 1000, 1)))
+
 
 def cmd_capture_single_step():
     if not SimulatedRun:
@@ -2147,8 +2153,9 @@ def cmd_set_negative_image():
     NegativeImage = negative_image.get()
     ConfigData["NegativeCaptureActive"] = NegativeImage
 
+
 def update_real_time_display():
-    global RealTimeDisplay, ZoomSize, FocusViewEnabled, ScanOngoing
+    global RealTimeDisplay, ZoomSize
     if RealTimeDisplay:
         if not SimulatedRun and not CameraDisabled:
             # Capture frame-by-frame
@@ -2194,7 +2201,7 @@ def update_real_time_display():
                     draw_outlined_text(draw, text_position, score_text, fill="yellow", outline_color="black", font=font)
 
                 except Exception as e:
-                    print(f"[DEBUG] RealTime Focus assist error: {e}")
+                    logging.debug(f"RealTime Focus assist error: {e}")
 
             # Resize image, match canvas size (need to increase a bit to prevent gaps)
             image = image.resize((PreviewWidth+4, PreviewHeight+4), Image.LANCZOS)
@@ -2213,13 +2220,14 @@ def update_real_time_display():
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
         draw_capture_canvas.config(highlightthickness=0, highlightbackground=default_canvas_bg_color)
-        
+
+
 def draw_outlined_text(draw, position, text, fill, outline_color, font):
-    """Draws text with a thicker, more prominent outline."""
+    #Draws text with a thicker, more prominent outline.
     x, y = position
     outline_thickness = 2  # Aumentiamo lo spessore del bordo
 
-    # Disegna il contorno in tutte le direzioni (incluse le diagonali)
+    # Draws the outline in all directions (including diagonals)
     draw.text((x - outline_thickness, y - outline_thickness), text, font=font, fill=outline_color)
     draw.text((x + outline_thickness, y - outline_thickness), text, font=font, fill=outline_color)
     draw.text((x - outline_thickness, y + outline_thickness), text, font=font, fill=outline_color)
@@ -2229,8 +2237,9 @@ def draw_outlined_text(draw, position, text, fill, outline_color, font):
     draw.text((x, y - outline_thickness), text, font=font, fill=outline_color)
     draw.text((x, y + outline_thickness), text, font=font, fill=outline_color)
 
-    # Disegna il testo principale sopra il contorno
+    # Draw the main text above the outline
     draw.text(position, text, font=font, fill=fill)
+
 
 # Function to enable 'real-time' view on main window
 # Not a direct video feed from PiCamera2 but images capured an displayed sequentially
@@ -2255,11 +2264,12 @@ def cmd_set_real_time_display():
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
     if not RealTimeDisplay:
-        # Questa logica di reset è ancora corretta e necessaria
+        # This reset logic is still correct and necessary
         focus_peaking_checkbox.deselect()
         cmd_toggle_focus_peaking()
     
     real_time_zoom_checkbox.deselect()
+
 
 def display_left_markers():
     reference_line_canvas.delete("all")
@@ -3000,7 +3010,7 @@ def start_scan():
         refresh_qr_code()
 
         # Invoke capture_loop a first time when scan starts
-        win.after(500, capture_loop)
+        win.after(5, capture_loop)
 
 
 def stop_scan():
@@ -3521,6 +3531,7 @@ def widget_update(cmd, widget, enabled, inc):
         print(f"   *** counter {counter}")
     """
 
+
 # Updates widget disabled counter (to have a consistent state when disabled from various sources)
 def widget_enable(widget, enabled, inc=1):
     widget_update('enable', widget, enabled, inc)
@@ -3529,6 +3540,7 @@ def widget_enable(widget, enabled, inc=1):
 # Refreshes widget atatus based on counter value
 def widget_refresh(widget):
     widget_update('refresh', widget, None, 0)
+
 
 # Enable/diable/refresh widgets in predefined list of dependent widgets
 def widget_list_update(cmd, category_list):
@@ -4589,7 +4601,6 @@ def cmd_set_auto_exposure():
 
     AutoExpEnabled = AE_enabled.get()
     ConfigData["AutoExpEnabled"] = AutoExpEnabled
-
     widget_list_enable([id_AutoExpEnabled])
     exposure_spinbox.config(state='readonly' if AutoExpEnabled else NORMAL)
 
@@ -4599,17 +4610,15 @@ def cmd_set_auto_exposure():
         auto_exposure_btn.config(text="Auto Exp:")
     else:
         if KeepManualValues:
-            exposure_value.set(int(manual_exposure_value / 1000))
+            exposure_value.set(int(manual_exposure_value/1000))
         auto_exposure_btn.config(text="Exposure:")
 
     if not SimulatedRun and not CameraDisabled:
         camera.set_controls({"AeEnable": AutoExpEnabled})
-
         if KeepManualValues:
             camera.set_controls({"ExposureTime": int(manual_exposure_value)})
         elif not AutoExpEnabled:
-            exposure_us = int(exposure_value.get() * 1000)
-            camera.set_controls({"ExposureTime": exposure_us})
+            camera.set_controls({"ExposureTime": int(exposure_value.get() * 1000)})
 
 def cmd_auto_exp_wb_change_pause_selection():
     global ExposureWbAdaptPause
@@ -5176,6 +5185,7 @@ def destroy_widgets(container, delete_top = False):
     if delete_top:
         container.destroy()
 
+
 def create_widgets():
     global win
     global AdvanceMovie_btn
@@ -5402,13 +5412,13 @@ def create_widgets():
                                                 "useful mainly to focus the film.")
     bottom_area_row += 1
 
-    # Checkbox per il Focus Peaking
+    # Focus Asist checkbox
     focus_peaking_enabled_var = tk.BooleanVar(value=FocusPeakingEnabled)
     focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus assist', height=1,
                                             variable=focus_peaking_enabled_var, onvalue=True, offvalue=False,
                                             font=("Arial", FontSize), command=cmd_toggle_focus_peaking,
                                             indicatoron=False, name='focus_peaking_checkbox',
-                                            state='disabled') # <<< MODIFICA 1: Parte disabilitato
+                                            state='disabled')
     focus_peaking_checkbox.widget_type = "general"
     if ColorCodedButtons:
         focus_peaking_checkbox.config(selectcolor="pale green")
@@ -6595,6 +6605,7 @@ def create_widgets():
         cmd_set_r8()
     elif FilmType == "S8":
         cmd_set_s8()
+
 
 def get_controller_version():
     if Controller_Id == 0:
