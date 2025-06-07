@@ -2254,9 +2254,12 @@ def cmd_set_real_time_display():
 
     # Do not allow scan to start while PiCam2 preview is active
     widget_enable(start_btn, not RealTimeDisplay)
-    widget_enable(real_time_zoom_checkbox, RealTimeDisplay)
+    if not RealTimeDisplay:
+        # Questa logica di reset è ancora corretta e necessaria
+        focus_peaking_checkbox.deselect()
+        cmd_toggle_focus_peaking()
+    
     real_time_zoom_checkbox.deselect()
-
 
 def display_left_markers():
     reference_line_canvas.delete("all")
@@ -3518,7 +3521,6 @@ def widget_update(cmd, widget, enabled, inc):
         print(f"   *** counter {counter}")
     """
 
-
 # Updates widget disabled counter (to have a consistent state when disabled from various sources)
 def widget_enable(widget, enabled, inc=1):
     widget_update('enable', widget, enabled, inc)
@@ -3527,7 +3529,6 @@ def widget_enable(widget, enabled, inc=1):
 # Refreshes widget atatus based on counter value
 def widget_refresh(widget):
     widget_update('refresh', widget, None, 0)
-
 
 # Enable/diable/refresh widgets in predefined list of dependent widgets
 def widget_list_update(cmd, category_list):
@@ -3540,7 +3541,7 @@ def widget_list_update(cmd, category_list):
     # First list contains the widgets to enable when boolean key is true
     # Second list contains the widgets to enable when boolean key is false
     dependent_widget_dict = {
-        id_RealTimeDisplay: [[real_time_zoom_checkbox],
+        id_RealTimeDisplay: [[real_time_zoom_checkbox, focus_peaking_checkbox],
                              []],
         id_RealTimeZoom: [[focus_plus_btn, focus_minus_btn, focus_lf_btn, focus_up_btn, focus_dn_btn, focus_rt_btn],
                           []],
@@ -5247,7 +5248,7 @@ def create_widgets():
     global capture_info_str
     global vfd_mode_value
     global default_canvas_bg_color
-    global focus_peaking_enabled_var
+    global focus_peaking_enabled_var, focus_peaking_checkbox
 
     # Global value for separations between widgets
     y_pad = 2
@@ -5287,7 +5288,7 @@ def create_widgets():
     # Menu bar
     menu_bar = tk.Menu(main_container)
     main_container.config(menu=menu_bar)
-
+    
     # File menu
     file_menu = tk.Menu(menu_bar, tearoff=0)
     menu_bar.add_cascade(label="File", menu=file_menu)
@@ -5337,7 +5338,7 @@ def create_widgets():
 
     # Retreat movie button (slow backward through filmgate)
     retreat_movie_btn = Button(top_left_area_frame, text="◀", command=cmd_retreat_movie,
-                                activebackground='#f0f0f0', relief=RAISED,
+                                activebackground='#f0f0f0', relief=RAISED, 
                                 name='retreat_movie_btn')
     retreat_movie_btn.widget_type = "general"
     retreat_movie_btn.grid(row=bottom_area_row, column=bottom_area_column, padx=x_pad, pady=y_pad,
@@ -5347,7 +5348,7 @@ def create_widgets():
 
     # Advance movie button (slow forward through filmgate)
     AdvanceMovie_btn = Button(top_left_area_frame, text="▶", command=cmd_advance_movie,
-                              activebackground='#f0f0f0', relief=RAISED,
+                              activebackground='#f0f0f0', relief=RAISED, 
                               name='advanceMovie_btn')
     AdvanceMovie_btn.widget_type = "general"
     AdvanceMovie_btn.grid(row=bottom_area_row, column=bottom_area_column + 1, padx=x_pad, pady=y_pad,
@@ -5401,17 +5402,19 @@ def create_widgets():
                                                 "useful mainly to focus the film.")
     bottom_area_row += 1
 
+    # Checkbox per il Focus Peaking
     focus_peaking_enabled_var = tk.BooleanVar(value=FocusPeakingEnabled)
-    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus assist', height=1,
+    focus_peaking_checkbox = tk.Checkbutton(top_left_area_frame, text='Focus Assist', height=1,
                                             variable=focus_peaking_enabled_var, onvalue=True, offvalue=False,
                                             font=("Arial", FontSize), command=cmd_toggle_focus_peaking,
-                                            indicatoron=False, name='focus_peaking_checkbox')
+                                            indicatoron=False, name='focus_peaking_checkbox',
+                                            state='disabled') # <<< MODIFICA 1: Parte disabilitato
     focus_peaking_checkbox.widget_type = "general"
     if ColorCodedButtons:
         focus_peaking_checkbox.config(selectcolor="pale green")
     focus_peaking_checkbox.grid(row=bottom_area_row, column=bottom_area_column, columnspan=2, padx=x_pad,
                                 pady=y_pad, sticky='NSEW')
-    as_tooltips.add(focus_peaking_checkbox, "Enables or disables visual overlay (red) and numerical Focus assist score.")
+    as_tooltips.add(focus_peaking_checkbox, "Abilita o disabilita l'overlay visivo (rosso) e il punteggio numerico del Focus Assist.")
     bottom_area_row += 1
 
     # Activate focus zoom, to facilitate focusing the camera
