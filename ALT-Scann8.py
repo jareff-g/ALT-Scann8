@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.06"
+__version__ = "1.20.07"
 __date__ = "2025-06-07"
-__version_highlight__ = "New Focus Assist, by Marco Robustini"
+__version_highlight__ = "Add file save menu. Corrected end of film detection for VFD."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -3489,7 +3489,7 @@ def arduino_listen_loop():  # Waits for Arduino communicated events and dispatch
         FastForwardErrorOutstanding = True
         logging.warning("Received fast forward error from Arduino")
     elif ArduinoTrigger == RSP_REPORT_PLOTTER_INFO:  # Integrated plotter info
-        if PlotterEnabled:
+        if PlotterEnabled and FrameDetectMode == 'PFD':
             UpdatePlotterWindow(ArduinoParam1, ArduinoParam2)
     elif ArduinoTrigger == RSP_FILM_FORWARD_ENDED:
         logging.warning("Received film forward end from Arduino")
@@ -5302,6 +5302,13 @@ def create_widgets():
     # File menu
     file_menu = tk.Menu(menu_bar, tearoff=0)
     menu_bar.add_cascade(label="File", menu=file_menu)
+    file_menu.add_command(
+        label="Save settings to disk",
+        command=lambda: (
+            save_configuration_data_to_disk(),
+            tk.messagebox.showinfo("Save settings", "Settings successfully saved."))
+    )
+    file_menu.add_separator()
     file_menu.add_command(label="Exit", command=lambda: exit_app(True))
 
     # Help Menu
