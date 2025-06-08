@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.10"
-#define  __date__       "2025-06-06"
-#define  __version_highlight__  "New no film detection, based on traction switch"
+#define __version__     "1.1.11"
+#define  __date__       "2025-06-08"
+#define  __version_highlight__  "Fallback to PT based film detection. Problem causing it to not work in VFD mode fixed."
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -183,12 +183,12 @@ boolean IsS8 = true;
 
 boolean TractionSwitchActive = false;  // When traction micro-switch is closed
 boolean TractionSwitchActiveLast = false;  // Last value of traction micro-switch, to detect changes
-unsigned long TractionSwitchTimeLimit = 0; // Last time traction switch was active, to detect changes
 
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
-bool NoFilmDetected = false;
+bool NoFilmDetected = true;
+bool EndScanNotificationSent = false; // Used to avoid sending multiple times the end of scan notification
 int MaxFilmStallTime = 6000;                // Maximum time film can be undetected to report end of reel
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
@@ -424,8 +424,13 @@ void loop() {
                 break;
         }
 
-        if (scan_process_ongoing)
+        if (scan_process_ongoing) {
+            if (AutoStopEnabled && NoFilmDetected && VFD_mode_active && !EndScanNotificationSent) {
+                EndScanNotificationSent = true; // Prevent sending multiple times
+                SendToRPi(RSP_SCAN_ENDED, 0, 0);
+            }
             CollectOutgoingFilm();
+        }
 
         switch (ScanState) {
             case Sts_Idle:
@@ -463,13 +468,13 @@ void loop() {
                         if (!VFD_mode_active) {   // Traditional mode with phototransistor detection, go to dedicated state
                             ScanState = Sts_Scan;
                             StartFrameTime = micros();
-                            FilmDetectedTime = millis() + MaxFilmStallTime;
-                            NoFilmDetected = false;
                             ScanSpeedDelay = OriginalScanSpeedDelay;
                         }
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
-                        TractionSwitchTimeLimit = millis() + MaxFilmStallTime; // Traction switch last time initialize
+                        FilmDetectedTime = millis() + MaxFilmStallTime;
+                        NoFilmDetected = false;
+                        EndScanNotificationSent = false; // Prevent sending multiple times
                         scan_process_ongoing = true;
                         delay(50);     // Wait for PT to stabilize after switching UV led on
                         collect_timer = scan_collect_timer;
@@ -527,7 +532,6 @@ void loop() {
                         collect_timer = 500;
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
-                        TractionSwitchTimeLimit = millis() + MaxFilmStallTime; // Traction switch last time initialize
                         ScanState = Sts_SlowForward;
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
                         delay(50);
@@ -807,10 +811,6 @@ void CollectOutgoingFilm(void) {
     }
     else {
         TractionSwitchActive = digitalRead(TractionStopPin);
-        if (TractionSwitchActiveLast != TractionSwitchActive) {  // Traction switch changed state
-            TractionSwitchTimeLimit = CurrentTime + MaxFilmStallTime;
-            TractionSwitchActiveLast = TractionSwitchActive;
-        }
         if (!TractionSwitchActive) {  //Motor allowed to turn
             digitalWrite(MotorC_Stepper, LOW);
             digitalWrite(MotorC_Stepper, HIGH);
@@ -884,14 +884,10 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    /*
-    if (CurrentTime > FilmDetectedTime) {
+    if (CurrentTime > FilmDetectedTime) 
         NoFilmDetected = true;
-    }
-    else if (film_detected(PT_SignalLevelRead)) {
+    else if (film_detected(PT_SignalLevelRead))
         FilmDetectedTime = millis() + MaxFilmStallTime;
-    }
-    */
 
     return(PT_SignalLevelRead);
 }
@@ -928,8 +924,7 @@ boolean SlowForward(){
         LastMove = CurrentTime + 400;
     }
     // Check if film still present (auto stop at end of reel)
-    //if (AutoStopEnabled && NoFilmDetected) {
-    if (AutoStopEnabled && millis() > TractionSwitchTimeLimit) {
+    if (AutoStopEnabled && NoFilmDetected) {
         SendToRPi(RSP_FILM_FORWARD_ENDED, 0, 0);
         return(false);
     }
@@ -1044,6 +1039,7 @@ void capstan_advance(int steps) {
         if (steps > 20) {
             delay_factor = (x < middle) ? int(middle - x) : (steps - x);
             delayMicroseconds(50 + min(500, delay_factor*10));
+            GetLevelPT();   // No need to know PT level here, but used to detect film end in VFD mode
         }
         else if (steps >= 1)
             delayMicroseconds(100);        
@@ -1081,8 +1077,7 @@ ScanResult scan(int UI_Command) {
         FrameDetected = false;
 
         // Check if film still present (auto stop at end of reel)
-        //if (AutoStopEnabled && NoFilmDetected) {
-    if (AutoStopEnabled && millis() > TractionSwitchTimeLimit) {
+        if (AutoStopEnabled && NoFilmDetected) {
             SendToRPi(RSP_SCAN_ENDED, 0, 0);
             return(SCAN_TERMINATION_REQUESTED);
         }
