@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.5"
-#define  __date__       "2025-02-08"
-#define  __version_highlight__  "Report PT level when passing new frame response (RSP_FRAME_AVAILABLE)"
+#define __version__     "1.1.11"
+#define  __date__       "2025-06-08"
+#define  __version_highlight__  "Fallback to PT based film detection. Problem causing it to not work in VFD mode fixed."
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -74,6 +74,7 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define CMD_SINGLE_STEP 40
 #define CMD_ADVANCE_FRAME 41
 #define CMD_ADVANCE_FRAME_FRACTION 42
+#define CMD_RUN_FILM_COLLECTION 43
 #define CMD_SET_PT_LEVEL 50
 #define CMD_SET_MIN_FRAME_STEPS 52
 #define CMD_SET_FRAME_FINE_TUNE 54
@@ -102,6 +103,8 @@ int UI_Command; // Stores I2C command from Raspberry PI --- ScanFilm=10 / Unlock
 #define RSP_REPORT_PLOTTER_INFO 87
 #define RSP_SCAN_ENDED 88
 #define RSP_FILM_FORWARD_ENDED 89
+#define RSP_ADVANCE_FRAME_FRACTION 90
+
 
 // Immutable values
 #define S8_HEIGHT  4.01
@@ -153,7 +156,7 @@ int PerforationThresholdLevel = PerforationThresholdLevelS8;    // Phototransist
 int PerforationThresholdAutoLevelRatio = 40;  // Percentage between dynamic max/min PT level - Can be changed from 20 to 60
 float CapstanDiameter = 14.3;         // Capstan diameter, to calculate actual number of steps per frame
 int MinFrameStepsR8;                  // R8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
-int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+int MinFrameStepsS8;                  // S8_HEIGHT/((PI*CapstanDiameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP))); // Default value for S8 (286 aprox)
 int MinFrameSteps = MinFrameStepsS8;        // Minimum number of steps to allow frame detection
 int FrameExtraSteps = 0;              // Allow framing adjustment on the fly (manual, automatic would require using CV2 pattern matching, maybe to be checked)
 int FrameDeductSteps = 0;               // Manually force reduction of MinFrameSteps when ExtraFrameSteps is negative
@@ -178,12 +181,14 @@ int LastPTLevel = 0;                        // Stores last PT level (stats only)
 
 boolean IsS8 = true;
 
-boolean TractionSwitchActive = true;  // When traction micro-switch is closed
+boolean TractionSwitchActive = false;  // When traction micro-switch is closed
+boolean TractionSwitchActiveLast = false;  // Last value of traction micro-switch, to detect changes
 
 unsigned long StartFrameTime = 0;           // Time at which we get RPi command to get next frame (stats only)
 unsigned long StartPictureSaveTime = 0;     // Time at which we tell RPi to save current frame (stats only)
 unsigned long FilmDetectedTime = 0;         // Updated when film is present (relevant PT variation)
-bool NoFilmDetected = false;
+bool NoFilmDetected = true;
+bool EndScanNotificationSent = false; // Used to avoid sending multiple times the end of scan notification
 int MaxFilmStallTime = 6000;                // Maximum time film can be undetected to report end of reel
 
 byte BufferForRPi[9];   // 9 byte array to send data to Raspberry Pi over I2C bus
@@ -196,6 +201,8 @@ boolean Frame_Steps_Auto = true;
 boolean IntegratedPlotter = false;
 
 boolean AutoStopEnabled = false;
+
+boolean VFD_mode_active = false;
 
 // Collect outgoing film frequency
 int default_collect_timer = 1000;
@@ -417,8 +424,13 @@ void loop() {
                 break;
         }
 
-        if (scan_process_ongoing)
+        if (scan_process_ongoing) {
+            if (AutoStopEnabled && NoFilmDetected && VFD_mode_active && !EndScanNotificationSent) {
+                EndScanNotificationSent = true; // Prevent sending multiple times
+                SendToRPi(RSP_SCAN_ENDED, 0, 0);
+            }
             CollectOutgoingFilm();
+        }
 
         switch (ScanState) {
             case Sts_Idle:
@@ -452,15 +464,19 @@ void loop() {
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrintStr(">Scan start");
                         digitalWrite(MotorB_Direction, HIGH);    // Set as clockwise, just in case
-                        ScanState = Sts_Scan;
+                        VFD_mode_active = param;
+                        if (!VFD_mode_active) {   // Traditional mode with phototransistor detection, go to dedicated state
+                            ScanState = Sts_Scan;
+                            StartFrameTime = micros();
+                            ScanSpeedDelay = OriginalScanSpeedDelay;
+                        }
                         analogWrite(11, UVLedBrightness); // Turn on UV LED
                         UVLedOn = true;
-                        scan_process_ongoing = true;
-                        delay(50);     // Wait for PT to stabilize after switching UV led on
-                        StartFrameTime = micros();
                         FilmDetectedTime = millis() + MaxFilmStallTime;
                         NoFilmDetected = false;
-                        ScanSpeedDelay = OriginalScanSpeedDelay;
+                        EndScanNotificationSent = false; // Prevent sending multiple times
+                        scan_process_ongoing = true;
+                        delay(50);     // Wait for PT to stabilize after switching UV led on
                         collect_timer = scan_collect_timer;
                         break;
                     case CMD_TERMINATE:  //Exit app
@@ -594,15 +610,18 @@ void loop() {
                             capstan_advance(MinFrameStepsS8);
                         else
                             capstan_advance(MinFrameStepsR8);
-                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
                         break;
                     case CMD_ADVANCE_FRAME_FRACTION:
                         SetReelsAsNeutral(HIGH, LOW, LOW);
                         DebugPrint(">Advance frame", param);
-                        // Parameter validation (can be 5 or 20, but we allow a bit more). Mainly to avoid crazy values
-                        if (param >=1 and param <= 40)
+                        // Parameter validation: Can be 5 or 20 for manual scan, allow 400 for VFD)
+                        if (param >=1 and param <= 400)
                             capstan_advance(param);
-                        SetReelsAsNeutral(HIGH, HIGH, HIGH);
+                        break;
+                    case CMD_RUN_FILM_COLLECTION:   // Used by manual scan
+                        SetReelsAsNeutral(HIGH, LOW, LOW);
+                        DebugPrint(">Collect film", param);
+                        CollectOutgoingFilmNow();
                         break;
                 }
                 break;
@@ -700,7 +719,7 @@ void loop() {
 
 void AdjustMinFrameStepsFromCapstanDiameter(float diameter) {
     MinFrameStepsR8 = R8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for R8 (236 aprox)
-    MinFrameStepsS8 = S8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));; // Default value for S8 (286 aprox)
+    MinFrameStepsS8 = S8_HEIGHT/((PI*diameter)/(360/(NEMA_STEP_DEGREES/NEMA_MICROSTEPS_IN_STEP)));  // Default value for S8 (286 aprox)
 }
 
 void SetReelsAsNeutral(boolean ReelA, boolean ReelB, boolean ReelC) {
@@ -728,7 +747,7 @@ boolean RewindFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            SetReelsAsNeutral(HIGH, LOW, LOW);
+            ///SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_REWIND_ENDED, 0, 0);
         }
@@ -762,7 +781,7 @@ boolean FastForwardFilm(int UI_Command) {
         else {
             retvalue = false;
             stopping = false;
-            SetReelsAsNeutral(HIGH, LOW, LOW);
+            ///SetReelsAsNeutral(HIGH, LOW, LOW);
             delay (100);
             SendToRPi(RSP_FAST_FORWARD_ENDED, 0, 0);
         }
@@ -784,8 +803,6 @@ boolean FastForwardFilm(int UI_Command) {
 // (https://www.thingiverse.com/thing:5541340) are required. Without them (specially without pinch roller)
 // tension might not be enough for the capstan to pull the film.
 void CollectOutgoingFilm(void) {
-    static boolean CollectOngoing = true;
-
     static unsigned long TimeToCollect = 0;
     unsigned long CurrentTime = millis();
 
@@ -807,6 +824,20 @@ void CollectOutgoingFilm(void) {
     }
 }
 
+// Function required to collect the film when usign manual scan
+// Since there is no dedicated step, and we do not want to lock motor C, 
+// we collect all pending film in a single loop, with a 3ms delay to mimick the standard collect
+void CollectOutgoingFilmNow(void) {
+    TractionSwitchActive = digitalRead(TractionStopPin);
+    while (!TractionSwitchActive) {  //Motor allowed to turn
+        digitalWrite(MotorC_Stepper, LOW);
+        digitalWrite(MotorC_Stepper, HIGH);
+        // digitalWrite(MotorC_Stepper, LOW);
+        TractionSwitchActive = digitalRead(TractionStopPin);
+        delay(10);
+    }
+}
+
 // ------------- Detect when PT curve becomes flat ---------------
 boolean film_detected(int pt_value)
 {
@@ -825,7 +856,7 @@ boolean film_detected(int pt_value)
     min_value = min(min_value, pt_value);
 
     instant_variance = max_value - min_value;
-    if (instant_variance > 30)
+    if (instant_variance > 50)
         return(true);
     else
         return(false);
@@ -853,15 +884,10 @@ int GetLevelPT() {
     }
 
     // If relevant diff between max/min dinamic it means we have film passing by
-    if (CurrentTime > FilmDetectedTime) {
+    if (CurrentTime > FilmDetectedTime) 
         NoFilmDetected = true;
-    }
-    else if (FilmDetectedTime - CurrentTime > MaxFilmStallTime) { // Overrun: Normalize value
+    else if (film_detected(PT_SignalLevelRead))
         FilmDetectedTime = millis() + MaxFilmStallTime;
-    }
-    else if (film_detected(PT_SignalLevelRead)) {
-        FilmDetectedTime = millis() + MaxFilmStallTime;
-    }
 
     return(PT_SignalLevelRead);
 }
@@ -1000,14 +1026,27 @@ boolean IsHoleDetected() {
     return(hole_detected);
 }
 
+// 24/02/2025: Modify to do progressive acceleration deceleration when more than 20 steps or so
+// For the moment we do it inside the function, but maybe should be spllit in slices in the main loop
 void capstan_advance(int steps) {
+    int middle, delay_factor;
+
+    if (steps > 20) 
+        middle = int(steps/2);
     for (int x = 0; x < steps; x++) {    // Advance steps five at a time, otherwise too slow
         digitalWrite(MotorB_Stepper, LOW);
         digitalWrite(MotorB_Stepper, HIGH);
-        if (steps > 1)
-            delayMicroseconds(500 + (10-ScanSpeed)*50);
+        if (steps > 20) {
+            delay_factor = (x < middle) ? int(middle - x) : (steps - x);
+            delayMicroseconds(50 + min(500, delay_factor*10));
+            GetLevelPT();   // No need to know PT level here, but used to detect film end in VFD mode
+        }
+        else if (steps >= 1)
+            delayMicroseconds(100);        
     }
     digitalWrite(MotorB_Stepper, LOW);
+    if (VFD_mode_active)
+        SendToRPi(RSP_ADVANCE_FRAME_FRACTION, steps, 0);
 }
 
 // ----- This is the function to "ScanFilm" -----
