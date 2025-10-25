@@ -1,5 +1,6 @@
-## Update 15th March 2025: ALT-Scann8 1.20
-New version available in [develop branch](https://github.com/jareff-g/ALT-Scann8/tree/develop). Main changes in [this page](https://github.com/jareff-g/ALT-Scann8/wiki/Recent-Changes)
+## Update 25th October 2025: ALT-Scann8 1.20 merged to master
+Main changes in [this page](https://github.com/jareff-g/ALT-Scann8/wiki/Recent-Changes)
+
 ## Join Our Community on Discord
 
 ALT-Scann8 is an enhanced user interface and controller for the [T-Scann 8](http://tscann8.torulf.com/index.html) Super 8/Regular 8 film scanner by Torulf Holmström, designed for Raspberry Pi OS.
