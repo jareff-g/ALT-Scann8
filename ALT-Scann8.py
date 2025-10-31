@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.07"
-__date__ = "2025-06-07"
-__version_highlight__ = "Add file save menu. Corrected end of film detection for VFD."
+__version__ = "1.20.08"
+__date__ = "2025-10-31"
+__version_highlight__ = "Some bugfixes, UI + IO error retry."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -2122,7 +2122,7 @@ def cmd_switch_hdr_capture():
 
     HdrCaptureActive = hdr_capture_active.get()
     ConfigData["HdrCaptureActive"] = HdrCaptureActive
-    widget_list_enable([id_HdrCaptureActive])
+    widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto])
 
     if HdrCaptureActive:  # If HDR enabled, handle automatic control settings for widgets
         max_inactivity_delay = max_inactivity_delay * 2
@@ -2376,7 +2376,7 @@ def cmd_adjust_hdr_bracket_auto():
     HdrBracketAuto = hdr_bracket_auto.get()
     ConfigData["HdrBracketAuto"] = HdrBracketAuto
 
-    widget_list_enable([id_HdrBracketAuto])
+    widget_list_enable([id_HdrCaptureActive, id_HdrBracketAuto])
 
 
 def cmd_adjust_merge_in_place():
@@ -3382,7 +3382,6 @@ def send_arduino_command(cmd, param=0):
                 f"Error while sending command {cmd} (param {param}) to Arduino while handling frame {CurrentFrame}. "
                 f"Retrying...")
             time.sleep(0.2)  # wait 100 µs, to avoid I/O errors
-            i2c.write_i2c_block_data(16, cmd, [int(param % 256), int(param >> 8)])  # Send command to Arduino
 
         time.sleep(0.0001)  # wait 100 µs, same
 
@@ -3621,6 +3620,8 @@ def widget_list_update(cmd, category_list):
             elif category == id_FrameVCenterEnabled:
                 state = FrameVCenterEnabled
             items = dependent_widget_dict[category]
+            if category == id_HdrBracketAuto and not HdrCaptureActive:
+                continue    # Do not update HDR bracket parameters if HDR is not enabled
             if cmd == 'enable':
                 for widget in items[0]:
                     widget_enable(widget, state)
@@ -6509,12 +6510,14 @@ def create_widgets():
         # Display entry to throttle Rwnd/FF speed
         rwnd_speed_control_label = tk.Label(experimental_miscellaneous_frame, text='RW/FF speed:',
                                             font=("Arial", FontSize - 1), name='rwnd_speed_control_label')
+        rwnd_speed_control_label.widget_type = "experimental"
         rwnd_speed_control_label.grid(row=experimental_row, column=0, padx=x_pad, pady=y_pad)
         rwnd_speed_control_value = tk.IntVar(value=round(60 / (rwnd_speed_delay * 375 / 1000000)))
         rwnd_speed_control_spinbox = DynamicSpinbox(experimental_miscellaneous_frame, state='readonly', width=4,
                                                     command=cmd_rwnd_speed_control_selection, from_=40, to=800,
                                                     increment=50, textvariable=rwnd_speed_control_value,
                                                     font=("Arial", FontSize - 1), name='rwnd_speed_control_spinbox')
+        rwnd_speed_control_spinbox.widget_type = "experimental"
         rwnd_speed_control_spinbox.grid(row=experimental_row, column=1, padx=x_pad, pady=y_pad)
         cmd_rewind_speed_validation_cmd = rwnd_speed_control_spinbox.register(rewind_speed_validation)
         rwnd_speed_control_spinbox.configure(validate="key", validatecommand=(cmd_rewind_speed_validation_cmd, '%P'))
