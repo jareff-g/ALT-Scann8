@@ -18,7 +18,7 @@ Check the [ALT-Scann8 Wiki](https://github.com/jareff-g/ALT-Scann8/wiki) for det
 - [FAQ](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions), including [Initial Raspberry Pi Setup](https://github.com/jareff-g/ALT-Scann8/wiki/Frequently-Asked-Questions#question-1)
 - [T-Scann 8 Mods](https://github.com/jareff-g/ALT-Scann8/wiki/T%E2%80%90Scann-8-mods)
 
-## ALT-Scann8 User Interface - Super 8 / 8mm film scanner software to be used with T-Scann8 scanner
+# ALT-Scann8 User Interface - Super 8 / 8mm film scanner software to be used with T-Scann8 scanner
 
 This UI is a fork of Torulf Holmström’s “T-Scann8-UserInterface v2.1” ([CC BY-NC 4.0](http://creativecommons.org/licenses/by-nc/4.0/)). ALT-Scann8 is licensed under the [MIT License](https://github.com/jareff-g/ALT-Scann8/blob/main/LICENSE) by Juan Remirez de Esparza.
 
