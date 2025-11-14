@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.08"
-__date__ = "2025-10-31"
-__version_highlight__ = "Some bugfixes, UI + IO error retry."
+__version__ = "1.20.09"
+__date__ = "2025-11-13"
+__version_highlight__ = "Some bugfixes, UI"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -6258,7 +6258,7 @@ def create_widgets():
         frame_extra_steps_label = tk.Label(frame_alignment_frame, text='Extra Steps:', font=("Arial", FontSize - 1),
                                            name='frame_extra_steps_label')
         frame_extra_steps_label.widget_type = "control"
-        frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        frame_extra_steps_label.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky="W")
 
         frame_extra_steps_value = tk.IntVar(value=FrameExtraStepsValue)  # To be overridden by config
         frame_extra_steps_spinbox = DynamicSpinbox(frame_alignment_frame, command=cmd_frame_extra_steps_selection, width=4,
@@ -6266,7 +6266,7 @@ def create_widgets():
                                                    textvariable=frame_extra_steps_value, font=("Arial", FontSize - 1),
                                                    name='frame_extra_steps_spinbox')
         frame_extra_steps_spinbox.widget_type = "control"
-        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        frame_extra_steps_spinbox.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         cmd_extra_steps_validation_cmd = frame_extra_steps_spinbox.register(extra_steps_validation)
         frame_extra_steps_spinbox.configure(validate="key", validatecommand=(cmd_extra_steps_validation_cmd, '%P'))
         as_tooltips.add(frame_extra_steps_spinbox, "Unconditionally advances/detects the frame n steps after/before "
@@ -6279,12 +6279,12 @@ def create_widgets():
         detect_misaligned_frames = tk.BooleanVar(value=DetectMisalignedFrames)
         detect_misaligned_frames_btn = tk.Checkbutton(frame_alignment_frame, variable=detect_misaligned_frames, onvalue=True, offvalue=False,
                                         font=("Arial", FontSize - 1), text="Bad frames", command=cmd_detect_misaligned_frames)
-        detect_misaligned_frames_btn.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky=E)
+        detect_misaligned_frames_btn.grid(row=frame_align_row, column=0, padx=x_pad, pady=y_pad, sticky="W")
         as_tooltips.add(detect_misaligned_frames_btn, "Misaligned frame detection (might slow down scanning)")
         scan_error_counter_value = tk.StringVar(value="0 (0%)")
         scan_error_counter_value_label = tk.Label(frame_alignment_frame, textvariable=scan_error_counter_value,
                                   font=("Arial", FontSize-1), justify="right", name='scan_error_counter_value_label')
-        scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=W)
+        scan_error_counter_value_label.grid(row=frame_align_row, column=1, columnspan=2, padx=x_pad, pady=y_pad, sticky=E)
         as_tooltips.add(scan_error_counter_value_label, "Number of frames missed or misaligned during scanning.")
         frame_align_row += 1
 
