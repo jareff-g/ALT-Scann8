@@ -2416,8 +2416,8 @@ def adjust_hdr_bracket():
         logging.debug(f"Adjusting bracket, prev/cur exp: {PreviousCurrentExposure} -> {aux_current_exposure}")
         force_adjust_hdr_bracket = False
         PreviousCurrentExposure = aux_current_exposure
-        hdr_best_exp = aux_current_exposure
-        HdrMinExp = max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp)
+        hdr_best_exp = min(aux_current_exposure, HDR_MAX_EXP)
+        HdrMinExp = min(max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp), HDR_MAX_EXP)
         HdrMaxExp = min(HdrMinExp + HdrBracketWidth, HDR_MAX_EXP)
         hdr_min_exp_value.set(HdrMinExp)
         hdr_max_exp_value.set(HdrMaxExp)
