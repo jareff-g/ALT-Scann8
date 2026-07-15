@@ -2430,15 +2430,23 @@ def capture_hdr(mode):
     global recalculate_hdr_exp_list, PreviewModuleValue
     global hw_panel_installed
 
+    bracket_exposure_probed = False
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
+        bracket_exposure_probed = True
 
     if recalculate_hdr_exp_list:
         hdr_reinit()
         perform_dry_run = True
         recalculate_hdr_exp_list = False
     else:
-        perform_dry_run = False
+        # adjust_hdr_bracket() runs an auto-exposure probe that leaves the sensor
+        # at the metered exposure, breaking the "first capture equals the previous
+        # frame's last capture" assumption the skip-dry-run path relies on. When the
+        # probe ran we must force a real dry run even if the bracket values are
+        # unchanged, otherwise the frame's first capture (the longest exposure on
+        # reversed frames) is saved before the sensor settles and comes out dark.
+        perform_dry_run = bracket_exposure_probed
 
     images_to_merge.clear()
     # session_frames should be equal to 1 for the first captured frame of the scan session.
