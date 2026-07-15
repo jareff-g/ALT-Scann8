@@ -2418,7 +2418,7 @@ def adjust_hdr_bracket():
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = aux_current_exposure
         HdrMinExp = max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp)
-        HdrMaxExp = HdrMinExp + HdrBracketWidth
+        HdrMaxExp = min(HdrMinExp + HdrBracketWidth, HDR_MAX_EXP)
         hdr_min_exp_value.set(HdrMinExp)
         hdr_max_exp_value.set(HdrMaxExp)
         ConfigData["HdrMinExp"] = HdrMinExp
