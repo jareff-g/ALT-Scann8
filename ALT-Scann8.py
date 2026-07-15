@@ -2391,7 +2391,7 @@ def cmd_adjust_merge_in_place():
 
 def adjust_hdr_bracket():
     global recalculate_hdr_exp_list
-    global hdr_best_exp, HdrMinExp
+    global hdr_best_exp, HdrMinExp, HdrMaxExp
     global PreviousCurrentExposure
     global force_adjust_hdr_bracket
     global AutoExpEnabled
@@ -2418,8 +2418,9 @@ def adjust_hdr_bracket():
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = aux_current_exposure
         HdrMinExp = max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp)
+        HdrMaxExp = HdrMinExp + HdrBracketWidth
         hdr_min_exp_value.set(HdrMinExp)
-        hdr_max_exp_value.set(HdrMinExp + HdrBracketWidth)
+        hdr_max_exp_value.set(HdrMaxExp)
         ConfigData["HdrMinExp"] = HdrMinExp
         ConfigData["HdrMaxExp"] = HdrMaxExp
         recalculate_hdr_exp_list = True
