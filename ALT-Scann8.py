@@ -2417,8 +2417,8 @@ def adjust_hdr_bracket():
         force_adjust_hdr_bracket = False
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = min(aux_current_exposure, HDR_MAX_EXP)
-        HdrMinExp = min(max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp), HDR_MAX_EXP)
-        HdrMaxExp = min(HdrMinExp + HdrBracketWidth, HDR_MAX_EXP)
+        HdrMinExp = min(max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp), HDR_MAX_EXP - HdrBracketWidth)
+        HdrMaxExp = HdrMinExp + HdrBracketWidth
         hdr_min_exp_value.set(HdrMinExp)
         hdr_max_exp_value.set(HdrMaxExp)
         ConfigData["HdrMinExp"] = HdrMinExp
@@ -2468,7 +2468,7 @@ def capture_hdr(mode):
     is_dng = FileType == 'dng'
     is_png = FileType == 'png'
     for exp in work_list:
-        exp = max(1, exp + HdrBracketShift)  # Apply bracket shift
+        exp = min(max(1, exp + HdrBracketShift), HDR_MAX_EXP)  # Apply bracket shift
         logging.debug("capture_hdr: exp %.2f", exp)
         if perform_dry_run:
             camera.set_controls({"ExposureTime": int(exp * 1000)})
