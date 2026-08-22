@@ -2216,7 +2216,8 @@ def update_real_time_display():
         if not SimulatedRun and not CameraDisabled:
             camera.switch_mode(capture_config)
             time.sleep(0.1)
-            camera.set_controls({"ScalerCrop": ZoomSize})
+            # No ScalerCrop restore here: ZoomSize may hold a cropped preview-mode
+            # rectangle, and switch_mode already reset the crop to full frame.
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
         draw_capture_canvas.config(highlightthickness=0, highlightbackground=default_canvas_bg_color)
@@ -4239,7 +4240,9 @@ def PiCam2_configure():
                                                        transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
-    vfd_config = camera.create_preview_configuration({"size": (1332, 990)}, transform=Transform(hflip=True))
+    # 2028x1520 selects the full-FOV binned sensor mode; a 1332x990 request can
+    # select the center-cropped 1332x990 mode, making the live view ~1.5x zoomed.
+    vfd_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     # WB controls
