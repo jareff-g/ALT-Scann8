@@ -4225,6 +4225,10 @@ def PiCam2_change_resolution():
     camera.configure(capture_config)
     camera.start()
 
+    raw_format = camera.camera_configuration()["raw"]["format"]
+    logging.info(f"Raw stream format granted by camera pipeline: {raw_format}")
+    if "COMP" in raw_format:
+        logging.warning(f"Raw format {raw_format} is lossy-compressed, DNG captures will not be lossless")
     logging.debug(f"Camera resolution set at: {CaptureResolution}")
 
 
