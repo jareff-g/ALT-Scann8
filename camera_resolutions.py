@@ -43,7 +43,12 @@ class CameraResolutions():
                 key = f"{mode['size'][0]}x{mode['size'][1]}"
                 if mode['crop_limits'][0] != 0 or mode['crop_limits'][1] != 0:
                     key = key + ' *'
+                # Recent kernels list each size at several bit depths; keep only the
+                # highest one so lower-depth entries cannot overwrite it
+                if key in self.resolution_dict and self.resolution_dict[key]['bit_depth'] >= mode['bit_depth']:
+                    continue
                 self.resolution_dict[key] = {}
+                self.resolution_dict[key]['bit_depth'] = mode['bit_depth']
                 self.resolution_dict[key]['sensor_resolution'] = mode['size']
                 self.resolution_dict[key]['image_resolution'] = mode['size']
                 if 1024 < mode['size'][0] < aux_width and 768 < mode['size'][1] < aux_height:
