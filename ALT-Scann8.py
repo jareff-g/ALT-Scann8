@@ -4855,8 +4855,8 @@ def cmd_set_frame_vcenter():
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
-        start_point = (0, height // 2 - FrameVCenterHoleShift)
-        end_point = (20, height // 2 - FrameVCenterHoleShift)
+        start_point = (0, height // 2 + FrameVCenterHoleShift)
+        end_point = (20, height // 2 + FrameVCenterHoleShift)
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
         # Draw some explanatory text
@@ -4873,7 +4873,7 @@ def cmd_set_frame_vcenter():
         draw_outlined_text(draw, text_position, text_content, fill=text_color, outline_color="black", font=font)
         # Finally, add the line and text to the image
         new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
         draw_capture_canvas.image = photo_image
@@ -4904,7 +4904,7 @@ def cmd_frame_vcenter_selection():
     # Arrange image according to user-defined displacement
     width, height = FrameVCenterImage.size
     new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
     photo_image = ImageTk.PhotoImage(new_image)
     draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
     draw_capture_canvas.image = photo_image
