@@ -1804,7 +1804,11 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     # Adjust VCenter (not all films have the frames vertically centered respect to the holes)
     if compensate:
-        middle += FrameVCenterImageShift
+        # FrameVCenterImageShift is measured on the preview image, scale it to the height of the image being checked
+        if PreviewHeight > 0:
+            middle += int(FrameVCenterImageShift * height / PreviewHeight)
+        else:
+            middle += FrameVCenterImageShift
 
     # Calculate margin
     margin = height*threshold//100
@@ -4882,7 +4886,7 @@ def cmd_set_frame_vcenter():
         if not hasattr(draw_capture_canvas, "arrows_drawn"):
             draw_static_arrows(draw_capture_canvas, width, height)
             draw_capture_canvas.arrows_drawn = True  # Set a flag so we don't draw them again
-    else:  # Button released, save final value (calculating proportion between previen and real image)
+    else:  # Button released, save final value (in preview pixels, scaled to real image height when applied)
         # First, draw back S8/R8 markers
         display_left_markers()
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
