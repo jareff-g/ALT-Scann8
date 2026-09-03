@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.09"
-__date__ = "2025-11-13"
-__version_highlight__ = "Some bugfixes, UI"
+__version__ = "1.20.10"
+__date__ = "2026-09-03"
+__version_highlight__ = "Fix Focus View showing (and leaking) a 1.5x center crop on recent kernels + Fix crash when scanning in cropped resolutions"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1765,7 +1765,8 @@ def adjust_auto_fine_tune():
     if auto_fine_tune_wait > 0:
         auto_fine_tune_wait -= 1
         return
-    if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.005:
+    raw_height = CaptureResolution.split("x")[1].replace("*", "").strip()
+    if abs(offset_avg) < int(raw_height) * 0.005:
         return  # Ignore if average offset is less than 0.5% of total height
     direction = 1 if offset_avg > 0 else -1
     step = min(10, int(abs(offset_avg)/10)) # big steps for big offsets
