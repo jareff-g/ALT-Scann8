@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.09"
-__date__ = "2025-11-13"
-__version_highlight__ = "Some bugfixes, UI"
+__version__ = "1.20.12"
+__date__ = "2026-09-05"
+__version_highlight__ = "Fix issue when setting frame VCenter"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1765,7 +1765,8 @@ def adjust_auto_fine_tune():
     if auto_fine_tune_wait > 0:
         auto_fine_tune_wait -= 1
         return
-    if abs(offset_avg) < int(CaptureResolution.split("x")[1])*0.005:
+    raw_height = CaptureResolution.split("x")[1].replace("*", "").strip()
+    if abs(offset_avg) < int(raw_height) * 0.005:
         return  # Ignore if average offset is less than 0.5% of total height
     direction = 1 if offset_avg > 0 else -1
     step = min(10, int(abs(offset_avg)/10)) # big steps for big offsets
@@ -1783,6 +1784,10 @@ def adjust_auto_fine_tune():
 
 
 def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice_width=10):
+    # Make sure img is a Numpy array
+    if not isinstance(img, np.ndarray):
+        img = np.array(img)
+
     # Get dimensions of the binary image
     height = img.shape[0]
     width = img.shape[1]
@@ -1804,7 +1809,11 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     # Adjust VCenter (not all films have the frames vertically centered respect to the holes)
     if compensate:
-        middle += FrameVCenterImageShift
+        # FrameVCenterImageShift is measured on the preview image, scale it to the height of the image being checked
+        if PreviewHeight > 0:
+            middle += int(FrameVCenterImageShift * height / PreviewHeight)
+        else:
+            middle += FrameVCenterImageShift
 
     # Calculate margin
     margin = height*threshold//100
@@ -2216,7 +2225,8 @@ def update_real_time_display():
         if not SimulatedRun and not CameraDisabled:
             camera.switch_mode(capture_config)
             time.sleep(0.1)
-            camera.set_controls({"ScalerCrop": ZoomSize})
+            # No ScalerCrop restore here: ZoomSize may hold a cropped preview-mode
+            # rectangle, and switch_mode already reset the crop to full frame.
         # Restore the saved locale
         locale.setlocale(locale.LC_NUMERIC, saved_locale)
         draw_capture_canvas.config(highlightthickness=0, highlightbackground=default_canvas_bg_color)
@@ -2391,7 +2401,7 @@ def cmd_adjust_merge_in_place():
 
 def adjust_hdr_bracket():
     global recalculate_hdr_exp_list
-    global hdr_best_exp, HdrMinExp
+    global hdr_best_exp, HdrMinExp, HdrMaxExp
     global PreviousCurrentExposure
     global force_adjust_hdr_bracket
     global AutoExpEnabled
@@ -2418,8 +2428,9 @@ def adjust_hdr_bracket():
         PreviousCurrentExposure = aux_current_exposure
         hdr_best_exp = aux_current_exposure
         HdrMinExp = max(hdr_best_exp - int(HdrBracketWidth / 2), HdrMinExp)
+        HdrMaxExp = HdrMinExp + HdrBracketWidth
         hdr_min_exp_value.set(HdrMinExp)
-        hdr_max_exp_value.set(HdrMinExp + HdrBracketWidth)
+        hdr_max_exp_value.set(HdrMaxExp)
         ConfigData["HdrMinExp"] = HdrMinExp
         ConfigData["HdrMaxExp"] = HdrMaxExp
         recalculate_hdr_exp_list = True
@@ -2430,15 +2441,23 @@ def capture_hdr(mode):
     global recalculate_hdr_exp_list, PreviewModuleValue
     global hw_panel_installed
 
+    bracket_exposure_probed = False
     if HdrBracketAuto and session_frames % hdr_auto_bracket_frames == 0:
         adjust_hdr_bracket()
+        bracket_exposure_probed = True
 
     if recalculate_hdr_exp_list:
         hdr_reinit()
         perform_dry_run = True
         recalculate_hdr_exp_list = False
     else:
-        perform_dry_run = False
+        # adjust_hdr_bracket() runs an auto-exposure probe that leaves the sensor
+        # at the metered exposure, breaking the "first capture equals the previous
+        # frame's last capture" assumption the skip-dry-run path relies on. When the
+        # probe ran we must force a real dry run even if the bracket values are
+        # unchanged, otherwise the frame's first capture (the longest exposure on
+        # reversed frames) is saved before the sensor settles and comes out dark.
+        perform_dry_run = bracket_exposure_probed
 
     images_to_merge.clear()
     # session_frames should be equal to 1 for the first captured frame of the scan session.
@@ -4239,7 +4258,9 @@ def PiCam2_configure():
                                                        transform=Transform(hflip=True))
 
     preview_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
-    vfd_config = camera.create_preview_configuration({"size": (1332, 990)}, transform=Transform(hflip=True))
+    # 2028x1520 selects the full-FOV binned sensor mode; a 1332x990 request can
+    # select the center-cropped 1332x990 mode, making the live view ~1.5x zoomed.
+    vfd_config = camera.create_preview_configuration({"size": (2028, 1520)}, transform=Transform(hflip=True))
     # Camera preview window is not saved in configuration, so always off on start up (we start in capture mode)
     camera.configure(capture_config)
     # WB controls
@@ -4855,8 +4876,8 @@ def cmd_set_frame_vcenter():
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
-        start_point = (0, height // 2 - FrameVCenterHoleShift)
-        end_point = (20, height // 2 - FrameVCenterHoleShift)
+        start_point = (0, height // 2 + FrameVCenterHoleShift)
+        end_point = (20, height // 2 + FrameVCenterHoleShift)
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
         # Draw some explanatory text
@@ -4873,7 +4894,7 @@ def cmd_set_frame_vcenter():
         draw_outlined_text(draw, text_position, text_content, fill=text_color, outline_color="black", font=font)
         # Finally, add the line and text to the image
         new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
         draw_capture_canvas.image = photo_image
@@ -4882,7 +4903,7 @@ def cmd_set_frame_vcenter():
         if not hasattr(draw_capture_canvas, "arrows_drawn"):
             draw_static_arrows(draw_capture_canvas, width, height)
             draw_capture_canvas.arrows_drawn = True  # Set a flag so we don't draw them again
-    else:  # Button released, save final value (calculating proportion between previen and real image)
+    else:  # Button released, save final value (in preview pixels, scaled to real image height when applied)
         # First, draw back S8/R8 markers
         display_left_markers()
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
@@ -4904,7 +4925,7 @@ def cmd_frame_vcenter_selection():
     # Arrange image according to user-defined displacement
     width, height = FrameVCenterImage.size
     new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
     photo_image = ImageTk.PhotoImage(new_image)
     draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
     draw_capture_canvas.image = photo_image
