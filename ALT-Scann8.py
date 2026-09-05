@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.10"
-__date__ = "2026-09-03"
-__version_highlight__ = "Fix Focus View showing (and leaking) a 1.5x center crop on recent kernels + Fix crash when scanning in cropped resolutions"
+__version__ = "1.20.11"
+__date__ = "2026-09-05"
+__version_highlight__ = "Fix exception in is_frame_centered() when input is not a Numpy array"
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1784,6 +1784,10 @@ def adjust_auto_fine_tune():
 
 
 def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice_width=10):
+    # Make sure img is a Numpy array
+    if not isinstance(img, np.ndarray):
+        img = np.array(img)
+
     # Get dimensions of the binary image
     height = img.shape[0]
     width = img.shape[1]
