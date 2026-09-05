@@ -1809,7 +1809,11 @@ def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice
 
     # Adjust VCenter (not all films have the frames vertically centered respect to the holes)
     if compensate:
-        middle += FrameVCenterImageShift
+        # FrameVCenterImageShift is measured on the preview image, scale it to the height of the image being checked
+        if PreviewHeight > 0:
+            middle += int(FrameVCenterImageShift * height / PreviewHeight)
+        else:
+            middle += FrameVCenterImageShift
 
     # Calculate margin
     margin = height*threshold//100
@@ -4872,8 +4876,8 @@ def cmd_set_frame_vcenter():
         width, height = FrameVCenterImage.size
         # Draw a line in the middle of the hole(s)
         draw = ImageDraw.Draw(FrameVCenterImage)
-        start_point = (0, height // 2 - FrameVCenterHoleShift)
-        end_point = (20, height // 2 - FrameVCenterHoleShift)
+        start_point = (0, height // 2 + FrameVCenterHoleShift)
+        end_point = (20, height // 2 + FrameVCenterHoleShift)
         line_color = (255, 0, 0)  # Red color (RGB)
         draw.line([start_point, end_point], fill=line_color, width=3)
         # Draw some explanatory text
@@ -4890,7 +4894,7 @@ def cmd_set_frame_vcenter():
         draw_outlined_text(draw, text_position, text_content, fill=text_color, outline_color="black", font=font)
         # Finally, add the line and text to the image
         new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+        new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
         photo_image = ImageTk.PhotoImage(new_image)
         draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
         draw_capture_canvas.image = photo_image
@@ -4899,7 +4903,7 @@ def cmd_set_frame_vcenter():
         if not hasattr(draw_capture_canvas, "arrows_drawn"):
             draw_static_arrows(draw_capture_canvas, width, height)
             draw_capture_canvas.arrows_drawn = True  # Set a flag so we don't draw them again
-    else:  # Button released, save final value (calculating proportion between previen and real image)
+    else:  # Button released, save final value (in preview pixels, scaled to real image height when applied)
         # First, draw back S8/R8 markers
         display_left_markers()
         ConfigData["FrameVCenterImageShift" + ConfigData["FilmType"]] = FrameVCenterImageShift
@@ -4921,7 +4925,7 @@ def cmd_frame_vcenter_selection():
     # Arrange image according to user-defined displacement
     width, height = FrameVCenterImage.size
     new_image = Image.new("RGB", (width, height), (0, 0, 0, 0))  # Create new image.
-    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift+FrameVCenterHoleShift))
+    new_image.paste(FrameVCenterImage, (0, FrameVCenterImageShift-FrameVCenterHoleShift))
     photo_image = ImageTk.PhotoImage(new_image)
     draw_capture_canvas.itemconfig(draw_capture_canvas_image_id, image=photo_image)
     draw_capture_canvas.image = photo_image
