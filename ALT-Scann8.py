@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.12"
-__date__ = "2026-09-05"
-__version_highlight__ = "Fix issue when setting frame VCenter"
+__version__ = "1.20.13"
+__date__ = "2026-09-06"
+__version_highlight__ = "Wait 5 frames before adjusting auto fine tune value, to allow new change to have an effect."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1780,7 +1780,7 @@ def adjust_auto_fine_tune():
         logging.debug(f"Average offset is {offset_avg}, adjusting fine tune value by {direction * step} to {FrameFineTuneValue}")
         send_arduino_command(CMD_SET_FRAME_FINE_TUNE, FrameFineTuneValue)
         frame_fine_tune_value.set(FrameFineTuneValue)
-    auto_fine_tune_wait = 2    # wait 5 frames to see the effect of this change
+    auto_fine_tune_wait = 5    # wait 5 frames to see the effect of this change
 
 
 def is_frame_centered(img, film_type ='S8', compensate=True, threshold=10, slice_width=10):
