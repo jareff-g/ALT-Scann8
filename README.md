@@ -59,12 +59,15 @@ Started to add a feature, it evolved with refactoring and enhancements.
 1. **Download**: Get the repo via [ZIP](https://github.com/jareff-g/ALT-Scann8/archive/refs/heads/main.zip) or `git clone https://github.com/jareff-g/ALT-Scann8.git`.
 2. **Python Setup**:
    - Update your system: `sudo apt update && sudo apt upgrade -y`.
-   - Install required libraries: 
+   - Install required libraries (for Bullseye): 
      ```bash
      sudo apt install -y python3-opencv python3-numpy python3-pil python3-psutil python3-qrencode python3-smbus python3-picamera2 python3-rawpy
      ```
+   - Install additonal libraries for Bookworm: 
+     ```bash
+     sudo apt install -y python3-pil.imagetk python3-tk
+     ```
    - Optional for usage reporting: `sudo apt install -y python3-requests`.
-   - Tkinter is included with Python 3.
 3. **Arduino Setup**:
    - Open `Controller/ALT-Scann8-Controller.ino` in the Arduino IDE.
    - Compile and upload to your Arduino board.
