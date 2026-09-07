@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.14"
+#define __version__     "1.1.15"
 #define  __date__       "2026-09-07"
-#define  __version_highlight__  "Fixed bounds check for convergence in GetPTLevel."
+#define  __version_highlight__  "Last reduction of PT Level convergence speed was too slow, make it a little bit faster"
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -177,7 +177,7 @@ unsigned long OriginalScanSpeedDelay = ScanSpeedDelay;          // Keep to resto
 int OriginalMinFrameSteps = MinFrameSteps;  // Keep to restore original value when needed
 
 int LastFrameSteps = 0;                     // Stores number of steps required to reach current frame (stats only)
-int LastPTLevel = 0;                        // Stores last PT level (stats only)
+int LastFramePTLevel = 0;                   // Stores PT level of last captured frame (stats only)
 
 boolean IsS8 = true;
 
@@ -631,7 +631,7 @@ void loop() {
                         break;
                     case SCAN_FRAME_DETECTED:
                         ScanState = Sts_Idle; // Exit scan loop
-                        SendToRPi(RSP_FRAME_AVAILABLE, LastFrameSteps, LastPTLevel);
+                        SendToRPi(RSP_FRAME_AVAILABLE, LastFrameSteps, LastFramePTLevel);
                         break;
                     case SCAN_TERMINATION_REQUESTED:
                     case SCAN_FRAME_DETECTION_ERROR:
@@ -863,19 +863,22 @@ boolean film_detected(int pt_value)
 }
 
 // ------------- Centralized phototransistor level read ---------------
+// Threshold level algorithm: Linear Ramp Down Peak Detector with Fixed-Point Dynamic Thresholding
+// Tracks min/max optical signal boundaries using asymmetric linear decay (+6/-2) 
+// to continuously adapt the 8mm/Super 8 perforation detection threshold.
 int GetLevelPT() {
     float ratio;
     int user_margin, fixed_margin, average_pt;
     unsigned long CurrentTime = millis();
 
     PT_SignalLevelRead = analogRead(PHOTODETECT);
+    // Establish working values for Linear Ramp Down Peak Detector
     MaxPT = max(PT_SignalLevelRead, MaxPT);
     MinPT = min(PT_SignalLevelRead, MinPT);
     MaxPT_Dynamic = max(PT_SignalLevelRead*10, MaxPT_Dynamic);
     MinPT_Dynamic = min(PT_SignalLevelRead*10, MinPT_Dynamic);
-    if (MaxPT_Dynamic > (MinPT_Dynamic+1)) MaxPT_Dynamic-=1;
-    //if (MinPT_Dynamic < MaxPT_Dynamic) MinPT_Dynamic+=int((MaxPT_Dynamic-MinPT_Dynamic)/10);  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
-    if (MinPT_Dynamic < (MaxPT_Dynamic-3)) MinPT_Dynamic+=3;  // need to catch up quickly for overexposed frames (proportional to MaxPT to adapt to any scanner)
+    if (MaxPT_Dynamic > (MinPT_Dynamic+2)) MaxPT_Dynamic-=2;
+    if (MinPT_Dynamic < (MaxPT_Dynamic-6)) MinPT_Dynamic+=6;
     if (PT_Level_Auto && FrameStepsDone >= int((MinFrameSteps+FrameDeductSteps)*0.9)) {
         ratio = (float)PerforationThresholdAutoLevelRatio/100;
         fixed_margin = int((MaxPT_Dynamic-MinPT_Dynamic) * 0.10);
@@ -1015,9 +1018,11 @@ boolean IsHoleDetected() {
     // 14/Oct/2023: Until now, 'FrameStepsDone >= MinFrameSteps' was a precondition together with 'PT_Level >= PerforationThresholdLevel'
     // To consider a frame is detected. After changing the condition to allow 20% less in the number of steps, I can see a better precision
     // In the captured frames. So for the moment it stays like this. Also added a fuse to also give a frame as detected in case of reaching
-    // 150% of the required steps, even of the PT level does no tmatch the required threshold. We'll see...
-    if (PT_Level >= PerforationThresholdLevel && FrameStepsDone >= int(MinFrameSteps+FrameDeductSteps)) {
-        LastPTLevel = PT_Level;
+    // 150% of the required steps, even of the PT level does not match the required threshold. We'll see...
+    // 07/09/2026: Added a second condition to detect frame when PT level is lower than last PT level (failed to reach threshold), 
+    // to avoid missing frames in case of overexposed frames (PT level too low)
+    if (FrameStepsDone >= int(MinFrameSteps+FrameDeductSteps) && PT_Level >= PerforationThresholdLevel) {
+        LastFramePTLevel = PT_Level;
         hole_detected = true;
         GreenLedOn = true;
         analogWrite(A1, 255); // Light green led
