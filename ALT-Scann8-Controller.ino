@@ -18,9 +18,9 @@ More info in README.md file
 #define __copyright__   "Copyright 2022-25, Juan Remirez de Esparza"
 #define __credits__     "Juan Remirez de Esparza"
 #define __license__     "MIT"
-#define __version__     "1.1.15"
-#define  __date__       "2026-09-07"
-#define  __version_highlight__  "Last reduction of PT Level convergence speed was too slow, make it a little bit faster"
+#define __version__     "1.1.16"
+#define  __date__       "2026-09-08"
+#define  __version_highlight__  "Frame guard for decrease speed was inverted: Too late for faster speed, too early for slow speed. In any case, after validation, frame guard is not really required, so hardcoded to 3."
 #define __maintainer__  "Juan Remirez de Esparza"
 #define __email__       "jremirez@hotmail.com"
 #define __status__      "Development"
@@ -398,7 +398,7 @@ void loop() {
                     ScanSpeedDelay = BaseScanSpeedDelay + (10-param) * StepScanSpeedDelay;
                     scan_collect_timer = collect_timer = default_collect_timer + (10-param) * 100;
                     OriginalScanSpeedDelay = ScanSpeedDelay;
-                    DecreaseSpeedFrameStepsBefore = max(3, 53 - 5*param);
+                    DecreaseSpeedFrameStepsBefore = 3;  // Hardcoded, before Sep 2026 it was adjusted according to scan speed (but it was also wrong, was stopping later for faster speed, earlier for slower speed)
                     DecreaseSpeedFrameSteps = MinFrameSteps - DecreaseSpeedFrameStepsBefore;
                 }
                 break;
