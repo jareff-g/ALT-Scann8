@@ -20,9 +20,9 @@ __copyright__ = "Copyright 2022-25, Juan Remirez de Esparza"
 __credits__ = ["Juan Remirez de Esparza"]
 __license__ = "MIT"
 __module__ = "ALT-Scann8"
-__version__ = "1.20.13"
-__date__ = "2026-09-06"
-__version_highlight__ = "Wait 5 frames before adjusting auto fine tune value, to allow new change to have an effect."
+__version__ = "1.20.14"
+__date__ = "2026-10-01"
+__version_highlight__ = "Fix issue #294 - UnboundLocalError on captured_image in capture_save_thread."
 __maintainer__ = "Juan Remirez de Esparza"
 __email__ = "jremirez@hotmail.com"
 __status__ = "Development"
@@ -1961,8 +1961,7 @@ def capture_save_thread(queue, event, id):
                                  HdrFrameFilenamePattern % (frame_idx, hdr_idx, FileType))
                 else:  # Non HDR
                     request.save('main', FrameFilenamePattern % (frame_idx, FileType))
-                    if DetectMisalignedFrames:
-                        captured_image = request.make_array('main')
+                    captured_image = request.make_array('main')
                 request.release()
                 logging.debug("Thread %i saved request image: %s ms", id,
                               str(round((time.time() - curtime) * 1000, 1)))
